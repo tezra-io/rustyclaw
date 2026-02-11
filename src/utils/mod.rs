@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-/// Get the nanobot data directory (~/.nanobot).
+/// Get the rustyclaw data directory (~/.rustyclaw).
 pub fn get_data_path() -> PathBuf {
     crate::config::loader::get_data_dir()
 }

@@ -36,7 +36,7 @@ impl super::base::Tool for SpawnTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let task = args["task"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'task'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'task'".into()))?;
 
         // TODO: Delegate to SubagentManager once integrated.
         Ok(format!("Subagent spawned for task: {}", task))

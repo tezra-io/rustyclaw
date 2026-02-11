@@ -15,7 +15,7 @@ pub async fn transcribe_audio(
 
     let file_bytes = tokio::fs::read(file_path)
         .await
-        .map_err(crate::error::NanobotError::Io)?;
+        .map_err(crate::error::RustyClawError::Io)?;
 
     let part = multipart::Part::bytes(file_bytes)
         .file_name(file_name)
@@ -34,11 +34,11 @@ pub async fn transcribe_audio(
         .multipart(form)
         .send()
         .await
-        .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+        .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
     if !resp.status().is_success() {
         let text = resp.text().await.unwrap_or_default();
-        return Err(crate::error::NanobotError::Provider(format!(
+        return Err(crate::error::RustyClawError::Provider(format!(
             "Transcription failed: {}",
             text
         )));
@@ -47,7 +47,7 @@ pub async fn transcribe_audio(
     let data: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+        .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
     Ok(data["text"].as_str().unwrap_or("").to_string())
 }

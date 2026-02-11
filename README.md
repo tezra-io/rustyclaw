@@ -1,16 +1,8 @@
-# nanobot (Rust)
+# 🦀 RustyClaw
 
-A lightweight personal AI assistant framework. Rust port of [nanobot](https://github.com/HKUDS/nanobot).
+An ultra-lightweight personal AI assistant — [nanobot](https://github.com/HKUDS/nanobot) rewritten in Rust.
 
-## Features
-
-- Multi-channel support: Telegram, Discord, Slack, WhatsApp, Email, and more
-- Multi-provider LLM: OpenRouter, Anthropic, OpenAI, DeepSeek, vLLM, etc.
-- Tool system: file I/O, shell exec, web search/fetch, scheduling
-- Memory: persistent long-term + daily notes
-- Skills: markdown-based capability extensions
-- Cron: scheduled agent tasks
-- Subagents: background task execution
+⚡ Fast, secure, single binary. No Python runtime needed.
 
 ## Quick Start
 
@@ -19,67 +11,63 @@ A lightweight personal AI assistant framework. Rust port of [nanobot](https://gi
 cargo build --release
 
 # Initialize config
-./target/release/nanobot onboard
+./target/release/rustyclaw onboard
 
 # Chat (single message)
-nanobot agent -m "Hello!"
+rustyclaw agent -m "Hello!"
 
 # Chat (interactive)
-nanobot agent
+rustyclaw agent
 
-# Start gateway (Telegram, Discord, etc.)
-nanobot gateway
+# Run with channels (Telegram, Discord)
+rustyclaw gateway
 ```
 
 ## Configuration
 
-Config lives at `~/.nanobot/config.json`. Compatible with the Python version.
+Config lives at `~/.rustyclaw/config.json`.
 
 ```json
 {
   "providers": {
     "openrouter": {
-      "apiKey": "sk-or-..."
+      "apiKey": "sk-or-v1-xxx"
     }
   },
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-sonnet-4-5"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "BOT_TOKEN"
+      "model": "anthropic/claude-sonnet-4-20250514"
     }
   }
 }
 ```
 
-## Architecture
+## Channels
 
-```
-nanobot gateway
-    ├── MessageBus (tokio mpsc)
-    │   ├── inbound:  Channel → Agent
-    │   └── outbound: Agent → Channel
-    ├── AgentLoop
-    │   ├── ContextBuilder (system prompt + history + memory + skills)
-    │   ├── LLM Provider (OpenAI-compatible HTTP)
-    │   ├── ToolRegistry (filesystem, shell, web, message, spawn, cron)
-    │   └── SessionManager (JSONL persistence)
-    ├── ChannelManager
-    │   ├── TelegramChannel (teloxide long polling)
-    │   ├── DiscordChannel (Gateway WebSocket)
-    │   └── ...more channels
-    ├── CronService (scheduled jobs)
-    └── HeartbeatService (periodic wake)
-```
+| Channel | Status |
+|---------|--------|
+| CLI | ✅ Interactive + single message |
+| Telegram | ✅ Long polling |
+| Discord | ✅ Gateway WebSocket |
+| Slack | 🔜 Planned |
+| WhatsApp | 🔜 Planned |
 
-## Development
+## Features
+
+- 🔧 **Tool use** — file ops, shell exec, web search/fetch, cron, sub-agents
+- 💬 **Multi-provider** — OpenRouter, vLLM, any OpenAI-compatible API
+- 📅 **Cron scheduling** — persistent scheduled tasks
+- 💾 **Memory** — file-based persistent memory
+- 🔒 **Security** — sandboxed shell, secret zeroization, input validation
+
+## Building
 
 ```bash
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cargo build --release
 ```
+
+Single binary, no runtime dependencies. ~5MB stripped.
+
+## License
+
+MIT

@@ -102,7 +102,7 @@ pub struct AgentDefaults {
 impl Default for AgentDefaults {
     fn default() -> Self {
         Self {
-            workspace: "~/.nanobot/workspace".to_string(),
+            workspace: "~/.rustyclaw/workspace".to_string(),
             model: "anthropic/claude-sonnet-4-5".to_string(),
             max_tokens: 8192,
             temperature: 0.7,

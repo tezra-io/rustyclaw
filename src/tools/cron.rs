@@ -42,7 +42,7 @@ impl super::base::Tool for CronTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let action = args["action"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'action'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'action'".into()))?;
 
         match action {
             "list" => {
@@ -61,7 +61,7 @@ impl super::base::Tool for CronTool {
                 // TODO: Delegate to CronService
                 Ok("Cron job removed.".into())
             }
-            _ => Err(crate::error::NanobotError::Tool(format!(
+            _ => Err(crate::error::RustyClawError::Tool(format!(
                 "Unknown action: {}",
                 action
             ))),

@@ -7,15 +7,15 @@ use super::schema::Config;
 pub fn get_config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".nanobot")
+        .join(".rustyclaw")
         .join("config.json")
 }
 
-/// Get the nanobot data directory (~/.nanobot).
+/// Get the rustyclaw data directory (~/.rustyclaw).
 pub fn get_data_dir() -> PathBuf {
     let dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".nanobot");
+        .join(".rustyclaw");
     std::fs::create_dir_all(&dir).ok();
     dir
 }
@@ -55,12 +55,12 @@ pub fn load_config_from(config_path: Option<PathBuf>) -> Config {
 
 /// Apply environment variable overrides to the config.
 ///
-/// Supported env vars (matching nanobot Python conventions):
+/// Supported env vars (matching rustyclaw Python conventions):
 ///   OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY,
 ///   GROQ_API_KEY, GEMINI_API_KEY, ZHIPU_API_KEY, DASHSCOPE_API_KEY,
 ///   MOONSHOT_API_KEY, MINIMAX_API_KEY, AIHUBMIX_API_KEY, VLLM_API_KEY
 ///   TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN
-///   NANOBOT_MODEL, NANOBOT_WORKSPACE
+///   RUSTYCLAW_MODEL, RUSTYCLAW_WORKSPACE
 ///   BRAVE_SEARCH_API_KEY
 fn apply_env_overrides(config: &mut Config) {
     // Provider API keys
@@ -110,10 +110,10 @@ fn apply_env_overrides(config: &mut Config) {
     }
 
     // Agent defaults
-    if let Ok(v) = std::env::var("NANOBOT_MODEL") {
+    if let Ok(v) = std::env::var("RUSTYCLAW_MODEL") {
         config.agents.defaults.model = v;
     }
-    if let Ok(v) = std::env::var("NANOBOT_WORKSPACE") {
+    if let Ok(v) = std::env::var("RUSTYCLAW_WORKSPACE") {
         config.agents.defaults.workspace = v;
     }
 

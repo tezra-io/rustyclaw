@@ -11,7 +11,7 @@ fn resolve_path(path: &str, allowed_dir: Option<&Path>) -> crate::error::Result<
 
     if let Some(dir) = allowed_dir {
         if !resolved.starts_with(dir) {
-            return Err(crate::error::NanobotError::Tool(format!(
+            return Err(crate::error::RustyClawError::Tool(format!(
                 "Path {} is outside allowed directory {}",
                 resolved.display(),
                 dir.display()
@@ -51,12 +51,12 @@ impl super::base::Tool for ReadFileTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let path_str = args["path"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'path'".into()))?;
         let path = resolve_path(path_str, self.allowed_dir.as_deref())?;
         debug!("read_file: {}", path.display());
         tokio::fs::read_to_string(&path)
             .await
-            .map_err(crate::error::NanobotError::Io)
+            .map_err(crate::error::RustyClawError::Io)
     }
 }
 
@@ -90,10 +90,10 @@ impl super::base::Tool for WriteFileTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let path_str = args["path"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'path'".into()))?;
         let content = args["content"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'content'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'content'".into()))?;
         let path = resolve_path(path_str, self.allowed_dir.as_deref())?;
         debug!("write_file: {}", path.display());
 
@@ -140,24 +140,24 @@ impl super::base::Tool for EditFileTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let path_str = args["path"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'path'".into()))?;
         let old_text = args["old_text"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'old_text'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'old_text'".into()))?;
         let new_text = args["new_text"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'new_text'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'new_text'".into()))?;
         let path = resolve_path(path_str, self.allowed_dir.as_deref())?;
 
         let content = tokio::fs::read_to_string(&path).await?;
         let count = content.matches(old_text).count();
         if count == 0 {
-            return Err(crate::error::NanobotError::Tool(
+            return Err(crate::error::RustyClawError::Tool(
                 "old_text not found in file".into(),
             ));
         }
         if count > 1 {
-            return Err(crate::error::NanobotError::Tool(format!(
+            return Err(crate::error::RustyClawError::Tool(format!(
                 "old_text found {} times — must be unique",
                 count
             )));
@@ -198,7 +198,7 @@ impl super::base::Tool for ListDirTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let path_str = args["path"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'path'".into()))?;
         let path = resolve_path(path_str, self.allowed_dir.as_deref())?;
 
         let mut entries = Vec::new();

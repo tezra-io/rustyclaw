@@ -67,7 +67,7 @@ impl ToolRegistry {
         let tool = self
             .tools
             .get(name)
-            .ok_or_else(|| crate::error::NanobotError::Tool(format!("Unknown tool: {}", name)))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool(format!("Unknown tool: {}", name)))?;
         tool.execute(args).await
     }
 

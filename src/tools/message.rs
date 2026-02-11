@@ -52,23 +52,23 @@ impl super::base::Tool for MessageTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let content = args["content"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'content'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'content'".into()))?;
 
         let channel = args["channel"]
             .as_str()
             .map(String::from)
             .or_else(|| self.current_channel.lock().unwrap().clone())
-            .ok_or_else(|| crate::error::NanobotError::Tool("No channel context set".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("No channel context set".into()))?;
 
         let chat_id = args["chat_id"]
             .as_str()
             .map(String::from)
             .or_else(|| self.current_chat_id.lock().unwrap().clone())
-            .ok_or_else(|| crate::error::NanobotError::Tool("No chat_id context set".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("No chat_id context set".into()))?;
 
         let msg = OutboundMessage::new(&channel, &chat_id, content);
         self.sender.send(msg).await.map_err(|e| {
-            crate::error::NanobotError::Channel(format!("Failed to send message: {}", e))
+            crate::error::RustyClawError::Channel(format!("Failed to send message: {}", e))
         })?;
 
         Ok("Message sent.".into())

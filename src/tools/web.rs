@@ -31,10 +31,10 @@ impl super::base::Tool for WebSearchTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let query = args["query"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'query'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'query'".into()))?;
 
         if self.api_key.is_empty() {
-            return Err(crate::error::NanobotError::Tool(
+            return Err(crate::error::RustyClawError::Tool(
                 "Web search API key not configured".into(),
             ));
         }
@@ -48,12 +48,12 @@ impl super::base::Tool for WebSearchTool {
             .query(&[("q", query), ("count", &self.max_results.to_string())])
             .send()
             .await
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         let data: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         let results = data["web"]["results"]
             .as_array()
@@ -103,18 +103,18 @@ impl super::base::Tool for WebFetchTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let url = args["url"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'url'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'url'".into()))?;
 
         // URL validation: must start with http:// or https://
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err(crate::error::NanobotError::Tool(
+            return Err(crate::error::RustyClawError::Tool(
                 "URL must start with http:// or https://".into(),
             ));
         }
 
         // Block private/internal IPs
         if url.contains("://localhost") || url.contains("://127.") || url.contains("://0.0.0.0") {
-            return Err(crate::error::NanobotError::Tool(
+            return Err(crate::error::RustyClawError::Tool(
                 "Fetching localhost/internal URLs is not allowed".into(),
             ));
         }
@@ -125,19 +125,19 @@ impl super::base::Tool for WebFetchTool {
             .redirect(reqwest::redirect::Policy::limited(5))
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         let resp = client
             .get(url)
             .header("User-Agent", "RustyClaw/1.0")
             .send()
             .await
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         let html = resp
             .text()
             .await
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         // Basic HTML stripping — use scraper for readability extraction
         let doc = scraper::Html::parse_document(&html);

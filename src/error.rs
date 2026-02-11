@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum NanobotError {
+pub enum RustyClawError {
     #[error("config error: {0}")]
     Config(String),
 
@@ -33,4 +33,4 @@ pub enum NanobotError {
     WebSocket(String),
 }
 
-pub type Result<T> = std::result::Result<T, NanobotError>;
+pub type Result<T> = std::result::Result<T, RustyClawError>;

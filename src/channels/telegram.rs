@@ -107,7 +107,7 @@ impl super::base::Channel for TelegramChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         if !resp.status().is_success() {
             // Fallback to plain text on HTML parse error

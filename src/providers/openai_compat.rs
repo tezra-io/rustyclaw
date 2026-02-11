@@ -86,13 +86,13 @@ impl LlmProvider for OpenAiCompatProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             warn!("LLM API error {}: {}", status, text);
-            return Err(crate::error::NanobotError::Provider(format!(
+            return Err(crate::error::RustyClawError::Provider(format!(
                 "API returned {}: {}",
                 status, text
             )));
@@ -101,7 +101,7 @@ impl LlmProvider for OpenAiCompatProvider {
         let data: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
         parse_response(data)
     }
@@ -115,7 +115,7 @@ impl LlmProvider for OpenAiCompatProvider {
 fn parse_response(data: serde_json::Value) -> crate::error::Result<LlmResponse> {
     let choice = data["choices"]
         .get(0)
-        .ok_or_else(|| crate::error::NanobotError::Provider("No choices in response".into()))?;
+        .ok_or_else(|| crate::error::RustyClawError::Provider("No choices in response".into()))?;
 
     let content = choice["message"]["content"].as_str().map(String::from);
     let finish_reason = choice["finish_reason"].as_str().map(String::from);

@@ -2,7 +2,7 @@
 name = "rustyclaw"
 version = "0.1.0"
 edition = "2021"
-description = "An ultra-lightweight personal AI assistant — nanobot rewritten in Rust"
+description = "An ultra-lightweight personal AI assistant — nanobot rewritten in Rust 🦀"
 license = "MIT"
 rust-version = "1.75"
 

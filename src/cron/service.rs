@@ -28,8 +28,8 @@ impl CronService {
     }
 
     fn save_store(&self) -> crate::error::Result<()> {
-        let json =
-            serde_json::to_string_pretty(&self.store).map_err(crate::error::NanobotError::Json)?;
+        let json = serde_json::to_string_pretty(&self.store)
+            .map_err(crate::error::RustyClawError::Json)?;
         std::fs::write(&self.store_path, json)?;
         Ok(())
     }

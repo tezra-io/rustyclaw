@@ -49,14 +49,14 @@ impl super::base::Tool for ExecTool {
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
         let cmd = args["command"]
             .as_str()
-            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'command'".into()))?;
+            .ok_or_else(|| crate::error::RustyClawError::Tool("Missing 'command'".into()))?;
 
         // Safety checks
         let lower = cmd.to_lowercase();
         for pattern in DENY_PATTERNS {
             if lower.contains(pattern) {
                 warn!("Blocked dangerous command: {}", cmd);
-                return Err(crate::error::NanobotError::Tool(format!(
+                return Err(crate::error::RustyClawError::Tool(format!(
                     "Command blocked by safety filter: contains '{}'",
                     pattern
                 )));
@@ -79,12 +79,12 @@ impl super::base::Tool for ExecTool {
         )
         .await
         .map_err(|_| {
-            crate::error::NanobotError::Tool(format!(
+            crate::error::RustyClawError::Tool(format!(
                 "Command timed out after {}s",
                 self.timeout_secs
             ))
         })?
-        .map_err(crate::error::NanobotError::Io)?;
+        .map_err(crate::error::RustyClawError::Io)?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

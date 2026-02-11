@@ -62,7 +62,7 @@ impl super::base::Channel for DiscordChannel {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
+                .map_err(|e| crate::error::RustyClawError::Http(e.to_string()))?;
 
             let status = resp.status();
 
@@ -77,14 +77,14 @@ impl super::base::Channel for DiscordChannel {
                 return Ok(());
             } else {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(crate::error::NanobotError::Channel(format!(
+                return Err(crate::error::RustyClawError::Channel(format!(
                     "Discord API error: {}",
                     text
                 )));
             }
         }
 
-        Err(crate::error::NanobotError::Channel(
+        Err(crate::error::RustyClawError::Channel(
             "Discord send failed after retries".into(),
         ))
     }
@@ -95,17 +95,17 @@ impl DiscordChannel {
     async fn gateway_loop(&self) -> crate::error::Result<()> {
         let (ws_stream, _) = tokio_tungstenite::connect_async(&self.config.gateway_url)
             .await
-            .map_err(|e| crate::error::NanobotError::WebSocket(e.to_string()))?;
+            .map_err(|e| crate::error::RustyClawError::WebSocket(e.to_string()))?;
 
         let (mut write, mut read) = ws_stream.split();
         let mut sequence: Option<u64> = None;
 
         while let Some(msg) = read.next().await {
-            let msg = msg.map_err(|e| crate::error::NanobotError::WebSocket(e.to_string()))?;
+            let msg = msg.map_err(|e| crate::error::RustyClawError::WebSocket(e.to_string()))?;
 
             if let WsMessage::Text(text) = msg {
                 let payload: serde_json::Value =
-                    serde_json::from_str(&text).map_err(crate::error::NanobotError::Json)?;
+                    serde_json::from_str(&text).map_err(crate::error::RustyClawError::Json)?;
 
                 let op = payload["op"].as_u64().unwrap_or(0);
                 if let Some(s) = payload["s"].as_u64() {
