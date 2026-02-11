@@ -1,0 +1,74 @@
+[package]
+name = "nanobot"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight personal AI assistant framework"
+license = "MIT"
+rust-version = "1.75"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# WebSocket (Discord, WhatsApp bridge)
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
+# Cron expressions
+cron = "0.15"
+
+# DateTime
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
+# HTML parsing (web_fetch tool)
+scraper = "0.21"
+
+# Telegram bot
+teloxide = { version = "0.13", features = ["macros"] }
+
+# Interactive CLI input
+rustyline = "14"
+
+# Regex (shell safety guards, markdown parsing)
+regex = "1"
+
+# Async trait support
+async-trait = "0.1"
+
+# Path expansion (~/ handling)
+shellexpand = "3"
+dirs = "5"
+
+# Binary detection (skills requirement checking)
+which = "7"
+
+[dev-dependencies]
+mockito = "1"
+assert_cmd = "2"
+tempfile = "3"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
