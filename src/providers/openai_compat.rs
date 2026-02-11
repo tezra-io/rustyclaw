@@ -8,12 +8,13 @@ use super::registry::ProviderSpec;
 /// Generic OpenAI-compatible provider.
 ///
 /// Works with any API that follows the OpenAI chat completions format:
-/// Anthropic (via proxy), OpenAI, DeepSeek, Groq, vLLM, OpenRouter, etc.
+/// Anthropic (via Messages API compat), OpenAI, DeepSeek, Groq, vLLM, OpenRouter, etc.
 pub struct OpenAiCompatProvider {
     client: Client,
     api_base: String,
     api_key: String,
     default_model: String,
+    use_x_api_key: bool,
     extra_headers: std::collections::HashMap<String, String>,
 }
 
@@ -30,12 +31,21 @@ impl OpenAiCompatProvider {
             .trim_end_matches('/')
             .to_string();
 
+        // Merge spec's default headers into user-provided extra_headers
+        let mut headers = extra_headers.unwrap_or_default();
+        for (k, v) in spec.extra_default_headers {
+            headers
+                .entry(k.to_string())
+                .or_insert_with(|| v.to_string());
+        }
+
         Self {
             client: Client::new(),
             api_base: base,
             api_key,
             default_model: model.unwrap_or_else(|| spec.default_model.to_string()),
-            extra_headers: extra_headers.unwrap_or_default(),
+            use_x_api_key: spec.use_x_api_key,
+            extra_headers: headers,
         }
     }
 }
@@ -75,8 +85,14 @@ impl LlmProvider for OpenAiCompatProvider {
         let mut req = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json");
+
+        // Use the correct auth header style for this provider
+        if self.use_x_api_key {
+            req = req.header("x-api-key", &self.api_key);
+        } else {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
 
         for (k, v) in &self.extra_headers {
             req = req.header(k, v);

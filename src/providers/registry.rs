@@ -9,6 +9,10 @@ pub struct ProviderSpec {
     pub api_base: &'static str,
     pub default_model: &'static str,
     pub is_gateway: bool,
+    /// Use `x-api-key` header instead of `Authorization: Bearer`.
+    pub use_x_api_key: bool,
+    /// Extra default headers to include with every request (e.g., anthropic-version).
+    pub extra_default_headers: &'static [(&'static str, &'static str)],
 }
 
 /// All supported providers.
@@ -20,6 +24,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://openrouter.ai/api/v1",
         default_model: "anthropic/claude-sonnet-4-5",
         is_gateway: true,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "aihubmix",
@@ -28,6 +34,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://aihubmix.com/v1",
         default_model: "anthropic/claude-sonnet-4-5",
         is_gateway: true,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "anthropic",
@@ -36,6 +44,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://api.anthropic.com/v1",
         default_model: "claude-sonnet-4-5-20250929",
         is_gateway: false,
+        use_x_api_key: true,
+        extra_default_headers: &[("anthropic-version", "2024-10-22")],
     },
     ProviderSpec {
         name: "openai",
@@ -44,6 +54,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://api.openai.com/v1",
         default_model: "gpt-4o",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "deepseek",
@@ -52,6 +64,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://api.deepseek.com/v1",
         default_model: "deepseek-chat",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "gemini",
@@ -60,6 +74,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://generativelanguage.googleapis.com/v1beta/openai",
         default_model: "gemini-2.0-flash",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "groq",
@@ -68,6 +84,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://api.groq.com/openai/v1",
         default_model: "llama-3.3-70b-versatile",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "zhipu",
@@ -76,6 +94,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://open.bigmodel.cn/api/paas/v4",
         default_model: "glm-4-flash",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "dashscope",
@@ -84,6 +104,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         default_model: "qwen-plus",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "moonshot",
@@ -92,6 +114,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://api.moonshot.cn/v1",
         default_model: "moonshot-v1-auto",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "minimax",
@@ -100,6 +124,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "https://api.minimax.chat/v1",
         default_model: "MiniMax-Text-01",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
     ProviderSpec {
         name: "vllm",
@@ -108,6 +134,8 @@ pub static PROVIDERS: &[ProviderSpec] = &[
         api_base: "http://localhost:8000/v1",
         default_model: "default",
         is_gateway: false,
+        use_x_api_key: false,
+        extra_default_headers: &[],
     },
 ];
 
@@ -125,7 +153,7 @@ pub fn find_provider_by_name(name: &str) -> Option<&'static ProviderSpec> {
     PROVIDERS.iter().find(|p| p.name == lower)
 }
 
-/// Strip the provider prefix from a model name (e.g., "openai/gpt-4o" → "gpt-4o").
+/// Strip the provider prefix from a model name (e.g., "openai/gpt-4o" -> "gpt-4o").
 pub fn strip_prefix(model: &str) -> &str {
     model.find('/').map(|i| &model[i + 1..]).unwrap_or(model)
 }

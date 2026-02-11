@@ -3,14 +3,22 @@ use std::path::PathBuf;
 
 use crate::providers::registry::{find_provider_by_name, PROVIDERS};
 
+/// Helper for serde skip_serializing_if on bool fields.
+fn is_false(v: &bool) -> bool {
+    !v
+}
+
 /// Root configuration for rustyclaw.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
     pub agents: AgentsConfig,
+    #[serde(skip_serializing_if = "ChannelsConfig::is_default")]
     pub channels: ChannelsConfig,
     pub providers: ProvidersConfig,
+    #[serde(skip_serializing_if = "GatewayConfig::is_default")]
     pub gateway: GatewayConfig,
+    #[serde(skip_serializing_if = "ToolsConfig::is_default")]
     pub tools: ToolsConfig,
 }
 
@@ -116,25 +124,46 @@ impl Default for AgentDefaults {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderConfig {
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub api_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_base: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_headers: Option<std::collections::HashMap<String, String>>,
+}
+
+impl ProviderConfig {
+    pub fn is_empty(&self) -> bool {
+        self.api_key.is_empty() && self.api_base.is_none() && self.extra_headers.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProvidersConfig {
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub anthropic: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub openai: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub openrouter: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub deepseek: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub groq: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub zhipu: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub dashscope: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub vllm: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub gemini: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub moonshot: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub minimax: ProviderConfig,
+    #[serde(skip_serializing_if = "ProviderConfig::is_empty")]
     pub aihubmix: ProviderConfig,
 }
 
@@ -161,34 +190,62 @@ impl ProvidersConfig {
 
 // --- Channel Config ---
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ChannelsConfig {
+    #[serde(skip_serializing_if = "TelegramConfig::is_default")]
     pub telegram: TelegramConfig,
+    #[serde(skip_serializing_if = "DiscordConfig::is_default")]
     pub discord: DiscordConfig,
+    #[serde(skip_serializing_if = "WhatsAppConfig::is_default")]
     pub whatsapp: WhatsAppConfig,
+    #[serde(skip_serializing_if = "FeishuConfig::is_default")]
     pub feishu: FeishuConfig,
+    #[serde(skip_serializing_if = "DingTalkConfig::is_default")]
     pub dingtalk: DingTalkConfig,
+    #[serde(skip_serializing_if = "MochatConfig::is_default")]
     pub mochat: MochatConfig,
+    #[serde(skip_serializing_if = "EmailConfig::is_default")]
     pub email: EmailConfig,
+    #[serde(skip_serializing_if = "SlackConfig::is_default")]
     pub slack: SlackConfig,
+    #[serde(skip_serializing_if = "QQConfig::is_default")]
     pub qq: QQConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl ChannelsConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TelegramConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub token: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl TelegramConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DiscordConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub token: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
     pub gateway_url: String,
     pub intents: u64,
@@ -206,11 +263,19 @@ impl Default for DiscordConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl DiscordConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WhatsAppConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
     pub bridge_url: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
 }
 
@@ -224,72 +289,145 @@ impl Default for WhatsAppConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl WhatsAppConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FeishuConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub app_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub app_secret: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub encrypt_key: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub verification_token: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl FeishuConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DingTalkConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub client_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub client_secret: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl DingTalkConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MochatConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub base_url: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub claw_token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl MochatConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct EmailConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "is_false")]
     pub consent_granted: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub imap_host: String,
     pub imap_port: u16,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub imap_username: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub imap_password: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub smtp_host: String,
     pub smtp_port: u16,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub smtp_username: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub smtp_password: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl EmailConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SlackConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub mode: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub bot_token: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub app_token: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl SlackConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct QQConfig {
+    #[serde(skip_serializing_if = "is_false")]
     pub enabled: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub app_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub secret: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow_from: Vec<String>,
+}
+
+impl QQConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 // --- Gateway Config ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GatewayConfig {
     pub host: String,
@@ -305,30 +443,59 @@ impl Default for GatewayConfig {
     }
 }
 
+impl GatewayConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 // --- Tools Config ---
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ToolsConfig {
+    #[serde(skip_serializing_if = "WebToolsConfig::is_default")]
     pub web: WebToolsConfig,
+    #[serde(skip_serializing_if = "ExecToolConfig::is_default")]
     pub exec: ExecToolConfig,
+    #[serde(skip_serializing_if = "is_false")]
     pub restrict_to_workspace: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl ToolsConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WebToolsConfig {
+    #[serde(skip_serializing_if = "WebSearchConfig::is_default")]
     pub search: WebSearchConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl WebToolsConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WebSearchConfig {
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub api_key: String,
     pub max_results: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl WebSearchConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ExecToolConfig {
     pub timeout: u64,
@@ -337,5 +504,11 @@ pub struct ExecToolConfig {
 impl Default for ExecToolConfig {
     fn default() -> Self {
         Self { timeout: 60 }
+    }
+}
+
+impl ExecToolConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 }

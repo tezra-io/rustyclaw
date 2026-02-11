@@ -6,7 +6,7 @@ use tracing::info;
 use crate::bus::queue::MessageBus;
 use crate::config::schema::Config;
 use crate::providers::openai_compat::OpenAiCompatProvider;
-use crate::providers::registry::find_provider_by_name;
+use crate::providers::registry::{find_provider_by_name, find_provider_for_model};
 use crate::session::SessionManager;
 use crate::tools::base::ToolRegistry;
 
@@ -227,28 +227,34 @@ impl Cli {
                     config.agents.defaults.model = model.trim().to_string();
                 }
 
-                // Detect provider from model and ask for API key
-                if let Some(provider_name) = config.get_provider_name(None) {
-                    if let Some(spec) = find_provider_by_name(provider_name) {
-                        let current_key = config
-                            .get_provider(None)
-                            .map(|p| &p.api_key)
-                            .filter(|k| !k.is_empty());
-                        let hint = if current_key.is_some() {
-                            " (already set, press Enter to keep)"
-                        } else {
-                            ""
-                        };
-                        let key = rl
-                            .readline(&format!(
-                                "{} API key ({}){}: ",
-                                provider_name, spec.env_key, hint
-                            ))
-                            .unwrap_or_default();
-                        if !key.trim().is_empty() {
-                            set_provider_key(&mut config, provider_name, key.trim());
-                        }
+                // Detect provider from model name (without requiring key to be set)
+                if let Some(spec) = find_provider_for_model(&config.agents.defaults.model) {
+                    let current_key = config
+                        .providers
+                        .by_name(spec.name)
+                        .map(|p| &p.api_key)
+                        .filter(|k| !k.is_empty());
+                    let hint = if current_key.is_some() {
+                        " (already set, press Enter to keep)"
+                    } else {
+                        ""
+                    };
+                    let key = rl
+                        .readline(&format!(
+                            "{} API key ({}){}: ",
+                            spec.name, spec.env_key, hint
+                        ))
+                        .unwrap_or_default();
+                    if !key.trim().is_empty() {
+                        set_provider_key(&mut config, spec.name, key.trim());
                     }
+                } else {
+                    // No provider detected from model — ask for a generic API key
+                    println!(
+                        "Could not detect provider from model name '{}'.",
+                        config.agents.defaults.model
+                    );
+                    println!("You can set an API key manually in the config file.");
                 }
 
                 // Workspace
@@ -266,6 +272,9 @@ impl Cli {
                 let ws_path = config.workspace_path();
                 std::fs::create_dir_all(&ws_path).ok();
 
+                // Create workspace template files (AGENTS.md, SOUL.md, USER.md, etc.)
+                create_workspace_templates(&ws_path);
+
                 // Save
                 crate::config::save_config(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to save config: {}", e))?;
@@ -274,7 +283,17 @@ impl Cli {
                     "\nConfiguration saved to {}",
                     crate::config::get_config_path().display()
                 );
-                println!("Run `rustyclaw agent -m 'Hello'` to test your setup!");
+                println!("\nNext steps:");
+                if config.get_provider_name(None).is_none() {
+                    if let Some(spec) = find_provider_for_model(&config.agents.defaults.model) {
+                        println!("  1. Set your API key: export {}=your-key", spec.env_key);
+                    } else {
+                        println!("  1. Set an API key in ~/.rustyclaw/config.json");
+                    }
+                    println!("  2. Test: rustyclaw agent -m 'Hello'");
+                } else {
+                    println!("  Run: rustyclaw agent -m 'Hello'");
+                }
 
                 Ok(())
             }
@@ -369,10 +388,17 @@ fn build_agent_stack(
 
     // Resolve provider
     let provider_name = config.get_provider_name(model).ok_or_else(|| {
+        let effective_model = model.unwrap_or(&config.agents.defaults.model);
+        let hint = if let Some(spec) = find_provider_for_model(effective_model) {
+            format!("Set an API key: export {}=your-key\n", spec.env_key)
+        } else {
+            "Set an API key for a supported provider.\n".to_string()
+        };
         anyhow::anyhow!(
             "No LLM provider configured.\n\
-                 Set an API key: export OPENROUTER_API_KEY=sk-... (or any supported provider)\n\
-                 Or run: rustyclaw onboard"
+             {}\
+             Or run: rustyclaw onboard",
+            hint
         )
     })?;
 
@@ -519,5 +545,68 @@ fn set_provider_key(config: &mut Config, name: &str, key: &str) {
         "minimax" => config.providers.minimax.api_key = key.to_string(),
         "aihubmix" => config.providers.aihubmix.api_key = key.to_string(),
         _ => {}
+    }
+}
+
+/// Create default workspace template files matching nanobot's onboarding.
+fn create_workspace_templates(workspace: &std::path::Path) {
+    let templates: &[(&str, &str)] = &[
+        (
+            "AGENTS.md",
+            "# Agent Instructions\n\n\
+             You are a helpful AI assistant. Be concise, accurate, and friendly.\n\n\
+             ## Guidelines\n\n\
+             - Always explain what you're doing before taking actions\n\
+             - Ask for clarification when the request is ambiguous\n\
+             - Use tools to help accomplish tasks\n\
+             - Remember important information in your memory files\n",
+        ),
+        (
+            "SOUL.md",
+            "# Soul\n\n\
+             I am RustyClaw, a lightweight AI assistant.\n\n\
+             ## Personality\n\n\
+             - Helpful and friendly\n\
+             - Concise and to the point\n\
+             - Curious and eager to learn\n\n\
+             ## Values\n\n\
+             - Accuracy over speed\n\
+             - User privacy and safety\n\
+             - Transparency in actions\n",
+        ),
+        (
+            "USER.md",
+            "# User\n\n\
+             Information about the user goes here.\n\n\
+             ## Preferences\n\n\
+             - Communication style: (casual/formal)\n\
+             - Timezone: (your timezone)\n\
+             - Language: (your preferred language)\n",
+        ),
+    ];
+
+    for (filename, content) in templates {
+        let path = workspace.join(filename);
+        if !path.exists() {
+            if let Err(e) = std::fs::write(&path, content) {
+                eprintln!("  Warning: couldn't create {}: {}", filename, e);
+            } else {
+                println!("  Created {}", filename);
+            }
+        }
+    }
+
+    // Create memory directory
+    let memory_dir = workspace.join("memory");
+    std::fs::create_dir_all(&memory_dir).ok();
+    let memory_file = memory_dir.join("MEMORY.md");
+    if !memory_file.exists() {
+        std::fs::write(
+            &memory_file,
+            "# Long-term Memory\n\n\
+             This file stores important information that should persist across sessions.\n",
+        )
+        .ok();
+        println!("  Created memory/MEMORY.md");
     }
 }
