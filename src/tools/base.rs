@@ -59,7 +59,11 @@ impl ToolRegistry {
     }
 
     /// Execute a tool by name with arguments.
-    pub async fn execute(&self, name: &str, args: serde_json::Value) -> crate::error::Result<String> {
+    pub async fn execute(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> crate::error::Result<String> {
         let tool = self
             .tools
             .get(name)

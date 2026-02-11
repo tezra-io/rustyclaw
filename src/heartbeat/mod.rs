@@ -26,7 +26,10 @@ impl HeartbeatService {
 
     /// Run the heartbeat check loop.
     pub async fn run(&self) {
-        info!("Heartbeat service started (interval: {}s)", self.interval_secs);
+        info!(
+            "Heartbeat service started (interval: {}s)",
+            self.interval_secs
+        );
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(self.interval_secs)).await;

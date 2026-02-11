@@ -12,4 +12,3 @@ pub mod tools;
 pub mod utils;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LOGO: &str = "\u{1F408}"; // cat emoji

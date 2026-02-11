@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::bus::events::OutboundMessage;
 use crate::bus::queue::MessageBus;
@@ -39,10 +39,7 @@ impl super::base::Channel for TelegramChannel {
         let mut offset: i64 = 0;
 
         loop {
-            let url = format!(
-                "{}/getUpdates?offset={}&timeout=30",
-                base_url, offset
-            );
+            let url = format!("{}/getUpdates?offset={}&timeout=30", base_url, offset);
 
             match client.get(&url).send().await {
                 Ok(resp) => {
@@ -127,9 +124,69 @@ impl super::base::Channel for TelegramChannel {
 
 /// Convert markdown to Telegram-compatible HTML.
 fn markdown_to_telegram_html(text: &str) -> String {
-    // Simplified conversion — full implementation would use regex
-    text.replace("**", "<b>")
-        .replace("__", "<i>")
-        .replace("~~", "<s>")
-        .replace("`", "<code>")
+    let mut result = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Bold: **text**
+        if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
+            if let Some(end) = find_closing(&chars, i + 2, &['*', '*']) {
+                result.push_str("<b>");
+                let inner: String = chars[i + 2..end].iter().collect();
+                result.push_str(&inner);
+                result.push_str("</b>");
+                i = end + 2;
+                continue;
+            }
+        }
+        // Italic: __text__
+        if i + 1 < len && chars[i] == '_' && chars[i + 1] == '_' {
+            if let Some(end) = find_closing(&chars, i + 2, &['_', '_']) {
+                result.push_str("<i>");
+                let inner: String = chars[i + 2..end].iter().collect();
+                result.push_str(&inner);
+                result.push_str("</i>");
+                i = end + 2;
+                continue;
+            }
+        }
+        // Code: `text`
+        if chars[i] == '`' && !(i + 1 < len && chars[i + 1] == '`') {
+            if let Some(end) = chars[i + 1..].iter().position(|&c| c == '`') {
+                let end = i + 1 + end;
+                result.push_str("<code>");
+                let inner: String = chars[i + 1..end].iter().collect();
+                result.push_str(&inner);
+                result.push_str("</code>");
+                i = end + 1;
+                continue;
+            }
+        }
+        // Escape HTML special chars
+        match chars[i] {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            c => result.push(c),
+        }
+        i += 1;
+    }
+
+    result
+}
+
+/// Find closing marker (e.g., ** or __) starting from position `from`.
+fn find_closing(chars: &[char], from: usize, marker: &[char]) -> Option<usize> {
+    let mlen = marker.len();
+    if from + mlen > chars.len() {
+        return None;
+    }
+    for i in from..chars.len() - mlen + 1 {
+        if chars[i..i + mlen] == *marker {
+            return Some(i);
+        }
+    }
+    None
 }

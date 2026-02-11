@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// A loaded skill with metadata from YAML frontmatter.
 #[derive(Debug, Clone)]
@@ -98,14 +98,14 @@ impl SkillsLoader {
         // Parse YAML frontmatter (between --- markers)
         let mut description = String::new();
         let mut always_load = false;
-        let mut required_bins = Vec::new();
-        let mut required_env = Vec::new();
+        let required_bins = Vec::new();
+        let required_env = Vec::new();
         let mut body = content.as_str();
 
-        if content.starts_with("---") {
-            if let Some(end) = content[3..].find("---") {
-                let frontmatter = &content[3..3 + end];
-                body = &content[3 + end + 3..];
+        if let Some(stripped) = content.strip_prefix("---") {
+            if let Some(end) = stripped.find("---") {
+                let frontmatter = &stripped[..end];
+                body = &stripped[end + 3..];
 
                 for line in frontmatter.lines() {
                     let line = line.trim();

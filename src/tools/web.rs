@@ -10,7 +10,9 @@ pub struct WebSearchTool {
 
 #[async_trait]
 impl super::base::Tool for WebSearchTool {
-    fn name(&self) -> &str { "web_search" }
+    fn name(&self) -> &str {
+        "web_search"
+    }
 
     fn description(&self) -> &str {
         "Search the web using Brave Search API."
@@ -80,7 +82,9 @@ pub struct WebFetchTool;
 
 #[async_trait]
 impl super::base::Tool for WebFetchTool {
-    fn name(&self) -> &str { "web_fetch" }
+    fn name(&self) -> &str {
+        "web_fetch"
+    }
 
     fn description(&self) -> &str {
         "Fetch and extract readable content from a URL."
@@ -101,6 +105,20 @@ impl super::base::Tool for WebFetchTool {
             .as_str()
             .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'url'".into()))?;
 
+        // URL validation: must start with http:// or https://
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(crate::error::NanobotError::Tool(
+                "URL must start with http:// or https://".into(),
+            ));
+        }
+
+        // Block private/internal IPs
+        if url.contains("://localhost") || url.contains("://127.") || url.contains("://0.0.0.0") {
+            return Err(crate::error::NanobotError::Tool(
+                "Fetching localhost/internal URLs is not allowed".into(),
+            ));
+        }
+
         debug!("web_fetch: {}", url);
 
         let client = reqwest::Client::builder()
@@ -111,7 +129,7 @@ impl super::base::Tool for WebFetchTool {
 
         let resp = client
             .get(url)
-            .header("User-Agent", "Nanobot/1.0")
+            .header("User-Agent", "RustyClaw/1.0")
             .send()
             .await
             .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;

@@ -13,9 +13,9 @@ pub async fn transcribe_audio(
         .unwrap_or("audio.ogg")
         .to_string();
 
-    let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
-        crate::error::NanobotError::Io(e)
-    })?;
+    let file_bytes = tokio::fs::read(file_path)
+        .await
+        .map_err(crate::error::NanobotError::Io)?;
 
     let part = multipart::Part::bytes(file_bytes)
         .file_name(file_name)

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
-use crate::bus::events::OutboundMessage;
 use crate::bus::queue::MessageBus;
 use crate::config::schema::Config;
 
@@ -11,6 +10,7 @@ use super::base::Channel;
 pub struct ChannelManager {
     channels: Vec<Arc<dyn Channel>>,
     bus: Arc<MessageBus>,
+    #[allow(dead_code)]
     config: Arc<Config>,
 }
 

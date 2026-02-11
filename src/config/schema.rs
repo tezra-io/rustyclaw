@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Root configuration for nanobot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::providers::registry::{find_provider_by_name, PROVIDERS};
+
+/// Root configuration for rustyclaw.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
     pub agents: AgentsConfig,
@@ -12,39 +14,79 @@ pub struct Config {
     pub tools: ToolsConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            agents: AgentsConfig::default(),
-            channels: ChannelsConfig::default(),
-            providers: ProvidersConfig::default(),
-            gateway: GatewayConfig::default(),
-            tools: ToolsConfig::default(),
-        }
-    }
-}
-
 impl Config {
+    /// Get expanded workspace path.
     pub fn workspace_path(&self) -> PathBuf {
         let path = shellexpand::tilde(&self.agents.defaults.workspace);
         PathBuf::from(path.as_ref())
+    }
+
+    /// Match a provider config by model name. Returns (ProviderConfig, spec_name).
+    fn match_provider(
+        &self,
+        model: Option<&str>,
+    ) -> (Option<&ProviderConfig>, Option<&'static str>) {
+        let model_str = model.unwrap_or(&self.agents.defaults.model);
+        let model_lower = model_str.to_lowercase();
+
+        // Match by keyword (order follows PROVIDERS registry)
+        for spec in PROVIDERS {
+            if let Some(p) = self.providers.by_name(spec.name) {
+                if spec.keywords.iter().any(|kw| model_lower.contains(kw)) && !p.api_key.is_empty()
+                {
+                    return (Some(p), Some(spec.name));
+                }
+            }
+        }
+
+        // Fallback: gateways first, then others
+        for spec in PROVIDERS {
+            if let Some(p) = self.providers.by_name(spec.name) {
+                if !p.api_key.is_empty() {
+                    return (Some(p), Some(spec.name));
+                }
+            }
+        }
+
+        (None, None)
+    }
+
+    /// Get matched provider config for a model.
+    pub fn get_provider(&self, model: Option<&str>) -> Option<&ProviderConfig> {
+        self.match_provider(model).0
+    }
+
+    /// Get the registry name of the matched provider.
+    pub fn get_provider_name(&self, model: Option<&str>) -> Option<&'static str> {
+        self.match_provider(model).1
+    }
+
+    /// Get API base URL for the given model.
+    pub fn get_api_base(&self, model: Option<&str>) -> Option<String> {
+        let (p, name) = self.match_provider(model);
+        if let Some(p) = p {
+            if let Some(base) = &p.api_base {
+                return Some(base.clone());
+            }
+        }
+        // Gateways get a default api_base from the registry
+        if let Some(name) = name {
+            if let Some(spec) = find_provider_by_name(name) {
+                if spec.is_gateway && !spec.api_base.is_empty() {
+                    return Some(spec.api_base.to_string());
+                }
+            }
+        }
+        None
     }
 }
 
 // --- Agent Config ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentsConfig {
     pub defaults: AgentDefaults,
-}
-
-impl Default for AgentsConfig {
-    fn default() -> Self {
-        Self {
-            defaults: AgentDefaults::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +136,27 @@ pub struct ProvidersConfig {
     pub moonshot: ProviderConfig,
     pub minimax: ProviderConfig,
     pub aihubmix: ProviderConfig,
+}
+
+impl ProvidersConfig {
+    /// Get a provider config by registry name.
+    pub fn by_name(&self, name: &str) -> Option<&ProviderConfig> {
+        match name {
+            "anthropic" => Some(&self.anthropic),
+            "openai" => Some(&self.openai),
+            "openrouter" => Some(&self.openrouter),
+            "deepseek" => Some(&self.deepseek),
+            "groq" => Some(&self.groq),
+            "zhipu" => Some(&self.zhipu),
+            "dashscope" => Some(&self.dashscope),
+            "vllm" => Some(&self.vllm),
+            "gemini" => Some(&self.gemini),
+            "moonshot" => Some(&self.moonshot),
+            "minimax" => Some(&self.minimax),
+            "aihubmix" => Some(&self.aihubmix),
+            _ => None,
+        }
+    }
 }
 
 // --- Channel Config ---
@@ -187,7 +250,6 @@ pub struct MochatConfig {
     pub enabled: bool,
     pub base_url: String,
     pub claw_token: String,
-    // Additional fields omitted for brevity - add as needed
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

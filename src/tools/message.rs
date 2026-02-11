@@ -29,7 +29,9 @@ impl MessageTool {
 
 #[async_trait]
 impl super::base::Tool for MessageTool {
-    fn name(&self) -> &str { "message" }
+    fn name(&self) -> &str {
+        "message"
+    }
 
     fn description(&self) -> &str {
         "Send a message to a specific channel and chat."

@@ -5,9 +5,9 @@ use tracing::debug;
 /// Resolve and validate a path within an allowed directory.
 fn resolve_path(path: &str, allowed_dir: Option<&Path>) -> crate::error::Result<PathBuf> {
     let expanded = shellexpand::tilde(path);
-    let resolved = PathBuf::from(expanded.as_ref()).canonicalize().unwrap_or_else(|_| {
-        PathBuf::from(expanded.as_ref())
-    });
+    let resolved = PathBuf::from(expanded.as_ref())
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(expanded.as_ref()));
 
     if let Some(dir) = allowed_dir {
         if !resolved.starts_with(dir) {
@@ -30,7 +30,9 @@ pub struct ReadFileTool {
 
 #[async_trait]
 impl super::base::Tool for ReadFileTool {
-    fn name(&self) -> &str { "read_file" }
+    fn name(&self) -> &str {
+        "read_file"
+    }
 
     fn description(&self) -> &str {
         "Read the contents of a file."
@@ -54,7 +56,7 @@ impl super::base::Tool for ReadFileTool {
         debug!("read_file: {}", path.display());
         tokio::fs::read_to_string(&path)
             .await
-            .map_err(|e| crate::error::NanobotError::Io(e))
+            .map_err(crate::error::NanobotError::Io)
     }
 }
 
@@ -66,7 +68,9 @@ pub struct WriteFileTool {
 
 #[async_trait]
 impl super::base::Tool for WriteFileTool {
-    fn name(&self) -> &str { "write_file" }
+    fn name(&self) -> &str {
+        "write_file"
+    }
 
     fn description(&self) -> &str {
         "Write content to a file, creating parent directories as needed."
@@ -97,7 +101,11 @@ impl super::base::Tool for WriteFileTool {
             tokio::fs::create_dir_all(parent).await?;
         }
         tokio::fs::write(&path, content).await?;
-        Ok(format!("Wrote {} bytes to {}", content.len(), path.display()))
+        Ok(format!(
+            "Wrote {} bytes to {}",
+            content.len(),
+            path.display()
+        ))
     }
 }
 
@@ -109,7 +117,9 @@ pub struct EditFileTool {
 
 #[async_trait]
 impl super::base::Tool for EditFileTool {
-    fn name(&self) -> &str { "edit_file" }
+    fn name(&self) -> &str {
+        "edit_file"
+    }
 
     fn description(&self) -> &str {
         "Replace a unique string in a file with new content."
@@ -128,15 +138,23 @@ impl super::base::Tool for EditFileTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
-        let path_str = args["path"].as_str().ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
-        let old_text = args["old_text"].as_str().ok_or_else(|| crate::error::NanobotError::Tool("Missing 'old_text'".into()))?;
-        let new_text = args["new_text"].as_str().ok_or_else(|| crate::error::NanobotError::Tool("Missing 'new_text'".into()))?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
+        let old_text = args["old_text"]
+            .as_str()
+            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'old_text'".into()))?;
+        let new_text = args["new_text"]
+            .as_str()
+            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'new_text'".into()))?;
         let path = resolve_path(path_str, self.allowed_dir.as_deref())?;
 
         let content = tokio::fs::read_to_string(&path).await?;
         let count = content.matches(old_text).count();
         if count == 0 {
-            return Err(crate::error::NanobotError::Tool("old_text not found in file".into()));
+            return Err(crate::error::NanobotError::Tool(
+                "old_text not found in file".into(),
+            ));
         }
         if count > 1 {
             return Err(crate::error::NanobotError::Tool(format!(
@@ -159,7 +177,9 @@ pub struct ListDirTool {
 
 #[async_trait]
 impl super::base::Tool for ListDirTool {
-    fn name(&self) -> &str { "list_dir" }
+    fn name(&self) -> &str {
+        "list_dir"
+    }
 
     fn description(&self) -> &str {
         "List files and directories at a given path."
@@ -176,7 +196,9 @@ impl super::base::Tool for ListDirTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> crate::error::Result<String> {
-        let path_str = args["path"].as_str().ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| crate::error::NanobotError::Tool("Missing 'path'".into()))?;
         let path = resolve_path(path_str, self.allowed_dir.as_deref())?;
 
         let mut entries = Vec::new();

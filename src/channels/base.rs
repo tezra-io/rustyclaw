@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::bus::events::{InboundMessage, OutboundMessage};
 use crate::bus::queue::MessageBus;

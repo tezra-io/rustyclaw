@@ -1,20 +1,22 @@
 use async_trait::async_trait;
 
 /// Tool for spawning background subagent tasks.
+#[derive(Default)]
 pub struct SpawnTool {
-    // Reference to SubagentManager will be added during integration.
     _placeholder: (),
 }
 
 impl SpawnTool {
     pub fn new() -> Self {
-        Self { _placeholder: () }
+        Self::default()
     }
 }
 
 #[async_trait]
 impl super::base::Tool for SpawnTool {
-    fn name(&self) -> &str { "spawn" }
+    fn name(&self) -> &str {
+        "spawn"
+    }
 
     fn description(&self) -> &str {
         "Spawn a background subagent to work on a task asynchronously."

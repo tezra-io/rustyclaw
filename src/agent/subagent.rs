@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::bus::events::InboundMessage;
 use crate::config::schema::Config;
@@ -29,18 +29,18 @@ impl SubagentManager {
 
     /// Spawn a background subagent task.
     pub fn spawn(&self, task: String, context: Option<String>, origin_session: String) {
-        let config = self.config.clone();
-        let provider = self.provider.clone();
+        let _config = self.config.clone();
+        let _provider = self.provider.clone();
         let tx = self.inbound_tx.clone();
 
         tokio::spawn(async move {
             info!("Subagent started: {}", task);
 
             // Create a minimal tool registry (no message/spawn tools to prevent recursion)
-            let registry = ToolRegistry::new();
+            let _registry = ToolRegistry::new();
             // TODO: Register filesystem, shell, web tools with workspace restriction
 
-            let prompt = if let Some(ctx) = context {
+            let _prompt = if let Some(ctx) = context {
                 format!("{}\n\nContext: {}", task, ctx)
             } else {
                 task.clone()

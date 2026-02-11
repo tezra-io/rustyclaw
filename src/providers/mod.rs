@@ -5,4 +5,4 @@ pub mod transcription;
 
 pub use base::{LlmProvider, LlmResponse, ToolCallRequest};
 pub use openai_compat::OpenAiCompatProvider;
-pub use registry::{ProviderSpec, find_provider_for_model};
+pub use registry::{find_provider_for_model, ProviderSpec};

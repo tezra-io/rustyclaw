@@ -1,8 +1,8 @@
 [package]
-name = "nanobot"
+name = "rustyclaw"
 version = "0.1.0"
 edition = "2021"
-description = "A lightweight personal AI assistant framework"
+description = "An ultra-lightweight personal AI assistant — nanobot rewritten in Rust"
 license = "MIT"
 rust-version = "1.75"
 
@@ -11,7 +11,7 @@ rust-version = "1.75"
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "multipart"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

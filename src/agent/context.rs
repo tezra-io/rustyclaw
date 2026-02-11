@@ -1,17 +1,10 @@
-use std::path::PathBuf;
 use tracing::debug;
 
 use crate::config::schema::Config;
 use crate::providers::base::ChatMessage;
 
 /// Files loaded into the system prompt (from workspace).
-const BOOTSTRAP_FILES: &[&str] = &[
-    "AGENTS.md",
-    "SOUL.md",
-    "USER.md",
-    "TOOLS.md",
-    "IDENTITY.md",
-];
+const BOOTSTRAP_FILES: &[&str] = &["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"];
 
 /// Builds the message context for an LLM call.
 pub struct ContextBuilder<'a> {

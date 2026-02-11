@@ -4,7 +4,7 @@ use tracing::{debug, error, info, warn};
 use crate::bus::events::{InboundMessage, OutboundMessage};
 use crate::bus::queue::MessageBus;
 use crate::config::schema::Config;
-use crate::providers::base::{ChatMessage, LlmProvider, LlmResponse};
+use crate::providers::base::{ChatMessage, LlmProvider};
 use crate::session::SessionManager;
 use crate::tools::base::ToolRegistry;
 

@@ -24,13 +24,13 @@ pub enum NanobotError {
     Io(#[from] std::io::Error),
 
     #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 
     #[error("websocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(String),
 }
 
 pub type Result<T> = std::result::Result<T, NanobotError>;

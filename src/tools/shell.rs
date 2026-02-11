@@ -28,7 +28,9 @@ pub struct ExecTool {
 
 #[async_trait]
 impl super::base::Tool for ExecTool {
-    fn name(&self) -> &str { "exec" }
+    fn name(&self) -> &str {
+        "exec"
+    }
 
     fn description(&self) -> &str {
         "Execute a shell command and return its output."
@@ -61,19 +63,19 @@ impl super::base::Tool for ExecTool {
             }
         }
 
-        // Path traversal check
-        if let Some(dir) = &self.allowed_dir {
-            if cmd.contains("../") {
-                let canonical = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
-                debug!("Checking path traversal against {}", canonical.display());
-            }
-        }
-
         debug!("exec: {}", cmd);
+
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(cmd);
+
+        // Set working directory to workspace if restricted
+        if let Some(dir) = &self.allowed_dir {
+            command.current_dir(dir);
+        }
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(self.timeout_secs),
-            Command::new("sh").arg("-c").arg(cmd).output(),
+            command.output(),
         )
         .await
         .map_err(|_| {
@@ -82,7 +84,7 @@ impl super::base::Tool for ExecTool {
                 self.timeout_secs
             ))
         })?
-        .map_err(|e| crate::error::NanobotError::Io(e))?;
+        .map_err(crate::error::NanobotError::Io)?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

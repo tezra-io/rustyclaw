@@ -55,7 +55,7 @@ impl super::base::Channel for DiscordChannel {
         let body = serde_json::json!({ "content": msg.content });
 
         // Retry on rate limit (429)
-        for attempt in 0..3 {
+        for _attempt in 0..3 {
             let resp = client
                 .post(&url)
                 .header("Authorization", format!("Bot {}", self.config.token))
@@ -64,16 +64,16 @@ impl super::base::Channel for DiscordChannel {
                 .await
                 .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
 
-            if resp.status().as_u16() == 429 {
+            let status = resp.status();
+
+            if status.as_u16() == 429 {
                 if let Ok(data) = resp.json::<serde_json::Value>().await {
                     let retry_after = data["retry_after"].as_f64().unwrap_or(1.0);
                     warn!("Discord rate limited, retrying in {}s", retry_after);
                     tokio::time::sleep(std::time::Duration::from_secs_f64(retry_after)).await;
                     continue;
                 }
-            }
-
-            if resp.status().is_success() {
+            } else if status.is_success() {
                 return Ok(());
             } else {
                 let text = resp.text().await.unwrap_or_default();
@@ -93,10 +93,9 @@ impl super::base::Channel for DiscordChannel {
 impl DiscordChannel {
     /// Main gateway WebSocket loop handling Discord protocol.
     async fn gateway_loop(&self) -> crate::error::Result<()> {
-        let (ws_stream, _) =
-            tokio_tungstenite::connect_async(&self.config.gateway_url)
-                .await
-                .map_err(|e| crate::error::NanobotError::WebSocket(e.to_string()))?;
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&self.config.gateway_url)
+            .await
+            .map_err(|e| crate::error::NanobotError::WebSocket(e.to_string()))?;
 
         let (mut write, mut read) = ws_stream.split();
         let mut sequence: Option<u64> = None;
@@ -105,8 +104,8 @@ impl DiscordChannel {
             let msg = msg.map_err(|e| crate::error::NanobotError::WebSocket(e.to_string()))?;
 
             if let WsMessage::Text(text) = msg {
-                let payload: serde_json::Value = serde_json::from_str(&text)
-                    .map_err(|e| crate::error::NanobotError::Json(e.into()))?;
+                let payload: serde_json::Value =
+                    serde_json::from_str(&text).map_err(crate::error::NanobotError::Json)?;
 
                 let op = payload["op"].as_u64().unwrap_or(0);
                 if let Some(s) = payload["s"].as_u64() {
@@ -116,9 +115,7 @@ impl DiscordChannel {
                 match op {
                     10 => {
                         // HELLO — start heartbeat and identify
-                        let interval = payload["d"]["heartbeat_interval"]
-                            .as_u64()
-                            .unwrap_or(45000);
+                        let interval = payload["d"]["heartbeat_interval"].as_u64().unwrap_or(45000);
 
                         // Identify
                         let identify = serde_json::json!({
@@ -128,20 +125,17 @@ impl DiscordChannel {
                                 "intents": self.config.intents,
                                 "properties": {
                                     "os": "linux",
-                                    "browser": "nanobot",
-                                    "device": "nanobot"
+                                    "browser": "rustyclaw",
+                                    "device": "rustyclaw"
                                 }
                             }
                         });
 
-                        write
-                            .send(WsMessage::Text(identify.to_string().into()))
-                            .await
-                            .ok();
+                        write.send(WsMessage::Text(identify.to_string())).await.ok();
 
-                        // Start heartbeat task
-                        let seq = sequence;
-                        // TODO: Spawn heartbeat task with interval
+                        // Heartbeat is handled inline below (op=1 request)
+                        // The server sends op=1 when it wants a heartbeat
+                        debug!("Discord HELLO received, heartbeat_interval={}ms", interval);
                     }
                     0 => {
                         // Dispatch event
@@ -172,6 +166,15 @@ impl DiscordChannel {
                         // RECONNECT or INVALID_SESSION
                         warn!("Discord requested reconnect (op={})", op);
                         break;
+                    }
+                    1 => {
+                        // Server requesting heartbeat — respond with op=1
+                        let hb = serde_json::json!({
+                            "op": 1,
+                            "d": sequence,
+                        });
+                        write.send(WsMessage::Text(hb.to_string())).await.ok();
+                        debug!("Sent heartbeat (seq={:?})", sequence);
                     }
                     11 => {
                         // HEARTBEAT_ACK — no action needed

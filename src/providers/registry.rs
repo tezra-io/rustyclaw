@@ -127,8 +127,5 @@ pub fn find_provider_by_name(name: &str) -> Option<&'static ProviderSpec> {
 
 /// Strip the provider prefix from a model name (e.g., "openai/gpt-4o" → "gpt-4o").
 pub fn strip_prefix(model: &str) -> &str {
-    model
-        .find('/')
-        .map(|i| &model[i + 1..])
-        .unwrap_or(model)
+    model.find('/').map(|i| &model[i + 1..]).unwrap_or(model)
 }

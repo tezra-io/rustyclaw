@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use chrono::Utc;
+use std::path::PathBuf;
 use tracing::debug;
 
 /// Simple file-based memory store.
@@ -29,13 +29,17 @@ impl MemoryStore {
     /// Read today's daily note.
     pub fn today_note(&self) -> Option<String> {
         let path = self.today_path();
-        std::fs::read_to_string(&path).ok().filter(|s| !s.is_empty())
+        std::fs::read_to_string(&path)
+            .ok()
+            .filter(|s| !s.is_empty())
     }
 
     /// Read long-term memory.
     pub fn long_term(&self) -> Option<String> {
         let path = self.memory_path();
-        std::fs::read_to_string(&path).ok().filter(|s| !s.is_empty())
+        std::fs::read_to_string(&path)
+            .ok()
+            .filter(|s| !s.is_empty())
     }
 
     /// Get memory context for the system prompt.

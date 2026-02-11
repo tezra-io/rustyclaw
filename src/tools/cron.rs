@@ -1,20 +1,22 @@
 use async_trait::async_trait;
 
 /// Tool for managing scheduled cron jobs.
+#[derive(Default)]
 pub struct CronTool {
-    // Reference to CronService will be added during integration.
     _placeholder: (),
 }
 
 impl CronTool {
     pub fn new() -> Self {
-        Self { _placeholder: () }
+        Self::default()
     }
 }
 
 #[async_trait]
 impl super::base::Tool for CronTool {
-    fn name(&self) -> &str { "cron" }
+    fn name(&self) -> &str {
+        "cron"
+    }
 
     fn description(&self) -> &str {
         "Manage scheduled tasks: add, list, or remove cron jobs."

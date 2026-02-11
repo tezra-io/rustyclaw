@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use tracing::{debug, error, info};
+use tracing::info;
 
 use super::types::{CronJob, CronStore};
 
@@ -28,8 +28,8 @@ impl CronService {
     }
 
     fn save_store(&self) -> crate::error::Result<()> {
-        let json = serde_json::to_string_pretty(&self.store)
-            .map_err(|e| crate::error::NanobotError::Json(e.into()))?;
+        let json =
+            serde_json::to_string_pretty(&self.store).map_err(crate::error::NanobotError::Json)?;
         std::fs::write(&self.store_path, json)?;
         Ok(())
     }

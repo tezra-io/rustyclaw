@@ -82,9 +82,11 @@ impl LlmProvider for OpenAiCompatProvider {
             req = req.header(k, v);
         }
 
-        let resp = req.json(&body).send().await.map_err(|e| {
-            crate::error::NanobotError::Http(e.to_string())
-        })?;
+        let resp = req
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -96,9 +98,10 @@ impl LlmProvider for OpenAiCompatProvider {
             )));
         }
 
-        let data: serde_json::Value = resp.json().await.map_err(|e| {
-            crate::error::NanobotError::Json(e.into())
-        })?;
+        let data: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| crate::error::NanobotError::Http(e.to_string()))?;
 
         parse_response(data)
     }
