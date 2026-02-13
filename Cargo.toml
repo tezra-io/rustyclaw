@@ -59,6 +59,12 @@ async-trait = "0.1"
 # Hash chain (tamper-proof memory ledger)
 sha2 = "0.10"
 
+# YAML parsing (agent definition frontmatter)
+serde_yaml = "0.9"
+
+# File-based log rotation
+tracing-appender = "0.2"
+
 # Path expansion (~/ handling)
 shellexpand = "3"
 dirs = "5"

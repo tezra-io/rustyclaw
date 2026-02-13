@@ -21,7 +21,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Send a single prompt or start interactive chat.
-    Agent {
+    Chat {
         /// The prompt to send (omit for interactive mode).
         #[arg(short, long)]
         message: Option<String>,
@@ -38,11 +38,17 @@ enum Commands {
         model: Option<String>,
     },
 
-    /// Show agent status and configuration.
+    /// Show global status dashboard.
     Status,
 
     /// Run interactive onboarding setup.
     Onboard,
+
+    /// Manage worker agents.
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
 
     /// Manage channels.
     Channels {
@@ -55,6 +61,9 @@ enum Commands {
         #[command(subcommand)]
         action: CronAction,
     },
+
+    /// Validate config, API keys, agents, and ledger integrity.
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -63,6 +72,33 @@ enum ChannelAction {
     Status,
     /// Login to a channel.
     Login { channel: String },
+}
+
+#[derive(Subcommand)]
+enum AgentAction {
+    /// List all agent definitions.
+    List,
+    /// Show detailed status for an agent.
+    Status {
+        /// Agent name.
+        name: String,
+    },
+    /// Validate agent definitions.
+    Validate {
+        /// Agent name (or omit for all).
+        name: Option<String>,
+    },
+    /// Show recent logs for an agent.
+    Logs {
+        /// Agent name.
+        name: String,
+        /// Filter by log level (error, warn, info, debug).
+        #[arg(long)]
+        level: Option<String>,
+        /// Max lines to show.
+        #[arg(long, default_value = "50")]
+        lines: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -84,7 +120,7 @@ enum CronAction {
 impl Cli {
     pub async fn run(self) -> anyhow::Result<()> {
         match self.command {
-            Commands::Agent { message, model } => {
+            Commands::Chat { message, model } => {
                 let config = crate::config::load_config();
 
                 let agent = build_agent_stack(&config, model.as_deref())?;
@@ -203,6 +239,24 @@ impl Cli {
                         "disabled"
                     }
                 );
+
+                // Agent definitions
+                let (agents, _warnings) = crate::agent::definition::load_all_agents();
+                if agents.is_empty() {
+                    println!("\nAgents:    (none defined)");
+                } else {
+                    println!("\nAgents:");
+                    println!("  {:<20} {:<15} DESCRIPTION", "NAME", "MODEL");
+                    for agent in &agents {
+                        let model = agent.model.as_deref().unwrap_or("inherit");
+                        let desc = if agent.description.len() > 50 {
+                            format!("{}...", &agent.description[..47])
+                        } else {
+                            agent.description.clone()
+                        };
+                        println!("  {:<20} {:<15} {}", agent.name, model, desc);
+                    }
+                }
 
                 Ok(())
             }
@@ -375,8 +429,248 @@ impl Cli {
                 }
                 Ok(())
             }
+
+            Commands::Agent { action } => handle_agent_command(action),
+
+            Commands::Doctor => handle_doctor(),
         }
     }
+}
+
+/// Handle agent management subcommands.
+fn handle_agent_command(action: AgentAction) -> anyhow::Result<()> {
+    match action {
+        AgentAction::List => {
+            let (agents, _warnings) = crate::agent::definition::load_all_agents();
+            if agents.is_empty() {
+                println!("No agent definitions found.");
+                println!("  Global:  ~/.rustyclaw/agents/");
+                println!("  Project: .rustyclaw/agents/");
+            } else {
+                println!(
+                    "{:<20} {:<15} {:<10} DESCRIPTION",
+                    "NAME", "MODEL", "MEMORY"
+                );
+                println!("{}", "-".repeat(80));
+                for agent in &agents {
+                    let model = agent.model.as_deref().unwrap_or("inherit");
+                    let memory = match agent.memory_mode {
+                        crate::agent::MemoryMode::Isolated => "isolated",
+                        crate::agent::MemoryMode::Shared => "shared",
+                    };
+                    let desc = if agent.description.len() > 35 {
+                        format!("{}...", &agent.description[..32])
+                    } else {
+                        agent.description.clone()
+                    };
+                    println!("{:<20} {:<15} {:<10} {}", agent.name, model, memory, desc);
+                }
+                println!("\n{} agent(s) loaded.", agents.len());
+            }
+            Ok(())
+        }
+
+        AgentAction::Status { name } => {
+            let (agents, _) = crate::agent::definition::load_all_agents();
+            let agent = agents.iter().find(|a| a.name == name);
+
+            match agent {
+                Some(a) => {
+                    println!("Agent: {}", a.name);
+                    println!("Description: {}", a.description);
+                    println!(
+                        "Model: {}",
+                        a.model.as_deref().unwrap_or("inherit (master's model)")
+                    );
+                    println!(
+                        "Memory: {}",
+                        match a.memory_mode {
+                            crate::agent::MemoryMode::Isolated => "isolated",
+                            crate::agent::MemoryMode::Shared => "shared",
+                        }
+                    );
+                    if let Some(ref tools) = a.tools {
+                        println!("Tools: {}", tools.join(", "));
+                    } else {
+                        println!("Tools: (all — inherits master's tools)");
+                    }
+                    if !a.context_files.is_empty() {
+                        println!("Context files: {}", a.context_files.join(", "));
+                    }
+                    if !a.system_prompt.is_empty() {
+                        let preview = if a.system_prompt.len() > 200 {
+                            format!("{}...", &a.system_prompt[..197])
+                        } else {
+                            a.system_prompt.clone()
+                        };
+                        println!("\nSystem prompt:\n{}", preview);
+                    }
+                }
+                None => {
+                    eprintln!("Agent '{}' not found.", name);
+                    std::process::exit(1);
+                }
+            }
+            Ok(())
+        }
+
+        AgentAction::Validate { name } => {
+            let (agents, warnings) = crate::agent::definition::load_all_agents();
+
+            let relevant_warnings: Vec<_> = match &name {
+                Some(n) => warnings.iter().filter(|w| w.file.contains(n)).collect(),
+                None => warnings.iter().collect(),
+            };
+
+            let relevant_agents: Vec<_> = match &name {
+                Some(n) => agents.iter().filter(|a| a.name == *n).collect(),
+                None => agents.iter().collect(),
+            };
+
+            if let Some(n) = &name {
+                if relevant_agents.is_empty() && relevant_warnings.is_empty() {
+                    eprintln!("Agent '{}' not found.", n);
+                    std::process::exit(1);
+                }
+            }
+
+            let mut has_issues = false;
+
+            for w in &relevant_warnings {
+                has_issues = true;
+                eprintln!("  WARNING: {}", w);
+            }
+
+            for agent in &relevant_agents {
+                println!("  OK: {} — {}", agent.name, agent.description);
+            }
+
+            if !has_issues && !relevant_agents.is_empty() {
+                println!(
+                    "\nAll {} agent(s) validated successfully.",
+                    relevant_agents.len()
+                );
+            } else if has_issues {
+                println!("\n{} warning(s) found.", relevant_warnings.len());
+            }
+
+            Ok(())
+        }
+
+        AgentAction::Logs { name, level, lines } => {
+            let log_lines = crate::logging::read_agent_logs(&name, lines, level.as_deref());
+
+            if log_lines.is_empty() {
+                println!("No log entries found for agent '{}'.", name);
+            } else {
+                for line in &log_lines {
+                    println!("{}", line);
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Run diagnostics: config, API key, agents, ledger integrity.
+fn handle_doctor() -> anyhow::Result<()> {
+    println!("RustyClaw Doctor\n");
+    let mut issues = 0;
+
+    // 1. Config
+    let config_path = crate::config::get_config_path();
+    if config_path.exists() {
+        println!("  [OK] Config: {}", config_path.display());
+    } else {
+        println!("  [!!] Config not found: {}", config_path.display());
+        println!("       Run: rustyclaw onboard");
+        issues += 1;
+    }
+
+    let config = crate::config::load_config();
+
+    // 2. Workspace
+    let workspace = config.workspace_path();
+    if workspace.is_dir() {
+        println!("  [OK] Workspace: {}", workspace.display());
+    } else {
+        println!("  [!!] Workspace not found: {}", workspace.display());
+        println!("       Run: rustyclaw onboard");
+        issues += 1;
+    }
+
+    // 3. Provider / API key
+    if let Some(name) = config.get_provider_name(None) {
+        println!("  [OK] Provider: {} (API key set)", name);
+    } else {
+        println!("  [!!] No LLM provider configured (no API key)");
+        let model = &config.agents.defaults.model;
+        if let Some(spec) = find_provider_for_model(model) {
+            println!("       Set: export {}=your-key", spec.env_key);
+        }
+        issues += 1;
+    }
+
+    // 4. Agent definitions
+    let (agents, warnings) = crate::agent::definition::load_all_agents();
+    if agents.is_empty() {
+        println!("  [--] No agent definitions found (optional)");
+    } else {
+        println!("  [OK] {} agent definition(s) loaded", agents.len());
+    }
+    for w in &warnings {
+        println!("  [!!] Agent warning: {}", w);
+        issues += 1;
+    }
+
+    // 5. Ledger integrity
+    let memory_dir = workspace.join("memory");
+    if memory_dir.is_dir() {
+        match crate::agent::ledger::MemoryLedger::new(memory_dir) {
+            Ok(ledger) => match ledger.verify_chain() {
+                Ok(crate::agent::ledger::ChainStatus::Ok { entries }) => {
+                    println!("  [OK] Master ledger: {} entries, chain intact", entries);
+                }
+                Ok(crate::agent::ledger::ChainStatus::Broken {
+                    at_seq,
+                    expected,
+                    got,
+                }) => {
+                    println!("  [!!] Master ledger: chain broken at seq {}", at_seq);
+                    println!("       Expected: {}", expected);
+                    println!("       Got:      {}", got);
+                    issues += 1;
+                }
+                Err(e) => {
+                    println!("  [!!] Master ledger verify error: {}", e);
+                    issues += 1;
+                }
+            },
+            Err(e) => {
+                println!("  [!!] Cannot open master ledger: {}", e);
+                issues += 1;
+            }
+        }
+    } else {
+        println!("  [--] No memory ledger yet (will be created on first use)");
+    }
+
+    // 6. Log directory
+    let log_dir = crate::logging::log_base_dir();
+    if log_dir.is_dir() {
+        println!("  [OK] Logs: {}", log_dir.display());
+    } else {
+        println!("  [--] Logs directory not found (will be created on run)");
+    }
+
+    println!();
+    if issues == 0 {
+        println!("All checks passed.");
+    } else {
+        println!("{} issue(s) found.", issues);
+    }
+
+    Ok(())
 }
 
 /// Build the full agent stack for CLI usage.

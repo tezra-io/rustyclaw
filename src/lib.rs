@@ -6,6 +6,7 @@ pub mod config;
 pub mod cron;
 pub mod error;
 pub mod heartbeat;
+pub mod logging;
 pub mod providers;
 pub mod session;
 pub mod tools;
