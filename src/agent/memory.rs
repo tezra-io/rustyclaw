@@ -1,18 +1,25 @@
+use anyhow::Result;
 use chrono::Utc;
 use std::path::PathBuf;
 use tracing::debug;
+
+use super::ledger::{ChainStatus, MemoryLedger};
 
 /// Simple file-based memory store.
 ///
 /// - Daily notes: `notes/YYYY-MM-DD.md`
 /// - Long-term memory: `MEMORY.md`
+/// - Tamper-proof ledger: `memory/ledger.*.jsonl`
 pub struct MemoryStore {
     workspace: PathBuf,
+    ledger: MemoryLedger,
 }
 
 impl MemoryStore {
-    pub fn new(workspace: PathBuf) -> Self {
-        Self { workspace }
+    pub fn new(workspace: PathBuf) -> Result<Self> {
+        let ledger_dir = workspace.join("memory");
+        let ledger = MemoryLedger::new(ledger_dir)?;
+        Ok(Self { workspace, ledger })
     }
 
     /// Get the path to today's daily note.
@@ -40,6 +47,30 @@ impl MemoryStore {
         std::fs::read_to_string(&path)
             .ok()
             .filter(|s| !s.is_empty())
+    }
+
+    /// Store a fact in the tamper-proof ledger (append-only, no overwrite).
+    pub fn store_fact(&mut self, key: &str, value: &str) -> Result<String> {
+        self.ledger
+            .append("fact", serde_json::json!({"key": key, "value": value}))
+    }
+
+    /// Redact a previous entry by appending a tombstone (no delete).
+    pub fn redact(&mut self, seq: u64) -> Result<String> {
+        self.ledger.append(
+            "tombstone",
+            serde_json::json!({"ref_seq": seq, "reason": "redacted"}),
+        )
+    }
+
+    /// Verify the integrity of the ledger hash chain.
+    pub fn verify(&self) -> Result<ChainStatus> {
+        self.ledger.verify_chain()
+    }
+
+    /// Look up the latest value for a fact key from the ledger.
+    pub fn get_fact(&self, key: &str) -> Option<&str> {
+        self.ledger.get_latest_fact(key)
     }
 
     /// Get memory context for the system prompt.

@@ -56,6 +56,9 @@ regex = "1"
 # Async trait support
 async-trait = "0.1"
 
+# Hash chain (tamper-proof memory ledger)
+sha2 = "0.10"
+
 # Path expansion (~/ handling)
 shellexpand = "3"
 dirs = "5"

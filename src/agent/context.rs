@@ -74,9 +74,15 @@ impl<'a> ContextBuilder<'a> {
         }
 
         // Memory
-        let memory = crate::agent::memory::MemoryStore::new(workspace.clone());
-        if let Some(mem) = memory.get_context() {
-            parts.push(mem);
+        match crate::agent::memory::MemoryStore::new(workspace.clone()) {
+            Ok(memory) => {
+                if let Some(mem) = memory.get_context() {
+                    parts.push(mem);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize memory store: {}", e);
+            }
         }
 
         // Extra sections
