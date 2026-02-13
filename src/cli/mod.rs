@@ -441,35 +441,35 @@ fn build_tool_registry(config: &Config, bus: Option<&MessageBus>) -> ToolRegistr
     };
 
     // Filesystem tools
-    registry.register(Box::new(crate::tools::filesystem::ReadFileTool {
+    registry.register(Arc::new(crate::tools::filesystem::ReadFileTool {
         allowed_dir: workspace.clone(),
     }));
-    registry.register(Box::new(crate::tools::filesystem::WriteFileTool {
+    registry.register(Arc::new(crate::tools::filesystem::WriteFileTool {
         allowed_dir: workspace.clone(),
     }));
-    registry.register(Box::new(crate::tools::filesystem::EditFileTool {
+    registry.register(Arc::new(crate::tools::filesystem::EditFileTool {
         allowed_dir: workspace.clone(),
     }));
-    registry.register(Box::new(crate::tools::filesystem::ListDirTool {
+    registry.register(Arc::new(crate::tools::filesystem::ListDirTool {
         allowed_dir: workspace.clone(),
     }));
 
     // Shell exec
-    registry.register(Box::new(crate::tools::shell::ExecTool {
+    registry.register(Arc::new(crate::tools::shell::ExecTool {
         allowed_dir: workspace.clone(),
         timeout_secs: config.tools.exec.timeout,
     }));
 
     // Web tools
-    registry.register(Box::new(crate::tools::web::WebSearchTool {
+    registry.register(Arc::new(crate::tools::web::WebSearchTool {
         api_key: config.tools.web.search.api_key.clone(),
         max_results: config.tools.web.search.max_results,
     }));
-    registry.register(Box::new(crate::tools::web::WebFetchTool));
+    registry.register(Arc::new(crate::tools::web::WebFetchTool));
 
     // Message tool (if bus is available)
     if let Some(bus) = bus {
-        registry.register(Box::new(crate::tools::message::MessageTool::new(
+        registry.register(Arc::new(crate::tools::message::MessageTool::new(
             bus.outbound_sender(),
         )));
     }

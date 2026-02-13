@@ -3,7 +3,7 @@ use chrono::Utc;
 use std::path::PathBuf;
 use tracing::debug;
 
-use super::ledger::{ChainStatus, MemoryLedger};
+use super::ledger::{AsyncMemoryLedger, ChainStatus, MemoryLedger};
 
 /// Simple file-based memory store.
 ///
@@ -104,5 +104,52 @@ impl MemoryStore {
             debug!("Loaded {} memory sections", parts.len());
             Some(parts.join("\n\n"))
         }
+    }
+}
+
+/// Async-safe memory store that wraps ledger operations in spawn_blocking.
+/// Use this from async agent code instead of MemoryStore directly.
+pub struct AsyncMemoryStore {
+    workspace: PathBuf,
+    ledger: AsyncMemoryLedger,
+}
+
+impl AsyncMemoryStore {
+    pub fn new(workspace: PathBuf) -> Result<Self> {
+        let ledger_dir = workspace.join("memory");
+        let ledger = AsyncMemoryLedger::new(ledger_dir)?;
+        Ok(Self { workspace, ledger })
+    }
+
+    /// Store a fact in the tamper-proof ledger (async-safe).
+    pub async fn store_fact(&self, key: &str, value: &str) -> anyhow::Result<String> {
+        self.ledger
+            .append("fact", serde_json::json!({"key": key, "value": value}))
+            .await
+    }
+
+    /// Redact a previous entry by appending a tombstone (async-safe).
+    pub async fn redact(&self, seq: u64) -> anyhow::Result<String> {
+        self.ledger
+            .append(
+                "tombstone",
+                serde_json::json!({"ref_seq": seq, "reason": "redacted"}),
+            )
+            .await
+    }
+
+    /// Verify the integrity of the ledger hash chain (async-safe).
+    pub async fn verify(&self) -> anyhow::Result<ChainStatus> {
+        self.ledger.verify_chain().await
+    }
+
+    /// Look up the latest value for a fact key (async-safe).
+    pub async fn get_fact(&self, key: &str) -> Option<String> {
+        self.ledger.get_latest_fact(key).await
+    }
+
+    /// Get the workspace path.
+    pub fn workspace(&self) -> &PathBuf {
+        &self.workspace
     }
 }

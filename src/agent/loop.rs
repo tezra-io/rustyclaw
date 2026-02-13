@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::bus::events::{InboundMessage, OutboundMessage};
@@ -10,6 +11,7 @@ use crate::tools::base::ToolRegistry;
 
 /// Core agent loop: receives messages → builds context → calls LLM → executes tools → responds.
 pub struct AgentLoop {
+    agent_name: String,
     config: Arc<Config>,
     bus: Arc<MessageBus>,
     provider: Arc<dyn LlmProvider>,
@@ -28,6 +30,7 @@ impl AgentLoop {
     ) -> Self {
         let max_iterations = config.agents.defaults.max_tool_iterations;
         Self {
+            agent_name: "master".to_string(),
             config,
             bus,
             provider,
@@ -37,16 +40,36 @@ impl AgentLoop {
         }
     }
 
-    /// Run the main loop, consuming inbound messages until the bus is closed.
+    /// Set the agent name (for logging and tracing).
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.agent_name = name.to_string();
+        self
+    }
+
+    /// Run the main loop, consuming inbound messages from the shared bus.
+    /// This is the convenience method used by the master agent.
     pub async fn run(&self) {
-        info!("Agent loop started");
+        info!(agent = %self.agent_name, "Agent loop started");
         while let Some(msg) = self.bus.consume_inbound().await {
-            debug!("Processing message from {}:{}", msg.channel, msg.chat_id);
+            debug!(agent = %self.agent_name, "Processing message from {}:{}", msg.channel, msg.chat_id);
             if let Err(e) = self.handle_message(msg).await {
-                error!("Error handling message: {}", e);
+                error!(agent = %self.agent_name, "Error handling message: {}", e);
             }
         }
-        info!("Agent loop stopped");
+        info!(agent = %self.agent_name, "Agent loop stopped");
+    }
+
+    /// Run the loop consuming messages from a dedicated receiver.
+    /// Used by worker agents that have their own per-agent channel.
+    pub async fn run_with_receiver(&self, mut rx: mpsc::Receiver<InboundMessage>) {
+        info!(agent = %self.agent_name, "Agent loop started (dedicated channel)");
+        while let Some(msg) = rx.recv().await {
+            debug!(agent = %self.agent_name, "Processing message from {}:{}", msg.channel, msg.chat_id);
+            if let Err(e) = self.handle_message(msg).await {
+                error!(agent = %self.agent_name, "Error handling message: {}", e);
+            }
+        }
+        info!(agent = %self.agent_name, "Agent loop stopped (dedicated channel)");
     }
 
     /// Handle a single inbound message.
@@ -75,7 +98,7 @@ impl AgentLoop {
         let mut iterations = 0;
         loop {
             if iterations >= self.max_iterations {
-                warn!("Max tool iterations ({}) reached", self.max_iterations);
+                warn!(agent = %self.agent_name, "Max tool iterations ({}) reached", self.max_iterations);
                 break;
             }
 

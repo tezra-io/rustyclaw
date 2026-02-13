@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Trait for agent tools.
 ///
@@ -33,7 +34,7 @@ pub trait Tool: Send + Sync {
 
 /// Registry of available tools.
 pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn Tool>>,
+    tools: HashMap<String, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -44,12 +45,12 @@ impl ToolRegistry {
     }
 
     /// Register a tool.
-    pub fn register(&mut self, tool: Box<dyn Tool>) {
+    pub fn register(&mut self, tool: Arc<dyn Tool>) {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
     /// Unregister a tool by name.
-    pub fn unregister(&mut self, name: &str) -> Option<Box<dyn Tool>> {
+    pub fn unregister(&mut self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.remove(name)
     }
 
@@ -79,6 +80,15 @@ impl ToolRegistry {
     /// List tool names.
     pub fn names(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Create a scoped registry containing only the named tools (shared via Arc).
+    pub fn scoped(&self, allowed: &[&str]) -> ToolRegistry {
+        let tools = allowed
+            .iter()
+            .filter_map(|name| self.tools.get(*name).map(|t| (name.to_string(), t.clone())))
+            .collect();
+        ToolRegistry { tools }
     }
 }
 

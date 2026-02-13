@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tracing::debug;
 
 const SEGMENT_MAX_ENTRIES: u64 = 10_000;
@@ -242,6 +243,89 @@ fn compute_hash(
 mod hex {
     pub fn encode(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+}
+
+/// Async-safe wrapper around MemoryLedger.
+/// All blocking file I/O is dispatched via `tokio::task::spawn_blocking`
+/// so it does not stall the async executor.
+pub struct AsyncMemoryLedger {
+    inner: Arc<Mutex<MemoryLedger>>,
+}
+
+impl AsyncMemoryLedger {
+    /// Create a new async ledger, opening (or creating) the underlying ledger.
+    pub fn new(dir: PathBuf) -> Result<Self> {
+        let ledger = MemoryLedger::new(dir)?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(ledger)),
+        })
+    }
+
+    /// Wrap an existing MemoryLedger.
+    pub fn from_sync(ledger: MemoryLedger) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(ledger)),
+        }
+    }
+
+    /// Append an entry to the ledger. Returns the entry's hash.
+    pub async fn append(
+        &self,
+        entry_type: &str,
+        content: serde_json::Value,
+    ) -> anyhow::Result<String> {
+        let ledger = self.inner.clone();
+        let et = entry_type.to_string();
+        tokio::task::spawn_blocking(move || {
+            ledger
+                .lock()
+                .map_err(|e| anyhow::anyhow!("ledger lock poisoned: {}", e))?
+                .append(&et, content)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Verify the hash chain integrity.
+    pub async fn verify_chain(&self) -> anyhow::Result<ChainStatus> {
+        let ledger = self.inner.clone();
+        tokio::task::spawn_blocking(move || {
+            ledger
+                .lock()
+                .map_err(|e| anyhow::anyhow!("ledger lock poisoned: {}", e))?
+                .verify_chain()
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Look up the latest value for a fact key.
+    pub async fn get_latest_fact(&self, key: &str) -> Option<String> {
+        let ledger = self.inner.clone();
+        let k = key.to_string();
+        tokio::task::spawn_blocking(move || {
+            ledger
+                .lock()
+                .ok()
+                .and_then(|l| l.get_latest_fact(&k).map(|s| s.to_string()))
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// Rebuild the in-memory index from all segments on disk.
+    pub async fn rebuild_index(&self) -> anyhow::Result<()> {
+        let ledger = self.inner.clone();
+        tokio::task::spawn_blocking(move || {
+            ledger
+                .lock()
+                .map_err(|e| anyhow::anyhow!("ledger lock poisoned: {}", e))?
+                .rebuild_index()
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
     }
 }
 

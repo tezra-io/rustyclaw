@@ -11,6 +11,9 @@ pub enum RustyClawError {
     #[error("tool error: {0}")]
     Tool(String),
 
+    #[error("agent error: {0}")]
+    Agent(String),
+
     #[error("channel error: {0}")]
     Channel(String),
 
@@ -31,6 +34,9 @@ pub enum RustyClawError {
 
     #[error("websocket error: {0}")]
     WebSocket(String),
+
+    #[error("task join error: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
 
 pub type Result<T> = std::result::Result<T, RustyClawError>;
