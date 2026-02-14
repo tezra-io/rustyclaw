@@ -73,6 +73,11 @@ dirs = "5"
 which = "7"
 dialoguer = "0.12.0"
 
+# Embeddings (local ONNX Runtime + tokenizer)
+ort = { version = "2.0.0-rc.11", features = ["ndarray", "load-dynamic"] }
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+ndarray = "0.16"
+
 [dev-dependencies]
 mockito = "1"
 assert_cmd = "2"

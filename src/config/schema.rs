@@ -20,6 +20,8 @@ pub struct Config {
     pub gateway: GatewayConfig,
     #[serde(skip_serializing_if = "ToolsConfig::is_default")]
     pub tools: ToolsConfig,
+    #[serde(skip_serializing_if = "EmbeddingsConfig::is_default")]
+    pub embeddings: EmbeddingsConfig,
 }
 
 impl Config {
@@ -510,5 +512,66 @@ impl Default for ExecToolConfig {
 impl ExecToolConfig {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+}
+
+// --- Embeddings Config ---
+
+/// Configuration for the embedding subsystem.
+///
+/// Controls which embedding provider is used for semantic memory search.
+/// The local provider (default) uses ONNX Runtime with all-MiniLM-L6-v2
+/// and requires no API key. The OpenAI provider is opt-in fallback only.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EmbeddingsConfig {
+    /// Provider name: "local" (default) or "openai".
+    pub provider: String,
+    /// Override the default model for the selected provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// OpenAI API key (only needed when provider is "openai").
+    /// Prefer setting `RUSTYCLAW_OPENAI_API_KEY` env var instead.
+    #[serde(skip_serializing, skip_serializing_if = "Option::is_none")]
+    pub openai_api_key: Option<String>,
+    /// Directory for caching model files (defaults to `~/.rustyclaw/models`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_dir: Option<String>,
+}
+
+impl Default for EmbeddingsConfig {
+    fn default() -> Self {
+        Self {
+            provider: "local".to_string(),
+            model: None,
+            openai_api_key: None,
+            cache_dir: None,
+        }
+    }
+}
+
+impl EmbeddingsConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Resolve the OpenAI API key from config or environment.
+    pub fn resolve_openai_key(&self) -> Option<String> {
+        self.openai_api_key
+            .clone()
+            .or_else(|| std::env::var("RUSTYCLAW_OPENAI_API_KEY").ok())
+    }
+
+    /// Resolve the model cache directory.
+    pub fn resolve_cache_dir(&self) -> PathBuf {
+        self.cache_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".rustyclaw")
+                    .join("models")
+            })
     }
 }

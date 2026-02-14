@@ -164,6 +164,14 @@ impl MemoryLedger {
         self.index.get(key).map(|s| s.as_str())
     }
 
+    /// Return all current facts as (key, value) pairs.
+    pub fn all_facts(&self) -> Vec<(String, String)> {
+        self.index
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     /// Rebuild the in-memory index (and sequence state) from all segments.
     pub fn rebuild_index(&mut self) -> Result<()> {
         self.index.clear();
@@ -313,6 +321,20 @@ impl AsyncMemoryLedger {
         .await
         .ok()
         .flatten()
+    }
+
+    /// Return all current facts as (key, value) pairs.
+    pub async fn get_all_facts(&self) -> Vec<(String, String)> {
+        let ledger = self.inner.clone();
+        tokio::task::spawn_blocking(move || {
+            ledger
+                .lock()
+                .ok()
+                .map(|l| l.all_facts())
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// Rebuild the in-memory index from all segments on disk.

@@ -4,6 +4,7 @@ pub mod channels;
 pub mod cli;
 pub mod config;
 pub mod cron;
+pub mod embeddings;
 pub mod error;
 pub mod heartbeat;
 pub mod logging;

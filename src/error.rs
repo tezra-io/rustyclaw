@@ -35,6 +35,9 @@ pub enum RustyClawError {
     #[error("websocket error: {0}")]
     WebSocket(String),
 
+    #[error("embedding error: {0}")]
+    Embedding(String),
+
     #[error("task join error: {0}")]
     Join(#[from] tokio::task::JoinError),
 }
