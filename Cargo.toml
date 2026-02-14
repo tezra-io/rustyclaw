@@ -71,6 +71,7 @@ dirs = "5"
 
 # Binary detection (skills requirement checking)
 which = "7"
+dialoguer = "0.12.0"
 
 [dev-dependencies]
 mockito = "1"

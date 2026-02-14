@@ -1,3 +1,5 @@
+mod init;
+
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
@@ -42,7 +44,7 @@ enum Commands {
     Status,
 
     /// Run interactive onboarding setup.
-    Onboard,
+    Init,
 
     /// Manage worker agents.
     Agent {
@@ -98,6 +100,18 @@ enum AgentAction {
         /// Max lines to show.
         #[arg(long, default_value = "50")]
         lines: usize,
+    },
+    /// Add a new agent (interactive template selection).
+    Add,
+    /// Edit an agent definition in $EDITOR.
+    Edit {
+        /// Agent name.
+        name: String,
+    },
+    /// Remove an agent definition.
+    Remove {
+        /// Agent name.
+        name: String,
     },
 }
 
@@ -261,96 +275,7 @@ impl Cli {
                 Ok(())
             }
 
-            Commands::Onboard => {
-                println!("Welcome to RustyClaw! Let's set things up.\n");
-
-                let mut config = crate::config::load_config();
-
-                // Interactive setup using rustyline
-                let mut rl = rustyline::DefaultEditor::new()
-                    .map_err(|e| anyhow::anyhow!("Failed to init editor: {}", e))?;
-
-                // Ask for model
-                let model = rl
-                    .readline(&format!(
-                        "Default model [{}]: ",
-                        config.agents.defaults.model
-                    ))
-                    .unwrap_or_default();
-                if !model.trim().is_empty() {
-                    config.agents.defaults.model = model.trim().to_string();
-                }
-
-                // Detect provider from model name (without requiring key to be set)
-                if let Some(spec) = find_provider_for_model(&config.agents.defaults.model) {
-                    let current_key = config
-                        .providers
-                        .by_name(spec.name)
-                        .map(|p| &p.api_key)
-                        .filter(|k| !k.is_empty());
-                    let hint = if current_key.is_some() {
-                        " (already set, press Enter to keep)"
-                    } else {
-                        ""
-                    };
-                    let key = rl
-                        .readline(&format!(
-                            "{} API key ({}){}: ",
-                            spec.name, spec.env_key, hint
-                        ))
-                        .unwrap_or_default();
-                    if !key.trim().is_empty() {
-                        set_provider_key(&mut config, spec.name, key.trim());
-                    }
-                } else {
-                    // No provider detected from model — ask for a generic API key
-                    println!(
-                        "Could not detect provider from model name '{}'.",
-                        config.agents.defaults.model
-                    );
-                    println!("You can set an API key manually in the config file.");
-                }
-
-                // Workspace
-                let workspace = rl
-                    .readline(&format!(
-                        "Workspace path [{}]: ",
-                        config.agents.defaults.workspace
-                    ))
-                    .unwrap_or_default();
-                if !workspace.trim().is_empty() {
-                    config.agents.defaults.workspace = workspace.trim().to_string();
-                }
-
-                // Ensure workspace exists
-                let ws_path = config.workspace_path();
-                std::fs::create_dir_all(&ws_path).ok();
-
-                // Create workspace template files (AGENTS.md, SOUL.md, USER.md, etc.)
-                create_workspace_templates(&ws_path);
-
-                // Save
-                crate::config::save_config(&config)
-                    .map_err(|e| anyhow::anyhow!("Failed to save config: {}", e))?;
-
-                println!(
-                    "\nConfiguration saved to {}",
-                    crate::config::get_config_path().display()
-                );
-                println!("\nNext steps:");
-                if config.get_provider_name(None).is_none() {
-                    if let Some(spec) = find_provider_for_model(&config.agents.defaults.model) {
-                        println!("  1. Set your API key: export {}=your-key", spec.env_key);
-                    } else {
-                        println!("  1. Set an API key in ~/.rustyclaw/config.json");
-                    }
-                    println!("  2. Test: rustyclaw agent -m 'Hello'");
-                } else {
-                    println!("  Run: rustyclaw agent -m 'Hello'");
-                }
-
-                Ok(())
-            }
+            Commands::Init => init::run_init(),
 
             Commands::Channels { action } => {
                 let config = crate::config::load_config();
@@ -569,6 +494,12 @@ fn handle_agent_command(action: AgentAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
+
+        AgentAction::Add => init::run_agent_add(),
+
+        AgentAction::Edit { name } => init::run_agent_edit(&name),
+
+        AgentAction::Remove { name } => init::run_agent_remove(&name),
     }
 }
 
@@ -842,65 +773,4 @@ fn set_provider_key(config: &mut Config, name: &str, key: &str) {
     }
 }
 
-/// Create default workspace template files matching nanobot's onboarding.
-fn create_workspace_templates(workspace: &std::path::Path) {
-    let templates: &[(&str, &str)] = &[
-        (
-            "AGENTS.md",
-            "# Agent Instructions\n\n\
-             You are a helpful AI assistant. Be concise, accurate, and friendly.\n\n\
-             ## Guidelines\n\n\
-             - Always explain what you're doing before taking actions\n\
-             - Ask for clarification when the request is ambiguous\n\
-             - Use tools to help accomplish tasks\n\
-             - Remember important information in your memory files\n",
-        ),
-        (
-            "SOUL.md",
-            "# Soul\n\n\
-             I am RustyClaw, a lightweight AI assistant.\n\n\
-             ## Personality\n\n\
-             - Helpful and friendly\n\
-             - Concise and to the point\n\
-             - Curious and eager to learn\n\n\
-             ## Values\n\n\
-             - Accuracy over speed\n\
-             - User privacy and safety\n\
-             - Transparency in actions\n",
-        ),
-        (
-            "USER.md",
-            "# User\n\n\
-             Information about the user goes here.\n\n\
-             ## Preferences\n\n\
-             - Communication style: (casual/formal)\n\
-             - Timezone: (your timezone)\n\
-             - Language: (your preferred language)\n",
-        ),
-    ];
-
-    for (filename, content) in templates {
-        let path = workspace.join(filename);
-        if !path.exists() {
-            if let Err(e) = std::fs::write(&path, content) {
-                eprintln!("  Warning: couldn't create {}: {}", filename, e);
-            } else {
-                println!("  Created {}", filename);
-            }
-        }
-    }
-
-    // Create memory directory
-    let memory_dir = workspace.join("memory");
-    std::fs::create_dir_all(&memory_dir).ok();
-    let memory_file = memory_dir.join("MEMORY.md");
-    if !memory_file.exists() {
-        std::fs::write(
-            &memory_file,
-            "# Long-term Memory\n\n\
-             This file stores important information that should persist across sessions.\n",
-        )
-        .ok();
-        println!("  Created memory/MEMORY.md");
-    }
-}
+// Workspace template creation moved to cli/init.rs

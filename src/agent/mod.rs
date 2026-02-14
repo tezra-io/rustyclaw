@@ -8,6 +8,7 @@ pub mod router;
 pub mod skills;
 pub mod subagent;
 pub mod supervisor;
+pub mod templates;
 pub mod tokens;
 
 pub use r#loop::AgentLoop;
