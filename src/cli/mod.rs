@@ -113,6 +113,16 @@ enum AgentAction {
         /// Agent name.
         name: String,
     },
+    /// Run an agent with a specific prompt (one-shot).
+    Run {
+        /// Agent name.
+        name: String,
+        /// Prompt to send to the agent.
+        prompt: String,
+        /// Model override.
+        #[arg(short = 'M', long)]
+        model: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -500,7 +510,75 @@ fn handle_agent_command(action: AgentAction) -> anyhow::Result<()> {
         AgentAction::Edit { name } => init::run_agent_edit(&name),
 
         AgentAction::Remove { name } => init::run_agent_remove(&name),
+
+        AgentAction::Run {
+            name,
+            prompt,
+            model,
+        } => handle_agent_run(&name, &prompt, model.as_deref()),
     }
+}
+
+/// Run an agent one-shot with a specific prompt.
+fn handle_agent_run(name: &str, prompt: &str, model_override: Option<&str>) -> anyhow::Result<()> {
+    use crate::agent::definition::parse_agent_file;
+
+    // Find the agent definition file
+    let global_dir = dirs::home_dir()
+        .map(|h| h.join(".rustyclaw").join("agents"))
+        .unwrap_or_default();
+    let project_dir = std::path::PathBuf::from(".rustyclaw/agents");
+
+    let filename = format!("{}.md", name);
+    let agent_path = if project_dir.join(&filename).exists() {
+        project_dir.join(&filename)
+    } else if global_dir.join(&filename).exists() {
+        global_dir.join(&filename)
+    } else {
+        anyhow::bail!(
+            "Agent '{}' not found. Checked:\n  {}\n  {}",
+            name,
+            project_dir.join(&filename).display(),
+            global_dir.join(&filename).display()
+        );
+    };
+
+    let result = parse_agent_file(&agent_path)
+        .map_err(|e| anyhow::anyhow!("Failed to parse agent: {}", e))?;
+
+    if !result.warnings.is_empty() {
+        for w in &result.warnings {
+            eprintln!("⚠ {}", w);
+        }
+    }
+
+    let definition = result.definition;
+
+    // Determine model
+    let model = model_override
+        .map(String::from)
+        .or(definition.model.clone())
+        .unwrap_or_else(|| {
+            let config = crate::config::load_config();
+            config.agents.defaults.model.clone()
+        });
+
+    println!("Running agent '{}' with model {}", definition.name, model);
+    println!("Prompt: {}\n", prompt);
+
+    // Build a minimal agent and run the prompt
+    let config = crate::config::load_config();
+    let rt = tokio::runtime::Handle::current();
+
+    rt.block_on(async {
+        let agent = build_agent_stack(&config, Some(&model))?;
+        let session_key = format!("agent-run:{}:{}", name, crate::utils::today_date());
+        let response = agent.process_direct(prompt, &session_key).await?;
+        println!("{}", response);
+        Ok::<(), anyhow::Error>(())
+    })?;
+
+    Ok(())
 }
 
 /// Run diagnostics: config, API key, agents, ledger integrity.
