@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
-use super::{AgentDefinition, MemoryMode};
+use super::{AgentDefinition, MemoryMode, ScheduleEntry, TriggerConfig, TriggerEvent};
 
 /// Canonical tool names that agents can reference.
 const KNOWN_TOOLS: &[&str] = &[
@@ -135,10 +135,19 @@ pub fn parse_agent_content(content: &str, filename: &str) -> Result<ParseResult,
         }
     };
 
-    // Validate cron expressions in schedule
-    if let Some(ref schedule) = fm.schedule {
-        validate_schedule(schedule, filename, &mut warnings);
-    }
+    // Parse and validate schedule entries
+    let schedule = if let Some(ref schedule_yaml) = fm.schedule {
+        parse_schedule_entries(schedule_yaml, filename, &mut warnings)
+    } else {
+        Vec::new()
+    };
+
+    // Parse trigger config
+    let trigger = if let Some(ref trigger_yaml) = fm.trigger {
+        parse_trigger_config(trigger_yaml, filename, &mut warnings)
+    } else {
+        None
+    };
 
     let context_files = fm.context_files.unwrap_or_default();
 
@@ -150,6 +159,8 @@ pub fn parse_agent_content(content: &str, filename: &str) -> Result<ParseResult,
         tools,
         context_files,
         memory_mode,
+        schedule,
+        trigger,
     };
 
     Ok(ParseResult {
@@ -329,12 +340,12 @@ fn levenshtein(a: &str, b: &str) -> usize {
     dp[a.len()][b.len()]
 }
 
-/// Validate schedule entries (check cron expressions).
-fn validate_schedule(
+/// Parse schedule entries from YAML, returning validated `ScheduleEntry` values.
+fn parse_schedule_entries(
     schedule: &serde_yaml::Value,
     filename: &str,
     warnings: &mut Vec<ValidationWarning>,
-) {
+) -> Vec<ScheduleEntry> {
     let entries = match schedule {
         serde_yaml::Value::Sequence(seq) => seq.clone(),
         serde_yaml::Value::Mapping(_) => vec![schedule.clone()],
@@ -343,11 +354,19 @@ fn validate_schedule(
                 file: filename.to_string(),
                 message: "schedule should be a list of schedule entries".to_string(),
             });
-            return;
+            return Vec::new();
         }
     };
 
+    let mut result = Vec::new();
+
     for entry in &entries {
+        let task = entry
+            .get("task")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         if let Some(cron_expr) = entry.get("cron").and_then(|v| v.as_str()) {
             // The `cron` crate expects 6-field expressions (with seconds).
             // User-facing cron is 5-field, so prepend "0 " for seconds.
@@ -357,10 +376,130 @@ fn validate_schedule(
                     file: filename.to_string(),
                     message: format!("invalid cron expression '{}'", cron_expr),
                 });
+            } else {
+                result.push(ScheduleEntry::Cron {
+                    expression: cron_expr.to_string(),
+                    task,
+                });
             }
+        } else if let Some(every_str) = entry.get("every").and_then(|v| v.as_str()) {
+            match parse_interval(every_str) {
+                Ok(duration) => {
+                    result.push(ScheduleEntry::Every {
+                        interval: duration,
+                        task,
+                    });
+                }
+                Err(msg) => {
+                    warnings.push(ValidationWarning {
+                        file: filename.to_string(),
+                        message: format!("invalid interval '{}': {}", every_str, msg),
+                    });
+                }
+            }
+        } else {
+            warnings.push(ValidationWarning {
+                file: filename.to_string(),
+                message: "schedule entry must have 'cron' or 'every' field".to_string(),
+            });
         }
-        // `every` format (e.g., "4h") is accepted without validation for now
     }
+
+    result
+}
+
+/// Parse a human-friendly interval string like "4h", "30m", "1d", "90s" into Duration.
+pub fn parse_interval(s: &str) -> Result<std::time::Duration, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty interval".to_string());
+    }
+
+    // Find where digits end and unit begins
+    let (num_str, unit) = match s.find(|c: char| !c.is_ascii_digit()) {
+        Some(i) => (&s[..i], &s[i..]),
+        None => return Err("missing unit (use s, m, h, d)".to_string()),
+    };
+
+    let num: u64 = num_str
+        .parse()
+        .map_err(|_| format!("invalid number '{}'", num_str))?;
+
+    if num == 0 {
+        return Err("interval must be > 0".to_string());
+    }
+
+    let secs = match unit.trim() {
+        "s" | "sec" | "secs" => num,
+        "m" | "min" | "mins" => num * 60,
+        "h" | "hr" | "hrs" | "hour" | "hours" => num * 3600,
+        "d" | "day" | "days" => num * 86400,
+        other => return Err(format!("unknown unit '{}' (use s, m, h, d)", other)),
+    };
+
+    Ok(std::time::Duration::from_secs(secs))
+}
+
+/// Parse trigger configuration from YAML.
+fn parse_trigger_config(
+    trigger: &serde_yaml::Value,
+    filename: &str,
+    warnings: &mut Vec<ValidationWarning>,
+) -> Option<TriggerConfig> {
+    let on_str = trigger.get("on").and_then(|v| v.as_str()).unwrap_or("");
+
+    let on = match on_str {
+        "git_push" => TriggerEvent::GitPush,
+        "file_change" => TriggerEvent::FileChange,
+        "message_match" => TriggerEvent::MessageMatch,
+        other => {
+            warnings.push(ValidationWarning {
+                file: filename.to_string(),
+                message: format!(
+                    "unknown trigger event '{}'. Known: git_push, file_change, message_match",
+                    other
+                ),
+            });
+            return None;
+        }
+    };
+
+    let branches = trigger
+        .get("branches")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        });
+
+    let pattern = trigger
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let paths = trigger
+        .get("paths")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        });
+
+    let task = trigger
+        .get("task")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Some(TriggerConfig {
+        on,
+        branches,
+        pattern,
+        paths,
+        task,
+    })
 }
 
 /// Get the list of known tool names (for CLI validation output).
@@ -516,5 +655,170 @@ mod tests {
     fn tool_suggestion() {
         let suggestion = find_closest_tool("reed");
         assert_eq!(suggestion, Some("read"));
+    }
+
+    // --- Schedule parsing tests ---
+
+    #[test]
+    fn parse_cron_schedule_populates_field() {
+        let md = "---\nname: agent\ndescription: desc\nschedule:\n  - cron: \"0 10 * * *\"\n    task: morning check\n---\nBody\n";
+        let result = parse_agent_content(md, "sched.md").unwrap();
+        assert_eq!(result.definition.schedule.len(), 1);
+        match &result.definition.schedule[0] {
+            ScheduleEntry::Cron { expression, task } => {
+                assert_eq!(expression, "0 10 * * *");
+                assert_eq!(task, "morning check");
+            }
+            _ => panic!("expected Cron entry"),
+        }
+    }
+
+    #[test]
+    fn parse_every_schedule() {
+        let md = "---\nname: agent\ndescription: desc\nschedule:\n  - every: 4h\n    task: health check\n---\nBody\n";
+        let result = parse_agent_content(md, "sched.md").unwrap();
+        assert_eq!(result.definition.schedule.len(), 1);
+        match &result.definition.schedule[0] {
+            ScheduleEntry::Every { interval, task } => {
+                assert_eq!(*interval, std::time::Duration::from_secs(4 * 3600));
+                assert_eq!(task, "health check");
+            }
+            _ => panic!("expected Every entry"),
+        }
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn parse_multiple_schedules() {
+        let md = "---\nname: agent\ndescription: desc\nschedule:\n  - cron: \"0 10 * * *\"\n    task: morning\n  - every: 30m\n    task: quick check\n---\nBody\n";
+        let result = parse_agent_content(md, "sched.md").unwrap();
+        assert_eq!(result.definition.schedule.len(), 2);
+    }
+
+    #[test]
+    fn invalid_every_interval_warns() {
+        let md = "---\nname: agent\ndescription: desc\nschedule:\n  - every: banana\n    task: bad\n---\nBody\n";
+        let result = parse_agent_content(md, "sched.md").unwrap();
+        assert_eq!(result.definition.schedule.len(), 0);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].message.contains("invalid interval"));
+    }
+
+    #[test]
+    fn no_schedule_means_empty_vec() {
+        let md = "---\nname: agent\ndescription: desc\n---\nBody\n";
+        let result = parse_agent_content(md, "sched.md").unwrap();
+        assert!(result.definition.schedule.is_empty());
+    }
+
+    // --- Interval parsing tests ---
+
+    #[test]
+    fn parse_interval_seconds() {
+        assert_eq!(
+            parse_interval("90s").unwrap(),
+            std::time::Duration::from_secs(90)
+        );
+    }
+
+    #[test]
+    fn parse_interval_minutes() {
+        assert_eq!(
+            parse_interval("30m").unwrap(),
+            std::time::Duration::from_secs(1800)
+        );
+        assert_eq!(
+            parse_interval("30min").unwrap(),
+            std::time::Duration::from_secs(1800)
+        );
+    }
+
+    #[test]
+    fn parse_interval_hours() {
+        assert_eq!(
+            parse_interval("4h").unwrap(),
+            std::time::Duration::from_secs(14400)
+        );
+    }
+
+    #[test]
+    fn parse_interval_days() {
+        assert_eq!(
+            parse_interval("1d").unwrap(),
+            std::time::Duration::from_secs(86400)
+        );
+    }
+
+    #[test]
+    fn parse_interval_zero_fails() {
+        assert!(parse_interval("0h").is_err());
+    }
+
+    #[test]
+    fn parse_interval_no_unit_fails() {
+        assert!(parse_interval("30").is_err());
+    }
+
+    #[test]
+    fn parse_interval_empty_fails() {
+        assert!(parse_interval("").is_err());
+    }
+
+    #[test]
+    fn parse_interval_unknown_unit_fails() {
+        assert!(parse_interval("5x").is_err());
+    }
+
+    // --- Trigger parsing tests ---
+
+    #[test]
+    fn parse_git_push_trigger() {
+        let md = "---\nname: agent\ndescription: desc\ntrigger:\n  on: git_push\n  branches:\n    - main\n    - develop\n  task: review commits\n---\nBody\n";
+        let result = parse_agent_content(md, "trig.md").unwrap();
+        let trigger = result.definition.trigger.unwrap();
+        assert_eq!(trigger.on, TriggerEvent::GitPush);
+        assert_eq!(
+            trigger.branches,
+            Some(vec!["main".to_string(), "develop".to_string()])
+        );
+        assert_eq!(trigger.task, "review commits");
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn parse_message_match_trigger() {
+        let md = "---\nname: agent\ndescription: desc\ntrigger:\n  on: message_match\n  pattern: \"(?i)help\"\n  task: assist user\n---\nBody\n";
+        let result = parse_agent_content(md, "trig.md").unwrap();
+        let trigger = result.definition.trigger.unwrap();
+        assert_eq!(trigger.on, TriggerEvent::MessageMatch);
+        assert_eq!(trigger.pattern, Some("(?i)help".to_string()));
+    }
+
+    #[test]
+    fn parse_file_change_trigger() {
+        let md = "---\nname: agent\ndescription: desc\ntrigger:\n  on: file_change\n  paths:\n    - src/\n    - Cargo.toml\n  task: check changes\n---\nBody\n";
+        let result = parse_agent_content(md, "trig.md").unwrap();
+        let trigger = result.definition.trigger.unwrap();
+        assert_eq!(trigger.on, TriggerEvent::FileChange);
+        assert_eq!(
+            trigger.paths,
+            Some(vec!["src/".to_string(), "Cargo.toml".to_string()])
+        );
+    }
+
+    #[test]
+    fn unknown_trigger_event_warns() {
+        let md = "---\nname: agent\ndescription: desc\ntrigger:\n  on: webhook\n  task: bad\n---\nBody\n";
+        let result = parse_agent_content(md, "trig.md").unwrap();
+        assert!(result.definition.trigger.is_none());
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].message.contains("unknown trigger event"));
+    }
+
+    #[test]
+    fn no_trigger_means_none() {
+        let md = "---\nname: agent\ndescription: desc\n---\nBody\n";
+        let result = parse_agent_content(md, "trig.md").unwrap();
+        assert!(result.definition.trigger.is_none());
     }
 }

@@ -223,6 +223,8 @@ mod tests {
             tools: None,
             context_files: Vec::new(),
             memory_mode: MemoryMode::Isolated,
+            schedule: Vec::new(),
+            trigger: None,
         }
     }
 

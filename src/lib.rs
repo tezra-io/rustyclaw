@@ -9,6 +9,7 @@ pub mod error;
 pub mod heartbeat;
 pub mod logging;
 pub mod providers;
+pub mod scheduler;
 pub mod session;
 pub mod tools;
 pub mod utils;
