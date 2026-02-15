@@ -19,3 +19,9 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+      - id: check-docs
+        name: check docs staleness
+        entry: ./scripts/check-docs.sh
+        language: script
+        always_run: true
+        pass_filenames: false

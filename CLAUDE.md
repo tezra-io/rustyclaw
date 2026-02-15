@@ -12,9 +12,14 @@ RustyClaw: ultra-lightweight personal AI assistant with multi-agent support. Sin
 - Logging: **tracing** + **tracing-subscriber** + **tracing-appender**
 - Error handling: **thiserror** + **anyhow**
 - WebSocket: **tokio-tungstenite**
-- Crypto: **sha2** (memory integrity)
+- Crypto: **sha2** (memory integrity + model verification)
 - Telegram: **teloxide**
 - Cron: **cron** crate
+- Embeddings: **ort** (ONNX Runtime, load-dynamic) + **tokenizers** (HuggingFace) + **ndarray**
+
+## Environment
+- `ORT_DYLIB_PATH=/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.dylib` — required for ONNX embeddings
+- `RUSTYCLAW_OPENAI_API_KEY` — optional, for OpenAI embedding fallback
 
 ## Architecture
 - `src/agent/` — core agent loop, context builder, memory, ledger, multi-agent (cluster, supervisor, router, definition parser)
@@ -22,10 +27,11 @@ RustyClaw: ultra-lightweight personal AI assistant with multi-agent support. Sin
 - `src/channels/` — Telegram, Discord channel implementations
 - `src/providers/` — LLM providers (OpenAI-compatible, OpenRouter, Anthropic, etc.)
 - `src/tools/` — tool system (filesystem, shell, web, message, cron, spawn)
-- `src/cli/` — clap-based CLI with agent management commands
+- `src/cli/` — clap-based CLI with agent management commands + onboarding wizard
 - `src/config/` — JSON config loading with env var overrides
 - `src/cron/` — internal job scheduler
 - `src/session/` — conversation session management
+- `src/embeddings/` — local MiniLM (ONNX) + OpenAI embedding providers, registry with fallback, bootstrap wiring
 
 ## Code Style
 - `cargo fmt` — always
@@ -71,7 +77,16 @@ Read these in `../projects/rustyclaw/` for context:
 - Delegation router: explicit naming > keyword matching > master handles
 - Tool scoping per agent via `ToolRegistry::scoped()`
 
+## Embeddings
+- Local: all-MiniLM-L6-v2 via ONNX Runtime (384-dim, auto-downloads from HuggingFace)
+- OpenAI: text-embedding-3-small as optional fallback (needs API key)
+- SHA-256 hash verification on model downloads (supply chain protection)
+- Atomic download with sentinel file (no partial corruption)
+- Registry with dimension enforcement (can't mix 384 and 1536-dim providers)
+- Bootstrap wiring: `EmbeddingsConfig` → `build_embedding_registry()` → `AsyncMemoryStore`
+
 ## Config
 - Format: JSON (`~/.rustyclaw/config.json`)
 - Env var overrides for all API keys and core settings
 - One API key per provider, shared across all agents
+- Embeddings default to `"local"` (no config needed for basic setup)
