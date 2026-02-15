@@ -12,6 +12,7 @@ pub mod providers;
 pub mod scheduler;
 pub mod session;
 pub mod tools;
+pub mod triggers;
 pub mod utils;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
