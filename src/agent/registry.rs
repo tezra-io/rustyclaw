@@ -37,12 +37,14 @@ impl AgentRegistry {
 
     /// Get a specific agent by name
     pub fn get(&self, name: &str) -> Option<AgentDefinition> {
+        Self::validate_name(name).ok()?;
         let path = self.agent_path(name);
         AgentDefinition::from_file(&path).ok()
     }
 
     /// Create a new agent definition file
     pub fn create(&self, definition: &AgentDefinition) -> Result<()> {
+        Self::validate_name(&definition.name)?;
         std::fs::create_dir_all(&self.agents_dir)?;
         let path = self.agent_path(&definition.name);
         if path.exists() {
@@ -52,7 +54,7 @@ impl AgentRegistry {
 
         // Create agent data directory for persistent agents
         if definition.persistent {
-            let data_dir = self.data_dir(&definition.name);
+            let data_dir = self.data_dir(&definition.name)?;
             std::fs::create_dir_all(&data_dir)?;
         }
         Ok(())
@@ -60,6 +62,7 @@ impl AgentRegistry {
 
     /// Update an existing agent definition
     pub fn update(&self, definition: &AgentDefinition) -> Result<()> {
+        Self::validate_name(&definition.name)?;
         let path = self.agent_path(&definition.name);
         if !path.exists() {
             anyhow::bail!("Agent '{}' not found", definition.name);
@@ -70,27 +73,47 @@ impl AgentRegistry {
 
     /// Remove an agent and its data directory
     pub fn remove(&self, name: &str) -> Result<()> {
+        Self::validate_name(name)?;
         let md_path = self.agent_path(name);
         if !md_path.exists() {
             anyhow::bail!("Agent '{name}' not found");
         }
         std::fs::remove_file(&md_path)?;
 
-        let data_dir = self.data_dir(name);
+        let data_dir = self.data_dir(name)?;
         if data_dir.exists() {
             std::fs::remove_dir_all(&data_dir)?;
         }
         Ok(())
     }
 
+    /// Validate an agent name to prevent path traversal and filesystem issues.
+    fn validate_name(name: &str) -> Result<()> {
+        if name.is_empty() {
+            anyhow::bail!("Agent name cannot be empty");
+        }
+        if name.contains('/') || name.contains('\\') || name.contains('\0') {
+            anyhow::bail!("Agent name contains invalid path characters");
+        }
+        if name == "." || name == ".." || name.starts_with("..") {
+            anyhow::bail!("Agent name cannot be a relative path component");
+        }
+        // Restrict to safe characters
+        if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            anyhow::bail!("Agent name must contain only alphanumeric characters, hyphens, and underscores");
+        }
+        Ok(())
+    }
+
     /// Check if an agent exists
     pub fn exists(&self, name: &str) -> bool {
-        self.agent_path(name).exists()
+        Self::validate_name(name).is_ok() && self.agent_path(name).exists()
     }
 
     /// Get the data directory for a specific agent
-    pub fn data_dir(&self, name: &str) -> PathBuf {
-        self.agents_dir.join(name)
+    pub fn data_dir(&self, name: &str) -> Result<PathBuf> {
+        Self::validate_name(name)?;
+        Ok(self.agents_dir.join(name))
     }
 
     /// Get the definition file path for a specific agent
@@ -214,7 +237,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let reg = test_registry(&tmp);
         reg.create(&persistent_def("persist")).unwrap();
-        assert!(reg.data_dir("persist").exists());
+        assert!(reg.data_dir("persist").unwrap().exists());
     }
 
     #[test]
@@ -222,7 +245,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let reg = test_registry(&tmp);
         reg.create(&test_def("ephemeral")).unwrap();
-        assert!(!reg.data_dir("ephemeral").exists());
+        assert!(!reg.data_dir("ephemeral").unwrap().exists());
     }
 
     #[test]
@@ -230,9 +253,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let reg = test_registry(&tmp);
         reg.create(&persistent_def("cleanup")).unwrap();
-        assert!(reg.data_dir("cleanup").exists());
+        assert!(reg.data_dir("cleanup").unwrap().exists());
         reg.remove("cleanup").unwrap();
-        assert!(!reg.data_dir("cleanup").exists());
+        assert!(!reg.data_dir("cleanup").unwrap().exists());
     }
 
     #[test]
