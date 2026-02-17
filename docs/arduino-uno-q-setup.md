@@ -1,18 +1,18 @@
-# ZeroClaw on Arduino Uno Q — Step-by-Step Guide
+# RustyClaw on Arduino Uno Q — Step-by-Step Guide
 
-Run ZeroClaw on the Arduino Uno Q's Linux side. Telegram works over WiFi; GPIO control uses the Bridge (requires a minimal App Lab app).
+Run RustyClaw on the Arduino Uno Q's Linux side. Telegram works over WiFi; GPIO control uses the Bridge (requires a minimal App Lab app).
 
 ---
 
 ## What's Included (No Code Changes Needed)
 
-ZeroClaw includes everything needed for Arduino Uno Q. **Clone the repo and follow this guide — no patches or custom code required.**
+RustyClaw includes everything needed for Arduino Uno Q. **Clone the repo and follow this guide — no patches or custom code required.**
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Bridge app | `firmware/zeroclaw-uno-q-bridge/` | MCU sketch + Python socket server (port 9999) for GPIO |
+| Bridge app | `firmware/rustyclaw-uno-q-bridge/` | MCU sketch + Python socket server (port 9999) for GPIO |
 | Bridge tools | `src/peripherals/uno_q_bridge.rs` | `gpio_read` / `gpio_write` tools that talk to the Bridge over TCP |
-| Setup command | `src/peripherals/uno_q_setup.rs` | `zeroclaw peripheral setup-uno-q` deploys the Bridge via scp + arduino-app-cli |
+| Setup command | `src/peripherals/uno_q_setup.rs` | `rustyclaw peripheral setup-uno-q` deploys the Bridge via scp + arduino-app-cli |
 | Config schema | `board = "arduino-uno-q"`, `transport = "bridge"` | Supported in `config.toml` |
 
 Build with `--features hardware` (or the default features) to include Uno Q support.
@@ -49,7 +49,7 @@ ssh arduino@<UNO_Q_IP>
 
 ---
 
-## Phase 2: Install ZeroClaw on Uno Q
+## Phase 2: Install RustyClaw on Uno Q
 
 ### Option A: Build on the Device (Simpler, ~20–40 min)
 
@@ -65,15 +65,15 @@ source ~/.cargo/env
 sudo apt-get update
 sudo apt-get install -y pkg-config libssl-dev
 
-# Clone zeroclaw (or scp your project)
-git clone https://github.com/theonlyhennygod/zeroclaw.git
-cd zeroclaw
+# Clone rustyclaw (or scp your project)
+git clone https://github.com/theonlyhennygod/rustyclaw.git
+cd rustyclaw
 
 # Build (takes ~15–30 min on Uno Q)
 cargo build --release
 
 # Install
-sudo cp target/release/zeroclaw /usr/local/bin/
+sudo cp target/release/rustyclaw /usr/local/bin/
 ```
 
 ### Option B: Cross-Compile on Mac (Faster)
@@ -90,15 +90,15 @@ brew install aarch64-unknown-linux-gnu
 CC_aarch64_unknown_linux_gnu=aarch64-unknown-linux-gnu-gcc cargo build --release --target aarch64-unknown-linux-gnu
 
 # Copy to Uno Q
-scp target/aarch64-unknown-linux-gnu/release/zeroclaw arduino@<UNO_Q_IP>:~/
-ssh arduino@<UNO_Q_IP> "sudo mv ~/zeroclaw /usr/local/bin/"
+scp target/aarch64-unknown-linux-gnu/release/rustyclaw arduino@<UNO_Q_IP>:~/
+ssh arduino@<UNO_Q_IP> "sudo mv ~/rustyclaw /usr/local/bin/"
 ```
 
 If cross-compile fails, use Option A and build on the device.
 
 ---
 
-## Phase 3: Configure ZeroClaw
+## Phase 3: Configure RustyClaw
 
 ### 3.1 Run Onboard (or Create Config Manually)
 
@@ -106,11 +106,11 @@ If cross-compile fails, use Option A and build on the device.
 ssh arduino@<UNO_Q_IP>
 
 # Quick config
-zeroclaw onboard --api-key YOUR_OPENROUTER_KEY --provider openrouter
+rustyclaw onboard --api-key YOUR_OPENROUTER_KEY --provider openrouter
 
 # Or create config manually
-mkdir -p ~/.zeroclaw/workspace
-nano ~/.zeroclaw/config.toml
+mkdir -p ~/.rustyclaw/workspace
+nano ~/.rustyclaw/config.toml
 ```
 
 ### 3.2 Minimal config.toml
@@ -139,36 +139,36 @@ compact_context = true
 
 ---
 
-## Phase 4: Run ZeroClaw Daemon
+## Phase 4: Run RustyClaw Daemon
 
 ```bash
 ssh arduino@<UNO_Q_IP>
 
 # Run daemon (Telegram polling works over WiFi)
-zeroclaw daemon --host 127.0.0.1 --port 8080
+rustyclaw daemon --host 127.0.0.1 --port 8080
 ```
 
-**At this point:** Telegram chat works. Send messages to your bot — ZeroClaw responds. No GPIO yet.
+**At this point:** Telegram chat works. Send messages to your bot — RustyClaw responds. No GPIO yet.
 
 ---
 
-## Phase 5: GPIO via Bridge (ZeroClaw Handles It)
+## Phase 5: GPIO via Bridge (RustyClaw Handles It)
 
-ZeroClaw includes the Bridge app and setup command.
+RustyClaw includes the Bridge app and setup command.
 
 ### 5.1 Deploy Bridge App
 
-**From your Mac** (with zeroclaw repo):
+**From your Mac** (with rustyclaw repo):
 ```bash
-zeroclaw peripheral setup-uno-q --host 192.168.0.48
+rustyclaw peripheral setup-uno-q --host 192.168.0.48
 ```
 
 **From the Uno Q** (SSH'd in):
 ```bash
-zeroclaw peripheral setup-uno-q
+rustyclaw peripheral setup-uno-q
 ```
 
-This copies the Bridge app to `~/ArduinoApps/zeroclaw-uno-q-bridge` and starts it.
+This copies the Bridge app to `~/ArduinoApps/rustyclaw-uno-q-bridge` and starts it.
 
 ### 5.2 Add to config.toml
 
@@ -181,13 +181,13 @@ board = "arduino-uno-q"
 transport = "bridge"
 ```
 
-### 5.3 Run ZeroClaw
+### 5.3 Run RustyClaw
 
 ```bash
-zeroclaw daemon --host 127.0.0.1 --port 8080
+rustyclaw daemon --host 127.0.0.1 --port 8080
 ```
 
-Now when you message your Telegram bot *"Turn on the LED"* or *"Set pin 13 high"*, ZeroClaw uses `gpio_write` via the Bridge.
+Now when you message your Telegram bot *"Turn on the LED"* or *"Set pin 13 high"*, RustyClaw uses `gpio_write` via the Bridge.
 
 ---
 
@@ -199,19 +199,19 @@ Now when you message your Telegram bot *"Turn on the LED"* or *"Set pin 13 high"
 | 2 | `ssh arduino@<IP>` |
 | 3 | `curl -sSf https://sh.rustup.rs \| sh -s -- -y && source ~/.cargo/env` |
 | 4 | `sudo apt-get install -y pkg-config libssl-dev` |
-| 5 | `git clone https://github.com/theonlyhennygod/zeroclaw.git && cd zeroclaw` |
+| 5 | `git clone https://github.com/theonlyhennygod/rustyclaw.git && cd rustyclaw` |
 | 6 | `cargo build --release --no-default-features` |
-| 7 | `zeroclaw onboard --api-key KEY --provider openrouter` |
-| 8 | Edit `~/.zeroclaw/config.toml` (add Telegram bot_token) |
-| 9 | `zeroclaw daemon --host 127.0.0.1 --port 8080` |
+| 7 | `rustyclaw onboard --api-key KEY --provider openrouter` |
+| 8 | Edit `~/.rustyclaw/config.toml` (add Telegram bot_token) |
+| 9 | `rustyclaw daemon --host 127.0.0.1 --port 8080` |
 | 10 | Message your Telegram bot — it responds |
 
 ---
 
 ## Troubleshooting
 
-- **"command not found: zeroclaw"** — Use full path: `/usr/local/bin/zeroclaw` or ensure `~/.cargo/bin` is in PATH.
+- **"command not found: rustyclaw"** — Use full path: `/usr/local/bin/rustyclaw` or ensure `~/.cargo/bin` is in PATH.
 - **Telegram not responding** — Check bot_token, allowed_users, and that the Uno Q has internet (WiFi).
 - **Out of memory** — Use `--no-default-features` to reduce binary size; consider `compact_context = true`.
-- **GPIO commands ignored** — Ensure Bridge app is running (`zeroclaw peripheral setup-uno-q` deploys and starts it). Config must have `board = "arduino-uno-q"` and `transport = "bridge"`.
-- **LLM provider (GLM/Zhipu)** — Use `default_provider = "glm"` or `"zhipu"` with `GLM_API_KEY` in env or config. ZeroClaw uses the correct v4 endpoint.
+- **GPIO commands ignored** — Ensure Bridge app is running (`rustyclaw peripheral setup-uno-q` deploys and starts it). Config must have `board = "arduino-uno-q"` and `transport = "bridge"`.
+- **LLM provider (GLM/Zhipu)** — Use `default_provider = "glm"` or `"zhipu"` with `GLM_API_KEY` in env or config. RustyClaw uses the correct v4 endpoint.

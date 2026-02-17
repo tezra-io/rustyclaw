@@ -1,13 +1,13 @@
-# Contributing to ZeroClaw
+# Contributing to RustyClaw
 
-Thanks for your interest in contributing to ZeroClaw! This guide will help you get started.
+Thanks for your interest in contributing to RustyClaw! This guide will help you get started.
 
 ## Development Setup
 
 ```bash
 # Clone the repo
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/rustyclaw-labs/rustyclaw.git
+cd rustyclaw
 
 # Enable the pre-push hook (runs fmt, clippy, tests before every push)
 git config core.hooksPath .githooks
@@ -36,7 +36,7 @@ The repo includes a pre-push hook in `.githooks/` that enforces `cargo fmt --all
 For an opt-in strict lint pass during pre-push, set:
 
 ```bash
-ZEROCLAW_STRICT_LINT=1 git push
+RUSTYCLAW_STRICT_LINT=1 git push
 ```
 
 For full CI parity in Docker, run:
@@ -94,7 +94,7 @@ Before requesting review, ensure all of the following are true:
 - Security impact and rollback path are explicitly described.
 - No personal/sensitive data is introduced in code/docs/tests/fixtures/logs/examples/commit messages.
 - Tests/fixtures/examples use neutral project-scoped wording (no identity-specific or first-person phrasing).
-- If identity-like wording is required, use ZeroClaw-centric labels only (for example: `ZeroClawAgent`, `ZeroClawOperator`, `zeroclaw_user`).
+- If identity-like wording is required, use RustyClaw-centric labels only (for example: `RustyClawAgent`, `RustyClawOperator`, `rustyclaw_user`).
 - Linked issue (or rationale for no issue) is included.
 
 ## PR Definition of Done (DoD)
@@ -118,7 +118,7 @@ When PR traffic is high (especially with AI-assisted contributions), these rules
 - **Security-first review**: changes in `src/security/`, runtime, gateway, and CI need stricter validation.
 - **Risk-first triage**: use labels (`risk: high`, `risk: medium`, `risk: low`) to route review depth.
 - **Privacy-first hygiene**: redact/anonymize sensitive payloads and keep tests/examples neutral and project-scoped.
-- **Identity normalization**: when identity traits are unavoidable, use ZeroClaw/project-native roles instead of personal or real-world identities.
+- **Identity normalization**: when identity traits are unavoidable, use RustyClaw/project-native roles instead of personal or real-world identities.
 - **Supersede hygiene**: if your PR replaces an older open PR, add `Supersedes #...` and request maintainers close the outdated one.
 
 Full maintainer workflow: [`docs/pr-workflow.md`](docs/pr-workflow.md).
@@ -143,7 +143,7 @@ Agent implementation playbook lives in [`AGENTS.md`](AGENTS.md).
 
 ## Architecture: Trait-Based Pluggability
 
-ZeroClaw's architecture is built on **traits** — every subsystem is swappable. This means contributing a new integration is as simple as implementing a trait and registering it in the factory function.
+RustyClaw's architecture is built on **traits** — every subsystem is swappable. This means contributing a new integration is as simple as implementing a trait and registering it in the factory function.
 
 ```
 src/
@@ -165,7 +165,7 @@ Use these defaults unless an existing subsystem pattern clearly overrides them.
 - **Trait implementers**: keep predictable suffixes (`*Provider`, `*Channel`, `*Tool`, `*Memory`, `*Observer`, `*RuntimeAdapter`).
 - **Factory keys**: keep lowercase and stable (`openai`, `discord`, `shell`); avoid adding aliases without migration need.
 - **Tests**: use behavior-oriented names (`subject_expected_behavior`) and neutral project-scoped fixtures.
-- **Identity-like labels**: if unavoidable, use ZeroClaw-native identifiers only (`ZeroClawAgent`, `zeroclaw_user`, `zeroclaw_node`).
+- **Identity-like labels**: if unavoidable, use RustyClaw-native identifiers only (`RustyClawAgent`, `rustyclaw_user`, `rustyclaw_node`).
 
 ## Architecture Boundary Rules (Required)
 
@@ -191,7 +191,7 @@ Use these quick examples to align implementation choices before opening a PR.
 - **Good test name**: `allowlist_denies_unknown_user`, `provider_returns_error_on_invalid_model`
 
 - **Bad identity-like label**: `john_user`, `alice_bot`
-- **Good identity-like label**: `ZeroClawAgent`, `zeroclaw_user`, `zeroclaw_node`
+- **Good identity-like label**: `RustyClawAgent`, `rustyclaw_user`, `rustyclaw_node`
 
 ### Architecture boundary examples
 
@@ -351,7 +351,7 @@ impl Tool for YourTool {
 - [ ] Follows code naming conventions and architecture boundary rules in this guide
 - [ ] No personal/sensitive data in code/docs/tests/fixtures/logs/examples/commit messages
 - [ ] Test names/messages/fixtures/examples are neutral and project-focused
-- [ ] Any required identity-like wording uses ZeroClaw/project-native labels only
+- [ ] Any required identity-like wording uses RustyClaw/project-native labels only
 
 ## Commit Convention
 

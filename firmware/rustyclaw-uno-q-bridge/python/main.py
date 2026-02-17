@@ -1,4 +1,4 @@
-# ZeroClaw Bridge — socket server for GPIO control from ZeroClaw agent
+# RustyClaw Bridge — socket server for GPIO control from RustyClaw agent
 # SPDX-License-Identifier: MPL-2.0
 
 import socket

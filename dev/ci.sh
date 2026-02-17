@@ -19,7 +19,7 @@ run_in_ci() {
 
 print_help() {
   cat <<'EOF'
-ZeroClaw Local CI in Docker
+RustyClaw Local CI in Docker
 
 Usage: ./dev/ci.sh <command>
 
@@ -83,8 +83,8 @@ case "$1" in
     ;;
 
   docker-smoke)
-    docker build --target dev -t zeroclaw-local-smoke:latest .
-    docker run --rm zeroclaw-local-smoke:latest --version
+    docker build --target dev -t rustyclaw-local-smoke:latest .
+    docker run --rm rustyclaw-local-smoke:latest --version
     ;;
 
   all)
@@ -93,8 +93,8 @@ case "$1" in
     run_in_ci "cargo build --release --locked --verbose"
     run_in_ci "cargo deny check licenses sources"
     run_in_ci "cargo audit"
-    docker build --target dev -t zeroclaw-local-smoke:latest .
-    docker run --rm zeroclaw-local-smoke:latest --version
+    docker build --target dev -t rustyclaw-local-smoke:latest .
+    docker run --rm rustyclaw-local-smoke:latest --version
     ;;
 
   clean)

@@ -251,7 +251,7 @@ impl Provider for OpenRouterProvider {
         temperature: f64,
     ) -> anyhow::Result<String> {
         let api_key = self.api_key.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("OpenRouter API key not set. Run `zeroclaw onboard` or set OPENROUTER_API_KEY env var."))?;
+            .ok_or_else(|| anyhow::anyhow!("OpenRouter API key not set. Run `rustyclaw onboard` or set OPENROUTER_API_KEY env var."))?;
 
         let mut messages = Vec::new();
 
@@ -279,9 +279,9 @@ impl Provider for OpenRouterProvider {
             .header("Authorization", format!("Bearer {api_key}"))
             .header(
                 "HTTP-Referer",
-                "https://github.com/theonlyhennygod/zeroclaw",
+                "https://github.com/theonlyhennygod/rustyclaw",
             )
-            .header("X-Title", "ZeroClaw")
+            .header("X-Title", "RustyClaw")
             .json(&request)
             .send()
             .await?;
@@ -307,7 +307,7 @@ impl Provider for OpenRouterProvider {
         temperature: f64,
     ) -> anyhow::Result<String> {
         let api_key = self.api_key.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("OpenRouter API key not set. Run `zeroclaw onboard` or set OPENROUTER_API_KEY env var."))?;
+            .ok_or_else(|| anyhow::anyhow!("OpenRouter API key not set. Run `rustyclaw onboard` or set OPENROUTER_API_KEY env var."))?;
 
         let api_messages: Vec<Message> = messages
             .iter()
@@ -329,9 +329,9 @@ impl Provider for OpenRouterProvider {
             .header("Authorization", format!("Bearer {api_key}"))
             .header(
                 "HTTP-Referer",
-                "https://github.com/theonlyhennygod/zeroclaw",
+                "https://github.com/theonlyhennygod/rustyclaw",
             )
-            .header("X-Title", "ZeroClaw")
+            .header("X-Title", "RustyClaw")
             .json(&request)
             .send()
             .await?;
@@ -358,7 +358,7 @@ impl Provider for OpenRouterProvider {
     ) -> anyhow::Result<ProviderChatResponse> {
         let api_key = self.api_key.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-            "OpenRouter API key not set. Run `zeroclaw onboard` or set OPENROUTER_API_KEY env var."
+            "OpenRouter API key not set. Run `rustyclaw onboard` or set OPENROUTER_API_KEY env var."
         )
         })?;
 
@@ -377,9 +377,9 @@ impl Provider for OpenRouterProvider {
             .header("Authorization", format!("Bearer {api_key}"))
             .header(
                 "HTTP-Referer",
-                "https://github.com/theonlyhennygod/zeroclaw",
+                "https://github.com/theonlyhennygod/rustyclaw",
             )
-            .header("X-Title", "ZeroClaw")
+            .header("X-Title", "RustyClaw")
             .json(&native_request)
             .send()
             .await?;

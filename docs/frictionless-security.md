@@ -119,23 +119,23 @@ impl SandboxConfig {
 ### 3. First Run: Silent Logging
 
 ```bash
-$ zeroclaw agent -m "hello"
+$ rustyclaw agent -m "hello"
 
 # First time: silent detection
 [INFO] Detecting security features...
 [INFO] ✓ Landlock sandbox enabled (kernel 6.2+)
 [INFO] ✓ Memory monitoring active (512MB limit)
-[INFO] ✓ Audit logging enabled (~/.config/zeroclaw/audit.log)
+[INFO] ✓ Audit logging enabled (~/.config/rustyclaw/audit.log)
 
 # Subsequent runs: quiet
-$ zeroclaw agent -m "hello"
+$ rustyclaw agent -m "hello"
 [agent] Thinking...
 ```
 
 ### 4. Config File: All Defaults Hidden
 
 ```toml
-# ~/.config/zeroclaw/config.toml
+# ~/.config/rustyclaw/config.toml
 
 # These sections are NOT written unless user customizes
 # [security.sandbox]
@@ -162,21 +162,21 @@ max_memory_mb = 1024  # User increased limit
 
 ```bash
 # Check what's active
-$ zeroclaw security --status
+$ rustyclaw security --status
 Security Status:
   ✓ Sandbox: Landlock (Linux kernel 6.2)
   ✓ Memory monitoring: 512MB limit
-  ✓ Audit logging: ~/.config/zeroclaw/audit.log
+  ✓ Audit logging: ~/.config/rustyclaw/audit.log
   → 47 events logged today
 
 # Disable sandbox explicitly (writes to config)
-$ zeroclaw config set security.sandbox.enabled false
+$ rustyclaw config set security.sandbox.enabled false
 
 # Enable specific backend
-$ zeroclaw config set security.sandbox.backend firejail
+$ rustyclaw config set security.sandbox.backend firejail
 
 # Adjust limits
-$ zeroclaw config set security.resources.max_memory_mb 2048
+$ rustyclaw config set security.resources.max_memory_mb 2048
 ```
 
 ### 6. Graceful Degradation
@@ -261,7 +261,7 @@ impl Default for SandboxBackend {
 
 ### Before (Current)
 ```bash
-$ zeroclaw onboard
+$ rustyclaw onboard
 [1/9] Workspace Setup...
 [2/9] AI Provider...
 ...
@@ -271,7 +271,7 @@ $ zeroclaw onboard
 
 ### After (With Frictionless Security)
 ```bash
-$ zeroclaw onboard
+$ rustyclaw onboard
 [1/9] Workspace Setup...
 [2/9] AI Provider...
 ...
@@ -282,7 +282,7 @@ $ zeroclaw onboard
 
 ### Advanced User (Explicit Control)
 ```bash
-$ zeroclaw onboard --security-level paranoid
+$ rustyclaw onboard --security-level paranoid
 [1/9] Workspace Setup...
 ...
 ✓ Security: Paranoid | Landlock + Firejail | Audit signed
@@ -307,6 +307,6 @@ $ zeroclaw onboard --security-level paranoid
 ✅ **Zero new prompts** — silent auto-detection
 ✅ **Zero breaking changes** — backward compatible
 ✅ **Opt-out available** — explicit config flags
-✅ **Status visibility** — `zeroclaw security --status`
+✅ **Status visibility** — `rustyclaw security --status`
 
 The wizard remains "quick setup universal applications" — security is just **quietly better**.

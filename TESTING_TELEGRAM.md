@@ -1,6 +1,6 @@
 # Telegram Integration Testing Guide
 
-This guide covers testing the Telegram channel integration for ZeroClaw.
+This guide covers testing the Telegram channel integration for RustyClaw.
 
 ## 🚀 Quick Start
 
@@ -65,7 +65,7 @@ After running automated tests, perform these manual checks:
 1. **Basic messaging**
 
     ```bash
-    zeroclaw channel start
+    rustyclaw channel start
     ```
 
     - Send "Hello bot!" in Telegram
@@ -86,7 +86,7 @@ After running automated tests, perform these manual checks:
 3. **Unauthorized user blocking**
 
     ```toml
-    # Edit ~/.zeroclaw/config.toml
+    # Edit ~/.rustyclaw/config.toml
     allowed_users = ["999999999"]
     ```
 
@@ -104,7 +104,7 @@ After running automated tests, perform these manual checks:
 5. **Error logging**
 
     ```bash
-    RUST_LOG=debug zeroclaw channel start
+    RUST_LOG=debug rustyclaw channel start
     ```
 
     - Check for unexpected errors
@@ -113,7 +113,7 @@ After running automated tests, perform these manual checks:
 6. **Health check timeout**
 
     ```bash
-    time zeroclaw channel doctor
+    time rustyclaw channel doctor
     ```
 
     - Verify: Completes in <5 seconds
@@ -144,7 +144,7 @@ Solution: Check user allowlist
   1. Send message to bot
   2. Check logs for user_id
   3. Update config: allowed_users = ["YOUR_ID"]
-  4. Run: zeroclaw onboard --channels-only
+  4. Run: rustyclaw onboard --channels-only
 ```
 
 **Issue: Message splitting not working**
@@ -164,16 +164,16 @@ Solution: Verify code changes
 ./test_telegram_integration.sh
 
 # 2. Configure Telegram
-zeroclaw onboard --interactive
+rustyclaw onboard --interactive
 # Select Telegram channel
 # Enter bot token (from @BotFather)
 # Enter your user ID
 
 # 3. Verify health
-zeroclaw channel doctor
+rustyclaw channel doctor
 
 # 4. Start channel
-zeroclaw channel start
+rustyclaw channel start
 
 # 5. Send test message in Telegram
 ```
@@ -188,7 +188,7 @@ zeroclaw channel start
 ./test_telegram_integration.sh
 
 # 3. Manual smoke test
-zeroclaw channel start
+rustyclaw channel start
 # Send message in Telegram
 ```
 
@@ -208,10 +208,10 @@ for i in {1..100}; do
 done
 
 # 3. Monitor logs
-RUST_LOG=info zeroclaw daemon
+RUST_LOG=info rustyclaw daemon
 
 # 4. Check metrics
-zeroclaw status
+rustyclaw status
 ```
 
 ## 📊 Performance Benchmarks
@@ -220,11 +220,11 @@ Expected values after all fixes:
 
 | Metric                 | Expected   | How to Measure                   |
 | ---------------------- | ---------- | -------------------------------- |
-| Health check time      | <5s        | `time zeroclaw channel doctor`   |
+| Health check time      | <5s        | `time rustyclaw channel doctor`   |
 | First response time    | <3s        | Time from sending to receiving   |
 | Message split overhead | <50ms      | Check logs for timing            |
-| Memory usage           | <10MB      | `ps aux \| grep zeroclaw`        |
-| Binary size            | ~3-4MB     | `ls -lh target/release/zeroclaw` |
+| Memory usage           | <10MB      | `ps aux \| grep rustyclaw`        |
+| Binary size            | ~3-4MB     | `ls -lh target/release/rustyclaw` |
 | Unit test coverage     | 24/24 pass | `cargo test telegram --lib`      |
 
 ## 🐛 Debugging Failed Tests
@@ -246,14 +246,14 @@ cargo test telegram --lib -- --ignored
 
 ```bash
 # Maximum logging
-RUST_LOG=trace zeroclaw channel start
+RUST_LOG=trace rustyclaw channel start
 
 # Check Telegram API directly
 curl "https://api.telegram.org/bot<TOKEN>/getMe"
 curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
 
 # Validate config
-cat ~/.zeroclaw/config.toml | grep -A 3 "\[channels_config.telegram\]"
+cat ~/.rustyclaw/config.toml | grep -A 3 "\[channels_config.telegram\]"
 ```
 
 ### Debug Build Issues
@@ -323,15 +323,15 @@ git revert <commit-hash>
 cargo build --release
 
 # 4. Restart service
-zeroclaw service restart
+rustyclaw service restart
 
 # 5. Verify
-zeroclaw channel doctor
+rustyclaw channel doctor
 ```
 
 ## 📚 Additional Resources
 
 - [Telegram Bot API Documentation](https://core.telegram.org/bots/api)
-- [ZeroClaw Main README](README.md)
+- [RustyClaw Main README](README.md)
 - [Contributing Guide](CONTRIBUTING.md)
-- [Issue Tracker](https://github.com/theonlyhennygod/zeroclaw/issues)
+- [Issue Tracker](https://github.com/theonlyhennygod/rustyclaw/issues)

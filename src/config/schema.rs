@@ -844,7 +844,7 @@ pub struct ObservabilityConfig {
     #[serde(default)]
     pub otel_endpoint: Option<String>,
 
-    /// Service name reported to the OTel collector. Defaults to "zeroclaw".
+    /// Service name reported to the OTel collector. Defaults to "rustyclaw".
     #[serde(default)]
     pub otel_service_name: Option<String>,
 }
@@ -1330,7 +1330,7 @@ pub struct WhatsAppConfig {
     /// Webhook verify token (you define this, Meta sends it back for verification)
     pub verify_token: String,
     /// App secret from Meta Business Suite (for webhook signature verification)
-    /// Can also be set via `ZEROCLAW_WHATSAPP_APP_SECRET` environment variable
+    /// Can also be set via `RUSTYCLAW_WHATSAPP_APP_SECRET` environment variable
     #[serde(default)]
     pub app_secret: Option<String>,
     /// Allowed phone numbers (E.164 format: +1234567890) or "*" for all
@@ -1508,7 +1508,7 @@ pub struct AuditConfig {
     #[serde(default = "default_audit_enabled")]
     pub enabled: bool,
 
-    /// Path to audit log file (relative to zeroclaw dir)
+    /// Path to audit log file (relative to rustyclaw dir)
     #[serde(default = "default_audit_log_path")]
     pub log_path: String,
 
@@ -1562,11 +1562,11 @@ impl Default for Config {
     fn default() -> Self {
         let home =
             UserDirs::new().map_or_else(|| PathBuf::from("."), |u| u.home_dir().to_path_buf());
-        let zeroclaw_dir = home.join(".zeroclaw");
+        let rustyclaw_dir = home.join(".rustyclaw");
 
         Self {
-            workspace_dir: zeroclaw_dir.join("workspace"),
-            config_path: zeroclaw_dir.join("config.toml"),
+            workspace_dir: rustyclaw_dir.join("workspace"),
+            config_path: rustyclaw_dir.join("config.toml"),
             api_key: None,
             default_provider: Some("openrouter".to_string()),
             default_model: Some("anthropic/claude-sonnet-4".to_string()),
@@ -1601,12 +1601,12 @@ impl Config {
         let home = UserDirs::new()
             .map(|u| u.home_dir().to_path_buf())
             .context("Could not find home directory")?;
-        let zeroclaw_dir = home.join(".zeroclaw");
-        let config_path = zeroclaw_dir.join("config.toml");
+        let rustyclaw_dir = home.join(".rustyclaw");
+        let config_path = rustyclaw_dir.join("config.toml");
 
-        if !zeroclaw_dir.exists() {
-            fs::create_dir_all(&zeroclaw_dir).context("Failed to create .zeroclaw directory")?;
-            fs::create_dir_all(zeroclaw_dir.join("workspace"))
+        if !rustyclaw_dir.exists() {
+            fs::create_dir_all(&rustyclaw_dir).context("Failed to create .rustyclaw directory")?;
+            fs::create_dir_all(rustyclaw_dir.join("workspace"))
                 .context("Failed to create workspace directory")?;
         }
 
@@ -1617,13 +1617,13 @@ impl Config {
                 toml::from_str(&contents).context("Failed to parse config file")?;
             // Set computed paths that are skipped during serialization
             config.config_path = config_path.clone();
-            config.workspace_dir = zeroclaw_dir.join("workspace");
+            config.workspace_dir = rustyclaw_dir.join("workspace");
             config.apply_env_overrides();
             Ok(config)
         } else {
             let mut config = Config::default();
             config.config_path = config_path.clone();
-            config.workspace_dir = zeroclaw_dir.join("workspace");
+            config.workspace_dir = rustyclaw_dir.join("workspace");
             config.save()?;
             config.apply_env_overrides();
             Ok(config)
@@ -1632,8 +1632,8 @@ impl Config {
 
     /// Apply environment variable overrides to config
     pub fn apply_env_overrides(&mut self) {
-        // API Key: ZEROCLAW_API_KEY or API_KEY (generic)
-        if let Ok(key) = std::env::var("ZEROCLAW_API_KEY").or_else(|_| std::env::var("API_KEY")) {
+        // API Key: RUSTYCLAW_API_KEY or API_KEY (generic)
+        if let Ok(key) = std::env::var("RUSTYCLAW_API_KEY").or_else(|_| std::env::var("API_KEY")) {
             if !key.is_empty() {
                 self.api_key = Some(key);
             }
@@ -1649,53 +1649,53 @@ impl Config {
             }
         }
 
-        // Provider: ZEROCLAW_PROVIDER or PROVIDER
+        // Provider: RUSTYCLAW_PROVIDER or PROVIDER
         if let Ok(provider) =
-            std::env::var("ZEROCLAW_PROVIDER").or_else(|_| std::env::var("PROVIDER"))
+            std::env::var("RUSTYCLAW_PROVIDER").or_else(|_| std::env::var("PROVIDER"))
         {
             if !provider.is_empty() {
                 self.default_provider = Some(provider);
             }
         }
 
-        // Model: ZEROCLAW_MODEL
-        if let Ok(model) = std::env::var("ZEROCLAW_MODEL") {
+        // Model: RUSTYCLAW_MODEL
+        if let Ok(model) = std::env::var("RUSTYCLAW_MODEL") {
             if !model.is_empty() {
                 self.default_model = Some(model);
             }
         }
 
-        // Workspace directory: ZEROCLAW_WORKSPACE
-        if let Ok(workspace) = std::env::var("ZEROCLAW_WORKSPACE") {
+        // Workspace directory: RUSTYCLAW_WORKSPACE
+        if let Ok(workspace) = std::env::var("RUSTYCLAW_WORKSPACE") {
             if !workspace.is_empty() {
                 self.workspace_dir = PathBuf::from(workspace);
             }
         }
 
-        // Gateway port: ZEROCLAW_GATEWAY_PORT or PORT
+        // Gateway port: RUSTYCLAW_GATEWAY_PORT or PORT
         if let Ok(port_str) =
-            std::env::var("ZEROCLAW_GATEWAY_PORT").or_else(|_| std::env::var("PORT"))
+            std::env::var("RUSTYCLAW_GATEWAY_PORT").or_else(|_| std::env::var("PORT"))
         {
             if let Ok(port) = port_str.parse::<u16>() {
                 self.gateway.port = port;
             }
         }
 
-        // Gateway host: ZEROCLAW_GATEWAY_HOST or HOST
-        if let Ok(host) = std::env::var("ZEROCLAW_GATEWAY_HOST").or_else(|_| std::env::var("HOST"))
+        // Gateway host: RUSTYCLAW_GATEWAY_HOST or HOST
+        if let Ok(host) = std::env::var("RUSTYCLAW_GATEWAY_HOST").or_else(|_| std::env::var("HOST"))
         {
             if !host.is_empty() {
                 self.gateway.host = host;
             }
         }
 
-        // Allow public bind: ZEROCLAW_ALLOW_PUBLIC_BIND
-        if let Ok(val) = std::env::var("ZEROCLAW_ALLOW_PUBLIC_BIND") {
+        // Allow public bind: RUSTYCLAW_ALLOW_PUBLIC_BIND
+        if let Ok(val) = std::env::var("RUSTYCLAW_ALLOW_PUBLIC_BIND") {
             self.gateway.allow_public_bind = val == "1" || val.eq_ignore_ascii_case("true");
         }
 
-        // Temperature: ZEROCLAW_TEMPERATURE
-        if let Ok(temp_str) = std::env::var("ZEROCLAW_TEMPERATURE") {
+        // Temperature: RUSTYCLAW_TEMPERATURE
+        if let Ok(temp_str) = std::env::var("RUSTYCLAW_TEMPERATURE") {
             if let Ok(temp) = temp_str.parse::<f64>() {
                 if (0.0..=2.0).contains(&temp) {
                     self.default_temperature = temp;
@@ -1707,11 +1707,11 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         // Encrypt agent API keys before serialization
         let mut config_to_save = self.clone();
-        let zeroclaw_dir = self
+        let rustyclaw_dir = self
             .config_path
             .parent()
             .context("Config path must have a parent directory")?;
-        let store = crate::security::SecretStore::new(zeroclaw_dir, self.secrets.encrypt);
+        let store = crate::security::SecretStore::new(rustyclaw_dir, self.secrets.encrypt);
         for agent in config_to_save.agents.values_mut() {
             if let Some(ref plaintext_key) = agent.api_key {
                 if !crate::security::SecretStore::is_encrypted(plaintext_key) {
@@ -2023,7 +2023,7 @@ tool_dispatcher = "xml"
 
     #[test]
     fn config_save_and_load_tmpdir() {
-        let dir = std::env::temp_dir().join("zeroclaw_test_config");
+        let dir = std::env::temp_dir().join("rustyclaw_test_config");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 
@@ -2073,7 +2073,7 @@ tool_dispatcher = "xml"
     #[test]
     fn config_save_atomic_cleanup() {
         let dir =
-            std::env::temp_dir().join(format!("zeroclaw_test_config_{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("rustyclaw_test_config_{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
 
         let config_path = dir.join("config.toml");
@@ -2689,11 +2689,11 @@ default_temperature = 0.7
         let mut config = Config::default();
         assert!(config.api_key.is_none());
 
-        std::env::set_var("ZEROCLAW_API_KEY", "sk-test-env-key");
+        std::env::set_var("RUSTYCLAW_API_KEY", "sk-test-env-key");
         config.apply_env_overrides();
         assert_eq!(config.api_key.as_deref(), Some("sk-test-env-key"));
 
-        std::env::remove_var("ZEROCLAW_API_KEY");
+        std::env::remove_var("RUSTYCLAW_API_KEY");
     }
 
     #[test]
@@ -2701,7 +2701,7 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::remove_var("ZEROCLAW_API_KEY");
+        std::env::remove_var("RUSTYCLAW_API_KEY");
         std::env::set_var("API_KEY", "sk-fallback-key");
         config.apply_env_overrides();
         assert_eq!(config.api_key.as_deref(), Some("sk-fallback-key"));
@@ -2714,11 +2714,11 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::set_var("ZEROCLAW_PROVIDER", "anthropic");
+        std::env::set_var("RUSTYCLAW_PROVIDER", "anthropic");
         config.apply_env_overrides();
         assert_eq!(config.default_provider.as_deref(), Some("anthropic"));
 
-        std::env::remove_var("ZEROCLAW_PROVIDER");
+        std::env::remove_var("RUSTYCLAW_PROVIDER");
     }
 
     #[test]
@@ -2726,7 +2726,7 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::remove_var("ZEROCLAW_PROVIDER");
+        std::env::remove_var("RUSTYCLAW_PROVIDER");
         std::env::set_var("PROVIDER", "openai");
         config.apply_env_overrides();
         assert_eq!(config.default_provider.as_deref(), Some("openai"));
@@ -2739,11 +2739,11 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::set_var("ZEROCLAW_MODEL", "gpt-4o");
+        std::env::set_var("RUSTYCLAW_MODEL", "gpt-4o");
         config.apply_env_overrides();
         assert_eq!(config.default_model.as_deref(), Some("gpt-4o"));
 
-        std::env::remove_var("ZEROCLAW_MODEL");
+        std::env::remove_var("RUSTYCLAW_MODEL");
     }
 
     #[test]
@@ -2751,11 +2751,11 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::set_var("ZEROCLAW_WORKSPACE", "/custom/workspace");
+        std::env::set_var("RUSTYCLAW_WORKSPACE", "/custom/workspace");
         config.apply_env_overrides();
         assert_eq!(config.workspace_dir, PathBuf::from("/custom/workspace"));
 
-        std::env::remove_var("ZEROCLAW_WORKSPACE");
+        std::env::remove_var("RUSTYCLAW_WORKSPACE");
     }
 
     #[test]
@@ -2764,11 +2764,11 @@ default_temperature = 0.7
         let mut config = Config::default();
         let original_provider = config.default_provider.clone();
 
-        std::env::set_var("ZEROCLAW_PROVIDER", "");
+        std::env::set_var("RUSTYCLAW_PROVIDER", "");
         config.apply_env_overrides();
         assert_eq!(config.default_provider, original_provider);
 
-        std::env::remove_var("ZEROCLAW_PROVIDER");
+        std::env::remove_var("RUSTYCLAW_PROVIDER");
     }
 
     #[test]
@@ -2777,11 +2777,11 @@ default_temperature = 0.7
         let mut config = Config::default();
         assert_eq!(config.gateway.port, 3000);
 
-        std::env::set_var("ZEROCLAW_GATEWAY_PORT", "8080");
+        std::env::set_var("RUSTYCLAW_GATEWAY_PORT", "8080");
         config.apply_env_overrides();
         assert_eq!(config.gateway.port, 8080);
 
-        std::env::remove_var("ZEROCLAW_GATEWAY_PORT");
+        std::env::remove_var("RUSTYCLAW_GATEWAY_PORT");
     }
 
     #[test]
@@ -2789,7 +2789,7 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::remove_var("ZEROCLAW_GATEWAY_PORT");
+        std::env::remove_var("RUSTYCLAW_GATEWAY_PORT");
         std::env::set_var("PORT", "9000");
         config.apply_env_overrides();
         assert_eq!(config.gateway.port, 9000);
@@ -2803,11 +2803,11 @@ default_temperature = 0.7
         let mut config = Config::default();
         assert_eq!(config.gateway.host, "127.0.0.1");
 
-        std::env::set_var("ZEROCLAW_GATEWAY_HOST", "0.0.0.0");
+        std::env::set_var("RUSTYCLAW_GATEWAY_HOST", "0.0.0.0");
         config.apply_env_overrides();
         assert_eq!(config.gateway.host, "0.0.0.0");
 
-        std::env::remove_var("ZEROCLAW_GATEWAY_HOST");
+        std::env::remove_var("RUSTYCLAW_GATEWAY_HOST");
     }
 
     #[test]
@@ -2815,7 +2815,7 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::remove_var("ZEROCLAW_GATEWAY_HOST");
+        std::env::remove_var("RUSTYCLAW_GATEWAY_HOST");
         std::env::set_var("HOST", "0.0.0.0");
         config.apply_env_overrides();
         assert_eq!(config.gateway.host, "0.0.0.0");
@@ -2828,31 +2828,31 @@ default_temperature = 0.7
         let _env_guard = env_override_test_guard();
         let mut config = Config::default();
 
-        std::env::set_var("ZEROCLAW_TEMPERATURE", "0.5");
+        std::env::set_var("RUSTYCLAW_TEMPERATURE", "0.5");
         config.apply_env_overrides();
         assert!((config.default_temperature - 0.5).abs() < f64::EPSILON);
 
-        std::env::remove_var("ZEROCLAW_TEMPERATURE");
+        std::env::remove_var("RUSTYCLAW_TEMPERATURE");
     }
 
     #[test]
     fn env_override_temperature_out_of_range_ignored() {
         let _env_guard = env_override_test_guard();
         // Clean up any leftover env vars from other tests
-        std::env::remove_var("ZEROCLAW_TEMPERATURE");
+        std::env::remove_var("RUSTYCLAW_TEMPERATURE");
 
         let mut config = Config::default();
         let original_temp = config.default_temperature;
 
         // Temperature > 2.0 should be ignored
-        std::env::set_var("ZEROCLAW_TEMPERATURE", "3.0");
+        std::env::set_var("RUSTYCLAW_TEMPERATURE", "3.0");
         config.apply_env_overrides();
         assert!(
             (config.default_temperature - original_temp).abs() < f64::EPSILON,
             "Temperature 3.0 should be ignored (out of range)"
         );
 
-        std::env::remove_var("ZEROCLAW_TEMPERATURE");
+        std::env::remove_var("RUSTYCLAW_TEMPERATURE");
     }
 
     #[test]

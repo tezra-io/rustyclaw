@@ -421,10 +421,10 @@ impl Channel for EmailChannel {
             if let Some(pos) = message.find('\n') {
                 (&message[9..pos], message[pos + 1..].trim())
             } else {
-                ("ZeroClaw Message", message)
+                ("RustyClaw Message", message)
             }
         } else {
-            ("ZeroClaw Message", message)
+            ("RustyClaw Message", message)
         };
 
         let email = Message::builder()

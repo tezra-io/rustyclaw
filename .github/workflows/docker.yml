@@ -51,12 +51,12 @@ jobs:
                   context: .
                   push: false
                   load: true
-                  tags: zeroclaw-pr-smoke:latest
+                  tags: rustyclaw-pr-smoke:latest
                   labels: ${{ steps.meta.outputs.labels }}
                   platforms: linux/amd64
 
             - name: Verify image
-              run: docker run --rm zeroclaw-pr-smoke:latest --version
+              run: docker run --rm rustyclaw-pr-smoke:latest --version
 
     publish:
         name: Build and Push Docker Image

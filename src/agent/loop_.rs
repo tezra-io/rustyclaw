@@ -332,7 +332,7 @@ fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) {
         }
     }
 
-    // Fall back to XML-style <invoke> tag parsing (ZeroClaw's original format)
+    // Fall back to XML-style <invoke> tag parsing (RustyClaw's original format)
     while let Some(start) = remaining.find("<tool_call>") {
         // Everything before the tag is text
         let before = &remaining[..start];
@@ -367,7 +367,7 @@ fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) {
     // (e.g., in emails, files, or web pages) could include JSON that mimics a
     // tool call. Tool calls MUST be explicitly wrapped in either:
     // 1. OpenAI-style JSON with a "tool_calls" array
-    // 2. ZeroClaw <invoke>...</invoke> tags
+    // 2. RustyClaw <invoke>...</invoke> tags
     // This ensures only the LLM's intentional tool calls are executed.
 
     // Remaining text after last tool call
@@ -767,7 +767,7 @@ pub async fn run(
         ));
         tool_descs.push((
             "arduino_upload",
-            "Upload agent-generated Arduino sketch. Use when: user asks for 'make a heart', 'blink pattern', or custom LED behavior on Arduino. You write the full .ino code; ZeroClaw compiles and uploads it. Pin 13 = built-in LED on Uno.",
+            "Upload agent-generated Arduino sketch. Use when: user asks for 'make a heart', 'blink pattern', or custom LED behavior on Arduino. You write the full .ino code; RustyClaw compiles and uploads it. Pin 13 = built-in LED on Uno.",
         ));
         tool_descs.push((
             "hardware_memory_map",
@@ -857,7 +857,7 @@ pub async fn run(
                 .await;
         }
     } else {
-        println!("🦀 ZeroClaw Interactive Mode");
+        println!("🦀 RustyClaw Interactive Mode");
         println!("Type /quit to exit.\n");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
@@ -1045,7 +1045,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         ));
         tool_descs.push((
             "arduino_upload",
-            "Upload Arduino sketch. Use for 'make a heart', custom patterns. You write full .ino code; ZeroClaw uploads it.",
+            "Upload Arduino sketch. Use for 'make a heart', custom patterns. You write full .ino code; RustyClaw uploads it.",
         ));
         tool_descs.push((
             "hardware_memory_map",

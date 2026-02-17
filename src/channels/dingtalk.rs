@@ -84,7 +84,7 @@ impl Channel for DingTalkChannel {
         let body = serde_json::json!({
             "msgtype": "markdown",
             "markdown": {
-                "title": "ZeroClaw",
+                "title": "RustyClaw",
                 "text": message,
             }
         });

@@ -1,7 +1,7 @@
-# Resource Limits for ZeroClaw
+# Resource Limits for RustyClaw
 
 ## Problem
-ZeroClaw has rate limiting (20 actions/hour) but no resource caps. A runaway agent could:
+RustyClaw has rate limiting (20 actions/hour) but no resource caps. A runaway agent could:
 - Exhaust available memory
 - Spin CPU at 100%
 - Fill disk with logs/output
@@ -11,7 +11,7 @@ ZeroClaw has rate limiting (20 actions/hour) but no resource caps. A runaway age
 ## Proposed Solutions
 
 ### Option 1: cgroups v2 (Linux, Recommended)
-Automatically create a cgroup for zeroclaw with limits.
+Automatically create a cgroup for rustyclaw with limits.
 
 ```bash
 # Create systemd service with limits
