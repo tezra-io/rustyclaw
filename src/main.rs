@@ -70,7 +70,7 @@ mod util;
 use config::Config;
 
 // Re-export so binary's hardware/peripherals modules can use crate::HardwareCommands etc.
-pub use rustyclaw::{HardwareCommands, PeripheralCommands};
+pub use rustyclaw::{AgentSubCommands, HardwareCommands, PeripheralCommands};
 
 /// `RustyClaw` - Zero overhead. Zero compromise. 100% Rust.
 #[derive(Parser, Debug)]
@@ -201,6 +201,12 @@ enum Commands {
     Integrations {
         #[command(subcommand)]
         integration_command: IntegrationCommands,
+    },
+
+    /// Manage multi-agent definitions (create, list, edit, remove)
+    Agents {
+        #[command(subcommand)]
+        agent_subcommand: AgentSubCommands,
     },
 
     /// Manage skills (user-defined capabilities)
@@ -524,6 +530,10 @@ async fn main() -> Result<()> {
         Commands::Integrations {
             integration_command,
         } => integrations::handle_command(integration_command, &config),
+
+        Commands::Agents { agent_subcommand } => {
+            agent::commands::handle_command(agent_subcommand, &config).await
+        }
 
         Commands::Skills { skill_command } => {
             skills::handle_command(skill_command, &config.workspace_dir)

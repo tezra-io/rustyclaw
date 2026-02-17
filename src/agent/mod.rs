@@ -1,9 +1,14 @@
 #[allow(clippy::module_inception)]
 pub mod agent;
+pub mod bus;
+pub mod commands;
+pub mod definition;
 pub mod dispatcher;
+pub mod generator;
 pub mod loop_;
 pub mod memory_loader;
 pub mod prompt;
+pub mod registry;
 
 #[allow(unused_imports)]
 pub use agent::{Agent, AgentBuilder};

@@ -1,3 +1,4 @@
+pub mod agent_manage;
 pub mod browser;
 pub mod browser_open;
 pub mod composio;
@@ -18,6 +19,7 @@ pub mod screenshot;
 pub mod shell;
 pub mod traits;
 
+pub use agent_manage::AgentManageTool;
 pub use browser::{BrowserTool, ComputerUseConfig};
 pub use browser_open::BrowserOpenTool;
 pub use composio::ComposioTool;
@@ -181,6 +183,16 @@ pub fn all_tools_with_runtime(
     }
 
     tools
+}
+
+/// Add the agent management tool to an existing tools registry.
+/// Call this after `all_tools()` when agent registry and bus are available.
+pub fn add_agent_management(
+    tools: &mut Vec<Box<dyn Tool>>,
+    registry: Arc<crate::agent::registry::AgentRegistry>,
+    bus: Arc<crate::agent::bus::AgentBus>,
+) {
+    tools.push(Box::new(AgentManageTool::new(registry, bus)));
 }
 
 #[cfg(test)]

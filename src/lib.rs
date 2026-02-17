@@ -184,6 +184,70 @@ pub enum IntegrationCommands {
     },
 }
 
+/// Agent management subcommands
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AgentSubCommands {
+    /// List all defined agents
+    List,
+    /// Create a new agent
+    Create {
+        /// Agent name
+        #[arg(long)]
+        name: Option<String>,
+        /// Persistent agent (survives restarts)
+        #[arg(long)]
+        persistent: bool,
+        /// Skills to assign
+        #[arg(long, value_delimiter = ',')]
+        skills: Option<Vec<String>>,
+        /// Memory isolation (isolated, shared-read, shared)
+        #[arg(long)]
+        memory: Option<String>,
+        /// Cron schedule expression
+        #[arg(long)]
+        schedule: Option<String>,
+        /// Allowed tools (empty = all)
+        #[arg(long, value_delimiter = ',')]
+        allowed_tools: Option<Vec<String>>,
+        /// Generate from natural language description
+        #[arg(long)]
+        from_description: Option<String>,
+    },
+    /// Edit an agent definition in $EDITOR
+    Edit {
+        /// Agent name
+        name: String,
+    },
+    /// Remove an agent
+    Remove {
+        /// Agent name
+        name: String,
+    },
+    /// Show agent status
+    Status {
+        /// Agent name
+        name: String,
+    },
+    /// Add a skill to an agent
+    SkillAdd {
+        /// Agent name
+        #[arg(long)]
+        agent: String,
+        /// Skill name
+        #[arg(long)]
+        skill: String,
+    },
+    /// Remove a skill from an agent
+    SkillRemove {
+        /// Agent name
+        #[arg(long)]
+        agent: String,
+        /// Skill name
+        #[arg(long)]
+        skill: String,
+    },
+}
+
 /// Hardware discovery subcommands
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum HardwareCommands {
