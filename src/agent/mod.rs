@@ -9,10 +9,12 @@ pub mod loop_;
 pub mod memory_loader;
 pub mod prompt;
 pub mod registry;
+pub mod runner;
 
 #[allow(unused_imports)]
 pub use agent::{Agent, AgentBuilder};
 pub use loop_::{process_message, run};
+pub use runner::run_persistent_agent;
 
 #[cfg(test)]
 mod tests {

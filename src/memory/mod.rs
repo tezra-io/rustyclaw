@@ -1,6 +1,8 @@
 pub mod backend;
 pub mod chunker;
+pub mod composite;
 pub mod embeddings;
+pub mod ephemeral;
 pub mod hygiene;
 pub mod lucid;
 pub mod markdown;
@@ -16,6 +18,8 @@ pub use backend::{
     classify_memory_backend, default_memory_backend_key, memory_backend_profile,
     selectable_memory_backends, MemoryBackendKind, MemoryBackendProfile,
 };
+pub use composite::CompositeMemory;
+pub use ephemeral::EphemeralMemory;
 pub use lucid::LucidMemory;
 pub use markdown::MarkdownMemory;
 pub use none::NoneMemory;
@@ -142,6 +146,49 @@ pub fn create_memory_for_migration(
         workspace_dir,
         || SqliteMemory::new(workspace_dir),
         " during migration",
+    )
+}
+
+/// Create memory for an ephemeral agent (in-memory HashMap, no persistence).
+pub fn create_ephemeral_memory() -> Box<dyn Memory> {
+    Box::new(EphemeralMemory::new())
+}
+
+/// Create memory for a persistent agent.
+/// Default: JSONL/markdown backend pointed at agent's data dir.
+/// Opt-in: SQLite when agent definition specifies `memory_backend: sqlite`.
+pub fn create_agent_memory(
+    config: &MemoryConfig,
+    agents_dir: &std::path::Path,
+    agent_name: &str,
+    memory_backend: &str,
+    api_key: Option<&str>,
+) -> anyhow::Result<Box<dyn Memory>> {
+    let agent_data_dir = agents_dir.join(agent_name);
+    std::fs::create_dir_all(&agent_data_dir)?;
+
+    create_memory_with_sqlite_builder(
+        memory_backend,
+        &agent_data_dir,
+        || {
+            let embedder: Arc<dyn embeddings::EmbeddingProvider> =
+                Arc::from(embeddings::create_embedding_provider(
+                    &config.embedding_provider,
+                    api_key,
+                    &config.embedding_model,
+                    config.embedding_dimensions,
+                ));
+
+            #[allow(clippy::cast_possible_truncation)]
+            SqliteMemory::with_embedder(
+                &agent_data_dir,
+                embedder,
+                config.vector_weight as f32,
+                config.keyword_weight as f32,
+                config.embedding_cache_size,
+            )
+        },
+        &format!(" for agent '{agent_name}'"),
     )
 }
 

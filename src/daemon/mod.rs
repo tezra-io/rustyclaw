@@ -17,6 +17,9 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
 
     crate::health::mark_component_ok("daemon");
 
+    // ── Shutdown coordination ──
+    let (shutdown_tx, _) = tokio::sync::watch::channel(false);
+
     if config.heartbeat.enabled {
         let _ =
             crate::heartbeat::engine::HeartbeatEngine::ensure_heartbeat_file(&config.workspace_dir)
@@ -24,6 +27,53 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
     }
 
     let mut handles: Vec<JoinHandle<()>> = vec![spawn_state_writer(config.clone())];
+
+    // ── Agent infrastructure ──
+    let registry = crate::agent::registry::AgentRegistry::from_config(&config);
+    let bus = std::sync::Arc::new(crate::agent::bus::AgentBus::new());
+
+    // ── Start persistent agents ──
+    let persistent_agents: Vec<_> = registry
+        .list()
+        .into_iter()
+        .filter(|d| d.persistent)
+        .collect();
+
+    let agent_count = persistent_agents.len();
+
+    for definition in persistent_agents {
+        let agent_name = definition.name.clone();
+        let agent_bus = bus.clone();
+        let agent_config = config.clone();
+        let agent_shutdown_rx = shutdown_tx.subscribe();
+        handles.push(tokio::spawn(async move {
+            loop {
+                crate::health::mark_component_ok(&format!("agent:{agent_name}"));
+                match crate::agent::run_persistent_agent(
+                    definition.clone(),
+                    agent_config.clone(),
+                    agent_bus.clone(),
+                    agent_shutdown_rx.clone(),
+                )
+                .await
+                {
+                    Ok(()) => {
+                        tracing::info!(agent = %agent_name, "Agent exited cleanly");
+                        break; // Clean exit (shutdown requested)
+                    }
+                    Err(e) => {
+                        crate::health::mark_component_error(
+                            &format!("agent:{agent_name}"),
+                            e.to_string(),
+                        );
+                        crate::health::bump_component_restart(&format!("agent:{agent_name}"));
+                        tracing::error!(agent = %agent_name, "Agent crashed: {e}. Restarting in 5s...");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
+        }));
+    }
 
     {
         let gateway_cfg = config.clone();
@@ -87,10 +137,16 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
     println!("🧠 RustyClaw daemon started");
     println!("   Gateway:  http://{host}:{port}");
     println!("   Components: gateway, channels, heartbeat, scheduler");
+    if agent_count > 0 {
+        println!("   Agents:   {agent_count} persistent");
+    }
     println!("   Ctrl+C to stop");
 
     tokio::signal::ctrl_c().await?;
     crate::health::mark_component_error("daemon", "shutdown requested");
+
+    // Signal all persistent agents to stop gracefully
+    let _ = shutdown_tx.send(true);
 
     for handle in &handles {
         handle.abort();
