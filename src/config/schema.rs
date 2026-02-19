@@ -54,6 +54,12 @@ pub struct Config {
     pub memory: MemoryConfig,
 
     #[serde(default)]
+    pub learning: LearningConfig,
+
+    #[serde(default)]
+    pub personalization: PersonalizationConfig,
+
+    #[serde(default)]
     pub tunnel: TunnelConfig,
 
     #[serde(default)]
@@ -833,6 +839,99 @@ impl Default for MemoryConfig {
     }
 }
 
+// ── Learning ──────────────────────────────────────────────────────
+
+/// Configuration for the background Learning Worker (L layer of MAPLE).
+///
+/// The Learning Worker extracts durable facts and preferences from conversation
+/// history and stores them as `Fact`/`Preference` memory entries.
+/// Requires SQLite backend; automatically disabled for markdown/none backends.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningConfig {
+    /// Enable the Learning Worker. Off by default — opt in explicitly.
+    #[serde(default)]
+    pub enabled: bool,
+    /// How often the worker polls for new sessions to process (seconds).
+    #[serde(default = "default_learning_poll_secs")]
+    pub poll_interval_secs: u64,
+    /// Inactivity gap (seconds) before a persistent-agent session is considered ended.
+    #[serde(default = "default_session_idle_secs")]
+    pub session_idle_secs: u64,
+    /// Override model for extraction calls. Defaults to `config.default_model`.
+    /// Set to a cheaper/faster model (e.g. haiku) to reduce cost.
+    #[serde(default)]
+    pub extraction_model: Option<String>,
+    /// Maximum extraction runs per calendar day (coarse rate limit).
+    #[serde(default = "default_learning_daily_limit")]
+    pub max_extractions_per_day: u32,
+    /// Maximum conversation entries fed into a single extraction batch.
+    #[serde(default = "default_learning_batch_size")]
+    pub max_conversation_entries_per_batch: usize,
+}
+
+fn default_learning_poll_secs() -> u64 {
+    300
+}
+fn default_session_idle_secs() -> u64 {
+    600
+}
+fn default_learning_daily_limit() -> u32 {
+    3
+}
+fn default_learning_batch_size() -> usize {
+    40
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            poll_interval_secs: default_learning_poll_secs(),
+            session_idle_secs: default_session_idle_secs(),
+            extraction_model: None,
+            max_extractions_per_day: default_learning_daily_limit(),
+            max_conversation_entries_per_batch: default_learning_batch_size(),
+        }
+    }
+}
+
+// ── Personalization ────────────────────────────────────────────────
+
+/// Configuration for the Personalization Engine (P layer of MAPLE).
+///
+/// Controls how recalled memories are structured and injected into each request.
+/// Always-on by default (replaces the simple `build_context()` recall).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersonalizationConfig {
+    /// Enable category-structured context injection.
+    /// When true, `Preference`/`UserModel` entries are placed first in the context.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Number of preference entries injected unconditionally (always-on list).
+    #[serde(default = "default_preference_limit")]
+    pub always_on_preference_limit: usize,
+    /// Total recalled entries from semantic search.
+    #[serde(default = "default_recall_limit")]
+    pub recall_limit: usize,
+}
+
+fn default_preference_limit() -> usize {
+    5
+}
+fn default_recall_limit() -> usize {
+    10
+}
+
+impl Default for PersonalizationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            always_on_preference_limit: default_preference_limit(),
+            recall_limit: default_recall_limit(),
+        }
+    }
+}
+
 // ── Observability ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1592,6 +1691,8 @@ impl Default for Config {
             peripherals: PeripheralsConfig::default(),
             agents: HashMap::new(),
             hardware: HardwareConfig::default(),
+            learning: LearningConfig::default(),
+            personalization: PersonalizationConfig::default(),
         }
     }
 }
@@ -1937,6 +2038,8 @@ mod tests {
                 dingtalk: None,
             },
             memory: MemoryConfig::default(),
+            learning: LearningConfig::default(),
+            personalization: PersonalizationConfig::default(),
             tunnel: TunnelConfig::default(),
             gateway: GatewayConfig::default(),
             composio: ComposioConfig::default(),
@@ -2044,6 +2147,8 @@ tool_dispatcher = "xml"
             heartbeat: HeartbeatConfig::default(),
             channels_config: ChannelsConfig::default(),
             memory: MemoryConfig::default(),
+            learning: LearningConfig::default(),
+            personalization: PersonalizationConfig::default(),
             tunnel: TunnelConfig::default(),
             gateway: GatewayConfig::default(),
             composio: ComposioConfig::default(),

@@ -301,6 +301,9 @@ fn parse_category(raw: &str) -> MemoryCategory {
         "core" | "" => MemoryCategory::Core,
         "daily" => MemoryCategory::Daily,
         "conversation" => MemoryCategory::Conversation,
+        "fact" => MemoryCategory::Fact,
+        "preference" => MemoryCategory::Preference,
+        "user_model" => MemoryCategory::UserModel,
         other => MemoryCategory::Custom(other.to_string()),
     }
 }

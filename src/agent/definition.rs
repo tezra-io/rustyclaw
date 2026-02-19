@@ -28,8 +28,8 @@ pub struct AgentDefinition {
     pub skills: Vec<String>,
     #[serde(default)]
     pub memory: MemoryIsolation,
-    /// Memory backend for this agent: "jsonl" (default for persistent),
-    /// "sqlite" (opt-in for vector search), ignored for ephemeral (always in-memory)
+    /// Memory backend for this agent: "markdown" (default), "sqlite" (opt-in for
+    /// vector search and Learning), ignored for ephemeral (always in-memory)
     #[serde(default = "default_memory_backend")]
     pub memory_backend: String,
     #[serde(default)]
@@ -62,7 +62,7 @@ pub enum MemoryIsolation {
 }
 
 fn default_memory_backend() -> String {
-    "jsonl".into()
+    "markdown".into()
 }
 
 fn default_max_tools() -> usize {
@@ -152,8 +152,10 @@ impl AgentDefinition {
 
         // Validate memory_backend
         match self.memory_backend.as_str() {
-            "jsonl" | "sqlite" | "markdown" => {}
-            other => warnings.push(format!("Unknown memory_backend '{other}', will use jsonl")),
+            "sqlite" | "markdown" | "lucid" | "none" => {}
+            other => warnings.push(format!(
+                "Unknown memory_backend '{other}', will use markdown"
+            )),
         }
 
         Ok(warnings)
@@ -209,7 +211,7 @@ You manage my Twitter account. Post engaging content.
         assert!(!def.persistent);
         assert_eq!(def.max_tools_per_turn, 10);
         assert!(def.allowed_tools.is_empty());
-        assert_eq!(def.memory_backend, "jsonl");
+        assert_eq!(def.memory_backend, "markdown");
         assert_eq!(def.personality, "Hello");
     }
 
@@ -273,11 +275,20 @@ You manage my Twitter account. Post engaging content.
         let def = AgentDefinition::parse(md).unwrap();
         let warnings = def.validate(&[]).unwrap();
         assert!(warnings.iter().any(|w| w.contains("nosql")));
+        assert!(warnings.iter().any(|w| w.contains("markdown")));
     }
 
     #[test]
     fn validate_accepts_valid_definition() {
         let md = "---\nname: test\nmemory_backend: sqlite\n---\n";
+        let def = AgentDefinition::parse(md).unwrap();
+        let warnings = def.validate(&[]).unwrap();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn validate_accepts_markdown_backend() {
+        let md = "---\nname: test\nmemory_backend: markdown\n---\n";
         let def = AgentDefinition::parse(md).unwrap();
         let warnings = def.validate(&[]).unwrap();
         assert!(warnings.is_empty());

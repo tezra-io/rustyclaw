@@ -23,6 +23,12 @@ pub enum MemoryCategory {
     Daily,
     /// Conversation context
     Conversation,
+    /// Extracted factual statements about the user (e.g. "user is a software engineer")
+    Fact,
+    /// Behavioral preferences (e.g. "prefers terse responses")
+    Preference,
+    /// Aggregate user model entries with stable keys (e.g. "user_model.response_style")
+    UserModel,
     /// User-defined custom category
     Custom(String),
 }
@@ -33,6 +39,9 @@ impl std::fmt::Display for MemoryCategory {
             Self::Core => write!(f, "core"),
             Self::Daily => write!(f, "daily"),
             Self::Conversation => write!(f, "conversation"),
+            Self::Fact => write!(f, "fact"),
+            Self::Preference => write!(f, "preference"),
+            Self::UserModel => write!(f, "user_model"),
             Self::Custom(name) => write!(f, "{name}"),
         }
     }
@@ -76,6 +85,9 @@ mod tests {
         assert_eq!(MemoryCategory::Core.to_string(), "core");
         assert_eq!(MemoryCategory::Daily.to_string(), "daily");
         assert_eq!(MemoryCategory::Conversation.to_string(), "conversation");
+        assert_eq!(MemoryCategory::Fact.to_string(), "fact");
+        assert_eq!(MemoryCategory::Preference.to_string(), "preference");
+        assert_eq!(MemoryCategory::UserModel.to_string(), "user_model");
         assert_eq!(
             MemoryCategory::Custom("project_notes".into()).to_string(),
             "project_notes"
@@ -87,10 +99,16 @@ mod tests {
         let core = serde_json::to_string(&MemoryCategory::Core).unwrap();
         let daily = serde_json::to_string(&MemoryCategory::Daily).unwrap();
         let conversation = serde_json::to_string(&MemoryCategory::Conversation).unwrap();
+        let fact = serde_json::to_string(&MemoryCategory::Fact).unwrap();
+        let preference = serde_json::to_string(&MemoryCategory::Preference).unwrap();
+        let user_model = serde_json::to_string(&MemoryCategory::UserModel).unwrap();
 
         assert_eq!(core, "\"core\"");
         assert_eq!(daily, "\"daily\"");
         assert_eq!(conversation, "\"conversation\"");
+        assert_eq!(fact, "\"fact\"");
+        assert_eq!(preference, "\"preference\"");
+        assert_eq!(user_model, "\"user_model\"");
     }
 
     #[test]

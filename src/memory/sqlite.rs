@@ -131,6 +131,9 @@ impl SqliteMemory {
             MemoryCategory::Core => "core".into(),
             MemoryCategory::Daily => "daily".into(),
             MemoryCategory::Conversation => "conversation".into(),
+            MemoryCategory::Fact => "fact".into(),
+            MemoryCategory::Preference => "preference".into(),
+            MemoryCategory::UserModel => "user_model".into(),
             MemoryCategory::Custom(name) => name.clone(),
         }
     }
@@ -140,6 +143,9 @@ impl SqliteMemory {
             "core" => MemoryCategory::Core,
             "daily" => MemoryCategory::Daily,
             "conversation" => MemoryCategory::Conversation,
+            "fact" => MemoryCategory::Fact,
+            "preference" => MemoryCategory::Preference,
+            "user_model" => MemoryCategory::UserModel,
             other => MemoryCategory::Custom(other.to_string()),
         }
     }
@@ -1355,6 +1361,121 @@ mod tests {
         assert_eq!(s, "");
         let back = SqliteMemory::str_to_category(&s);
         assert_eq!(back, MemoryCategory::Custom(String::new()));
+    }
+
+    // ── MAPLE Phase 1: new category string conversion tests ──────
+
+    #[test]
+    fn category_to_str_fact() {
+        assert_eq!(SqliteMemory::category_to_str(&MemoryCategory::Fact), "fact");
+    }
+
+    #[test]
+    fn category_to_str_preference() {
+        assert_eq!(
+            SqliteMemory::category_to_str(&MemoryCategory::Preference),
+            "preference"
+        );
+    }
+
+    #[test]
+    fn category_to_str_user_model() {
+        assert_eq!(
+            SqliteMemory::category_to_str(&MemoryCategory::UserModel),
+            "user_model"
+        );
+    }
+
+    #[test]
+    fn str_to_category_fact() {
+        assert_eq!(SqliteMemory::str_to_category("fact"), MemoryCategory::Fact);
+    }
+
+    #[test]
+    fn str_to_category_preference() {
+        assert_eq!(
+            SqliteMemory::str_to_category("preference"),
+            MemoryCategory::Preference
+        );
+    }
+
+    #[test]
+    fn str_to_category_user_model() {
+        assert_eq!(
+            SqliteMemory::str_to_category("user_model"),
+            MemoryCategory::UserModel
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_category_roundtrip_maple_variants() {
+        let (_tmp, mem) = temp_sqlite();
+        let categories = [
+            MemoryCategory::Fact,
+            MemoryCategory::Preference,
+            MemoryCategory::UserModel,
+        ];
+
+        for (i, cat) in categories.iter().enumerate() {
+            mem.store(&format!("maple_k{i}"), &format!("maple_v{i}"), cat.clone())
+                .await
+                .unwrap();
+        }
+
+        for (i, cat) in categories.iter().enumerate() {
+            let entry = mem.get(&format!("maple_k{i}")).await.unwrap().unwrap();
+            assert_eq!(&entry.category, cat, "Category mismatch for index {i}");
+        }
+    }
+
+    #[tokio::test]
+    async fn sqlite_list_by_fact_category() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store("f1", "user is a software engineer", MemoryCategory::Fact)
+            .await
+            .unwrap();
+        mem.store("f2", "user lives in Berlin", MemoryCategory::Fact)
+            .await
+            .unwrap();
+        mem.store("p1", "prefers terse responses", MemoryCategory::Preference)
+            .await
+            .unwrap();
+
+        let facts = mem.list(Some(&MemoryCategory::Fact)).await.unwrap();
+        assert_eq!(facts.len(), 2);
+        assert!(facts.iter().all(|e| e.category == MemoryCategory::Fact));
+
+        let prefs = mem.list(Some(&MemoryCategory::Preference)).await.unwrap();
+        assert_eq!(prefs.len(), 1);
+        assert_eq!(prefs[0].category, MemoryCategory::Preference);
+    }
+
+    #[tokio::test]
+    async fn sqlite_list_by_user_model_category() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store(
+            "user_model.response_style",
+            "terse",
+            MemoryCategory::UserModel,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "user_model.expertise",
+            "backend engineer",
+            MemoryCategory::UserModel,
+        )
+        .await
+        .unwrap();
+        mem.store("f1", "some fact", MemoryCategory::Fact)
+            .await
+            .unwrap();
+
+        let user_model = mem.list(Some(&MemoryCategory::UserModel)).await.unwrap();
+        assert_eq!(user_model.len(), 2);
+        assert!(user_model
+            .iter()
+            .all(|e| e.category == MemoryCategory::UserModel));
     }
 
     // ── Edge cases: list ─────────────────────────────────────────

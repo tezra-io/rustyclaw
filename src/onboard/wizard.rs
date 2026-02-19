@@ -130,6 +130,8 @@ pub fn run_wizard() -> Result<Config> {
         peripherals: crate::config::PeripheralsConfig::default(),
         agents: std::collections::HashMap::new(),
         hardware: hardware_config,
+        learning: crate::config::LearningConfig::default(),
+        personalization: crate::config::PersonalizationConfig::default(),
     };
 
     println!(
@@ -342,6 +344,8 @@ pub fn run_quick_setup(
         peripherals: crate::config::PeripheralsConfig::default(),
         agents: std::collections::HashMap::new(),
         hardware: crate::config::HardwareConfig::default(),
+        learning: crate::config::LearningConfig::default(),
+        personalization: crate::config::PersonalizationConfig::default(),
     };
 
     config.save()?;
@@ -1339,7 +1343,9 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String)> {
             style("Custom Provider Setup").white().bold(),
             style("— any OpenAI-compatible API").dim()
         );
-        print_bullet("RustyClaw works with ANY API that speaks the OpenAI chat completions format.");
+        print_bullet(
+            "RustyClaw works with ANY API that speaks the OpenAI chat completions format.",
+        );
         print_bullet("Examples: LiteLLM, LocalAI, vLLM, text-generation-webui, LM Studio, etc.");
         println!();
 
