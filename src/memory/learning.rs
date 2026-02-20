@@ -60,17 +60,12 @@ pub async fn run(config: Config) -> Result<()> {
         config.api_key.as_deref(),
     )?);
 
-    let provider_name = config
-        .default_provider
-        .as_deref()
-        .unwrap_or("openrouter")
-        .to_string();
+    let provider_name = config.effective_provider().to_string();
     let model_name = config
         .learning
         .extraction_model
         .clone()
-        .or_else(|| config.default_model.clone())
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+        .unwrap_or_else(|| config.effective_model());
 
     let provider = providers::create_routed_provider(
         &provider_name,

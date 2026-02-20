@@ -109,12 +109,13 @@ pub async fn run_persistent_agent(
     // Filter tools by allowed_tools
     let tools = filter_tools(all_tools, &definition.allowed_tools);
 
-    let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
+    let provider_name = config.effective_provider();
+    let effective_model = config.effective_model();
     let model_name = definition
         .model
         .as_deref()
         .or(config.default_model.as_deref())
-        .unwrap_or("anthropic/claude-sonnet-4-20250514")
+        .unwrap_or(&effective_model)
         .to_string();
     let temperature = definition.temperature.unwrap_or(config.default_temperature);
 

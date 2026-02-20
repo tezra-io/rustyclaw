@@ -1136,7 +1136,7 @@ pub fn run_models_refresh(
 ) -> Result<()> {
     let provider_name = provider_override
         .or(config.default_provider.as_deref())
-        .unwrap_or("openrouter")
+        .unwrap_or_else(|| config.effective_provider())
         .trim()
         .to_string();
 
@@ -3630,7 +3630,7 @@ fn print_summary(config: &Config) {
     println!(
         "    {} Provider:      {}",
         style("🤖").cyan(),
-        config.default_provider.as_deref().unwrap_or("openrouter")
+        config.effective_provider()
     );
     println!(
         "    {} Model:         {}",
@@ -3775,7 +3775,7 @@ fn print_summary(config: &Config) {
     let mut step = 1u8;
 
     if config.api_key.is_none() {
-        let env_var = provider_env_var(config.default_provider.as_deref().unwrap_or("openrouter"));
+        let env_var = provider_env_var(config.effective_provider());
         println!(
             "    {} Set your API key:",
             style(format!("{step}.")).cyan().bold()

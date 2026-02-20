@@ -438,7 +438,7 @@ async fn main() -> Result<()> {
             println!();
             println!(
                 "🤖 Provider:      {}",
-                config.default_provider.as_deref().unwrap_or("openrouter")
+                config.effective_provider()
             );
             println!(
                 "   Model:         {}",

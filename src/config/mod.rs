@@ -2,14 +2,15 @@ pub mod schema;
 
 #[allow(unused_imports)]
 pub use schema::{
-    AgentConfig, AuditConfig, AutonomyConfig, BrowserComputerUseConfig, BrowserConfig,
-    ChannelsConfig, ComposioConfig, Config, CostConfig, DelegateAgentConfig, DiscordConfig,
-    DockerRuntimeConfig, GatewayConfig, HardwareConfig, HardwareTransport, HeartbeatConfig,
-    HttpRequestConfig, IMessageConfig, IdentityConfig, LarkConfig, LearningConfig, MatrixConfig,
-    MemoryConfig, ModelRouteConfig, ObservabilityConfig, PeripheralBoardConfig, PeripheralsConfig,
-    PersonalizationConfig, ReliabilityConfig, ResourceLimitsConfig, RuntimeConfig, SandboxBackend,
-    SandboxConfig, SchedulerConfig, SecretsConfig, SecurityConfig, SlackConfig, TelegramConfig,
-    TunnelConfig, WebhookConfig,
+    default_model_for_provider, AgentConfig, AuditConfig, AutonomyConfig,
+    BrowserComputerUseConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, CostConfig,
+    DelegateAgentConfig, DiscordConfig, DockerRuntimeConfig, GatewayConfig, HardwareConfig,
+    HardwareTransport, HeartbeatConfig, HttpRequestConfig, IMessageConfig, IdentityConfig,
+    LarkConfig, LearningConfig, MatrixConfig, MemoryConfig, ModelRouteConfig,
+    ObservabilityConfig, PeripheralBoardConfig, PeripheralsConfig, PersonalizationConfig,
+    ReliabilityConfig, ResourceLimitsConfig, RuntimeConfig, SandboxBackend, SandboxConfig,
+    SchedulerConfig, SecretsConfig, SecurityConfig, SlackConfig, TelegramConfig, TunnelConfig,
+    WebhookConfig,
 };
 
 #[cfg(test)]
@@ -20,8 +21,12 @@ mod tests {
     fn reexported_config_default_is_constructible() {
         let config = Config::default();
 
-        assert!(config.default_provider.is_some());
-        assert!(config.default_model.is_some());
+        // After TEZ-17: defaults are None until onboarding sets them;
+        // effective_provider() / effective_model() provide fallbacks.
+        assert!(config.default_provider.is_none());
+        assert!(config.default_model.is_none());
+        assert!(!config.effective_provider().is_empty());
+        assert!(!config.effective_model().is_empty());
         assert!(config.default_temperature > 0.0);
     }
 

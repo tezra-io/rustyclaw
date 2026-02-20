@@ -651,15 +651,16 @@ pub async fn run(
     }
 
     // ── Resolve provider ─────────────────────────────────────────
+    let effective_model = config.effective_model();
     let provider_name = provider_override
         .as_deref()
         .or(config.default_provider.as_deref())
-        .unwrap_or("openrouter");
+        .unwrap_or_else(|| config.effective_provider());
 
     let model_name = model_override
         .as_deref()
         .or(config.default_model.as_deref())
-        .unwrap_or("anthropic/claude-sonnet-4");
+        .unwrap_or(&effective_model);
 
     let provider: Box<dyn Provider> = providers::create_routed_provider(
         provider_name,
@@ -997,11 +998,8 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
     tools_registry.extend(peripheral_tools);
 
-    let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
-    let model_name = config
-        .default_model
-        .clone()
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into());
+    let provider_name = config.effective_provider();
+    let model_name = config.effective_model();
     let provider: Box<dyn Provider> = providers::create_routed_provider(
         provider_name,
         config.api_key.as_deref(),

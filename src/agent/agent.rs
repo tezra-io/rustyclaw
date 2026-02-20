@@ -241,13 +241,8 @@ impl Agent {
             config,
         );
 
-        let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
-
-        let model_name = config
-            .default_model
-            .as_deref()
-            .unwrap_or("anthropic/claude-sonnet-4-20250514")
-            .to_string();
+        let provider_name = config.effective_provider();
+        let model_name = config.effective_model();
 
         let provider: Box<dyn Provider> = providers::create_routed_provider(
             provider_name,
@@ -540,16 +535,8 @@ pub async fn run(
 
     let mut agent = Agent::from_config(&effective_config)?;
 
-    let provider_name = effective_config
-        .default_provider
-        .as_deref()
-        .unwrap_or("openrouter")
-        .to_string();
-    let model_name = effective_config
-        .default_model
-        .as_deref()
-        .unwrap_or("anthropic/claude-sonnet-4-20250514")
-        .to_string();
+    let provider_name = effective_config.effective_provider().to_string();
+    let model_name = effective_config.effective_model();
 
     agent.observer.record_event(&ObserverEvent::AgentStart {
         provider: provider_name,

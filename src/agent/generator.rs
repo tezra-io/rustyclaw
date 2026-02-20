@@ -16,15 +16,16 @@ pub async fn generate_definition(description: &str, config: &Config) -> Result<A
         .join("\n");
 
     let provider = providers::create_resilient_provider(
-        config.default_provider.as_deref().unwrap_or("openrouter"),
+        config.effective_provider(),
         config.api_key.as_deref(),
         &config.reliability,
     )?;
 
+    let effective_model = config.effective_model();
     let model = config
         .default_model
         .as_deref()
-        .unwrap_or("anthropic/claude-sonnet-4-20250514");
+        .unwrap_or(&effective_model);
 
     let prompt = format!(
         "Generate an agent definition for this request:\n\n\

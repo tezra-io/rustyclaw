@@ -1667,8 +1667,8 @@ impl Default for Config {
             workspace_dir: rustyclaw_dir.join("workspace"),
             config_path: rustyclaw_dir.join("config.toml"),
             api_key: None,
-            default_provider: Some("openrouter".to_string()),
-            default_model: Some("anthropic/claude-sonnet-4".to_string()),
+            default_provider: None,
+            default_model: None,
             default_temperature: 0.7,
             observability: ObservabilityConfig::default(),
             autonomy: AutonomyConfig::default(),
@@ -1729,6 +1729,21 @@ impl Config {
             config.apply_env_overrides();
             Ok(config)
         }
+    }
+
+    /// Returns the effective provider name, respecting the user's config.
+    /// Falls back to `"openrouter"` only when no provider was configured.
+    pub fn effective_provider(&self) -> &str {
+        self.default_provider.as_deref().unwrap_or("openrouter")
+    }
+
+    /// Returns the effective model name, deriving a sensible default from the
+    /// configured provider when no explicit model is set.
+    pub fn effective_model(&self) -> String {
+        if let Some(ref m) = self.default_model {
+            return m.clone();
+        }
+        default_model_for_provider(self.effective_provider())
     }
 
     /// Apply environment variable overrides to config
@@ -1893,6 +1908,22 @@ impl Config {
     }
 }
 
+/// Returns a sensible default model for a given provider name.
+pub fn default_model_for_provider(provider: &str) -> String {
+    match provider {
+        "anthropic" => "claude-sonnet-4-20250514".into(),
+        "openai" => "gpt-4o".into(),
+        "ollama" => "llama3.2".into(),
+        "groq" => "llama-3.3-70b-versatile".into(),
+        "deepseek" => "deepseek-chat".into(),
+        "gemini" | "google" | "google-gemini" => "gemini-2.5-pro".into(),
+        "glm" | "zhipu" | "zai" | "z.ai" => "glm-5".into(),
+        "minimax" => "MiniMax-M2.5".into(),
+        // openrouter and anything else
+        _ => "anthropic/claude-sonnet-4-20250514".into(),
+    }
+}
+
 #[cfg(unix)]
 fn sync_directory(path: &Path) -> Result<()> {
     let dir = File::open(path)
@@ -1918,8 +1949,11 @@ mod tests {
     #[test]
     fn config_default_has_sane_values() {
         let c = Config::default();
-        assert_eq!(c.default_provider.as_deref(), Some("openrouter"));
-        assert!(c.default_model.as_deref().unwrap().contains("claude"));
+        assert!(c.default_provider.is_none());
+        assert!(c.default_model.is_none());
+        // effective_* methods provide config-driven fallbacks
+        assert_eq!(c.effective_provider(), "openrouter");
+        assert!(c.effective_model().contains("claude"));
         assert!((c.default_temperature - 0.7).abs() < f64::EPSILON);
         assert!(c.api_key.is_none());
         assert!(c.workspace_dir.to_string_lossy().contains("workspace"));
