@@ -7,6 +7,7 @@ pub mod dispatcher;
 pub mod generator;
 pub mod loop_;
 pub mod memory_loader;
+pub mod personalization;
 pub mod prompt;
 pub mod registry;
 pub mod runner;

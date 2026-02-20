@@ -123,22 +123,18 @@ async fn auto_compact_history(
     Ok(true)
 }
 
-/// Build context preamble by searching memory for relevant entries
+/// Build a category-structured memory context preamble.
+///
+/// Delegates to the personalization engine which orders entries by category
+/// (Preference/UserModel first, then Fact, then other) and enforces a char
+/// budget.  See `src/agent/personalization.rs`.
 async fn build_context(mem: &dyn Memory, user_msg: &str) -> String {
-    let mut context = String::new();
+    crate::agent::personalization::build_context(mem, user_msg).await
+}
 
-    // Pull relevant memories for this message
-    if let Ok(entries) = mem.recall(user_msg, 5).await {
-        if !entries.is_empty() {
-            context.push_str("[Memory context]\n");
-            for entry in &entries {
-                let _ = writeln!(context, "- {}: {}", entry.key, entry.content);
-            }
-            context.push('\n');
-        }
-    }
-
-    context
+/// Load all UserModel entries for unconditional session-start injection.
+async fn build_user_model_context(mem: &dyn Memory) -> String {
+    crate::agent::personalization::build_user_model_context(mem).await
 }
 
 /// Build hardware datasheet context from RAG when peripherals are enabled.
@@ -815,14 +811,17 @@ pub async fn run(
                 .await;
         }
 
-        // Inject memory + hardware RAG context into user message
+        // Inject memory + hardware RAG context into user message.
+        // UserModel entries are loaded unconditionally (session-start injection),
+        // then query-relevant memories are appended in category order.
+        let user_model_ctx = build_user_model_context(mem.as_ref()).await;
         let mem_context = build_context(mem.as_ref(), &msg).await;
         let rag_limit = if config.agent.compact_context { 2 } else { 5 };
         let hw_context = hardware_rag
             .as_ref()
             .map(|r| build_hardware_context(r, &msg, &board_names, rag_limit))
             .unwrap_or_default();
-        let context = format!("{mem_context}{hw_context}");
+        let context = format!("{user_model_ctx}{mem_context}{hw_context}");
         let enriched = if context.is_empty() {
             msg.clone()
         } else {
@@ -880,14 +879,17 @@ pub async fn run(
                     .await;
             }
 
-            // Inject memory + hardware RAG context into user message
+            // Inject memory + hardware RAG context into user message.
+            // UserModel entries are loaded unconditionally (session-start injection),
+            // then query-relevant memories are appended in category order.
+            let user_model_ctx = build_user_model_context(mem.as_ref()).await;
             let mem_context = build_context(mem.as_ref(), &msg.content).await;
             let rag_limit = if config.agent.compact_context { 2 } else { 5 };
             let hw_context = hardware_rag
                 .as_ref()
                 .map(|r| build_hardware_context(r, &msg.content, &board_names, rag_limit))
                 .unwrap_or_default();
-            let context = format!("{mem_context}{hw_context}");
+            let context = format!("{user_model_ctx}{mem_context}{hw_context}");
             let enriched = if context.is_empty() {
                 msg.content.clone()
             } else {
@@ -1079,13 +1081,14 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     );
     system_prompt.push_str(&build_tool_instructions(&tools_registry));
 
+    let user_model_ctx = build_user_model_context(mem.as_ref()).await;
     let mem_context = build_context(mem.as_ref(), message).await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };
     let hw_context = hardware_rag
         .as_ref()
         .map(|r| build_hardware_context(r, message, &board_names, rag_limit))
         .unwrap_or_default();
-    let context = format!("{mem_context}{hw_context}");
+    let context = format!("{user_model_ctx}{mem_context}{hw_context}");
     let enriched = if context.is_empty() {
         message.to_string()
     } else {
