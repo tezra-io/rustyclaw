@@ -123,15 +123,32 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
 
     {
         let scheduler_cfg = config.clone();
+        let scheduler_bus = bus.clone();
         handles.push(spawn_component_supervisor(
             "scheduler",
             initial_backoff,
             max_backoff,
             move || {
                 let cfg = scheduler_cfg.clone();
-                async move { crate::cron::scheduler::run(cfg).await }
+                let b = Some(scheduler_bus.clone());
+                async move { crate::cron::scheduler::run(cfg, b).await }
             },
         ));
+    }
+
+    if config.learning.enabled {
+        let learning_cfg = config.clone();
+        handles.push(spawn_component_supervisor(
+            "learning",
+            initial_backoff,
+            max_backoff,
+            move || {
+                let cfg = learning_cfg.clone();
+                async move { crate::memory::learning::run(cfg).await }
+            },
+        ));
+    } else {
+        crate::health::mark_component_ok("learning");
     }
 
     println!("🧠 RustyClaw daemon started");

@@ -854,6 +854,9 @@ pub async fn run(
             let _ = mem
                 .store(&response_key, &summary, MemoryCategory::Daily)
                 .await;
+            // Write session-end sentinel so the Learning Worker can detect
+            // session boundaries in the one-shot CLI flow.
+            crate::memory::learning::write_session_end_sentinel(mem.as_ref()).await;
         }
     } else {
         println!("🦀 RustyClaw Interactive Mode");

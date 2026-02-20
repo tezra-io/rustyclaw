@@ -4,6 +4,7 @@ pub mod composite;
 pub mod embeddings;
 pub mod ephemeral;
 pub mod hygiene;
+pub mod learning;
 pub mod lucid;
 pub mod markdown;
 pub mod none;
