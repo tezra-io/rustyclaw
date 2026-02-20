@@ -14,7 +14,7 @@ use crate::util::truncate_with_ellipsis;
 use anyhow::Result;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub struct Agent {
     provider: Box<dyn Provider>,
@@ -33,6 +33,7 @@ pub struct Agent {
     skills: Vec<crate::skills::Skill>,
     auto_save: bool,
     history: Vec<ConversationMessage>,
+    turn_count: u64,
 }
 
 pub struct AgentBuilder {
@@ -181,6 +182,7 @@ impl AgentBuilder {
             skills: self.skills.unwrap_or_default(),
             auto_save: self.auto_save.unwrap_or(false),
             history: Vec::new(),
+            turn_count: 0,
         })
     }
 }
@@ -384,10 +386,17 @@ impl Agent {
                 )));
         }
 
+        self.turn_count += 1;
+        let turn_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
         if self.auto_save {
+            let user_key = format!("conv_{}_{}_user", self.turn_count, turn_ts);
             let _ = self
                 .memory
-                .store("user_msg", user_message, MemoryCategory::Conversation)
+                .store(&user_key, user_message, MemoryCategory::Conversation)
                 .await;
         }
 
@@ -443,10 +452,11 @@ impl Agent {
                 self.trim_history();
 
                 if self.auto_save {
+                    let asst_key = format!("conv_{}_{}_asst", self.turn_count, turn_ts);
                     let summary = truncate_with_ellipsis(&final_text, 100);
                     let _ = self
                         .memory
-                        .store("assistant_resp", &summary, MemoryCategory::Daily)
+                        .store(&asst_key, &summary, MemoryCategory::Conversation)
                         .await;
                 }
 
