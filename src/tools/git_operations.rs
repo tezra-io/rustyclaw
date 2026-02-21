@@ -30,11 +30,20 @@ impl GitOperationsTool {
             if arg_lower.starts_with("--exec=")
                 || arg_lower.starts_with("--upload-pack=")
                 || arg_lower.starts_with("--receive-pack=")
+                || arg_lower.starts_with("--pager=")
+                || arg_lower.starts_with("--editor=")
+                || arg_lower == "--no-verify"
                 || arg_lower.contains("$(")
                 || arg_lower.contains('`')
                 || arg.contains('|')
                 || arg.contains(';')
+                || arg.contains('>')
             {
+                anyhow::bail!("Blocked potentially dangerous git argument: {arg}");
+            }
+            // Exact-match -c check: block config injection without false-positives
+            // on --cached which starts with "-c" but is safe.
+            if arg_lower == "-c" || arg_lower.starts_with("-c=") {
                 anyhow::bail!("Blocked potentially dangerous git argument: {arg}");
             }
             result.push(arg.to_string());
@@ -126,6 +135,7 @@ impl GitOperationsTool {
 
     async fn git_diff(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let files = args.get("files").and_then(|v| v.as_str()).unwrap_or(".");
+        self.sanitize_git_args(files)?;
         let cached = args
             .get("cached")
             .and_then(|v| v.as_bool())
@@ -316,6 +326,7 @@ impl GitOperationsTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing 'paths' parameter"))?;
 
+        self.sanitize_git_args(paths)?;
         let output = self.run_git_command(&["add", "--", paths]).await;
 
         match output {
@@ -577,6 +588,18 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_git_blocks_expanded_injection() {
+        let tmp = TempDir::new().unwrap();
+        let tool = test_tool(tmp.path());
+
+        assert!(tool.sanitize_git_args("--pager=less").is_err());
+        assert!(tool.sanitize_git_args("--editor=vim").is_err());
+        assert!(tool.sanitize_git_args("--no-verify").is_err());
+        assert!(tool.sanitize_git_args("-c core.sshCommand=evil").is_err());
+        assert!(tool.sanitize_git_args("file.txt > /tmp/out").is_err());
+    }
+
+    #[test]
     fn sanitize_git_allows_safe() {
         let tmp = TempDir::new().unwrap();
         let tool = test_tool(tmp.path());
@@ -585,6 +608,8 @@ mod tests {
         assert!(tool.sanitize_git_args("main").is_ok());
         assert!(tool.sanitize_git_args("feature/test-branch").is_ok());
         assert!(tool.sanitize_git_args("--cached").is_ok());
+        assert!(tool.sanitize_git_args("src/main.rs").is_ok());
+        assert!(tool.sanitize_git_args(".").is_ok());
     }
 
     #[test]

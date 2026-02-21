@@ -1712,6 +1712,22 @@ impl Config {
         }
 
         if config_path.exists() {
+            // Warn if config (which may contain API keys) is world-readable.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = fs::metadata(&config_path) {
+                    if meta.permissions().mode() & 0o004 != 0 {
+                        tracing::warn!(
+                            "Config file {:?} is world-readable (mode {:o}). Consider: chmod 600 {:?}",
+                            config_path,
+                            meta.permissions().mode() & 0o777,
+                            config_path,
+                        );
+                    }
+                }
+            }
+
             let contents =
                 fs::read_to_string(&config_path).context("Failed to read config file")?;
             let mut config: Config =
@@ -1726,6 +1742,13 @@ impl Config {
             config.config_path = config_path.clone();
             config.workspace_dir = rustyclaw_dir.join("workspace");
             config.save()?;
+            // Restrict newly created config to owner-only (600) so API keys are
+            // not world-readable on shared systems.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600));
+            }
             config.apply_env_overrides();
             Ok(config)
         }

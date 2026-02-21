@@ -114,8 +114,14 @@ impl HttpRequestTool {
         headers: Vec<(String, String)>,
         body: Option<&str>,
     ) -> anyhow::Result<reqwest::Response> {
+        // Disable automatic redirect following. The initial URL is validated
+        // against the allowlist and private-IP checks; redirect hops are not,
+        // enabling SSRF via an attacker-controlled server returning 302 to an
+        // internal address (e.g. 169.254.169.254). Callers that need to follow
+        // a redirect must issue a new request, which re-runs validate_url.
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(self.timeout_secs))
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
 
         let mut request = client.request(method, url);

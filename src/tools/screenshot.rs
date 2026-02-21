@@ -68,6 +68,19 @@ impl ScreenshotTool {
             |n| n.to_string_lossy().to_string(),
         );
 
+        // Reject filenames with shell metacharacters. On Linux the path is
+        // interpolated into a `sh -c '...'` command with single-quote wrapping;
+        // any of these chars can break that quoting and inject shell tokens.
+        const SHELL_UNSAFE: &[char] =
+            &['\'', '"', '`', '$', '\\', ';', '|', '&', '\n', '\0', '(', ')'];
+        if safe_name.contains(SHELL_UNSAFE) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("Filename contains characters unsafe for shell execution".into()),
+            });
+        }
+
         let output_path = self.security.workspace_dir.join(&safe_name);
         let output_str = output_path.to_string_lossy().to_string();
 
@@ -295,6 +308,25 @@ mod tests {
         assert!(
             joined.contains("/tmp/my_screenshot.png"),
             "Command should contain the output path"
+        );
+    }
+
+    #[tokio::test]
+    async fn screenshot_rejects_shell_unsafe_filename() {
+        let tool = ScreenshotTool::new(test_security());
+        let result = tool
+            .execute(serde_json::json!({"filename": "test'injection.png"}))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("unsafe for shell execution"),
+            "Expected 'unsafe for shell execution' error, got: {:?}",
+            result.error
         );
     }
 }

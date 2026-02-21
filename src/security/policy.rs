@@ -335,6 +335,29 @@ impl SecurityPolicy {
         Ok(risk)
     }
 
+    /// Validate that command arguments don't enable sub-execution on otherwise-
+    /// allowed commands.  Called per-segment after the base command passes the
+    /// allowlist check.
+    fn is_args_safe(&self, base: &str, args: &[String]) -> bool {
+        match base {
+            "find" => {
+                // -exec and -ok invoke arbitrary commands
+                !args.iter().any(|a| a == "-exec" || a == "-ok")
+            }
+            "git" => {
+                // config/alias/-c allow setting dangerous options (e.g. core.editor)
+                !args.iter().any(|a| {
+                    a == "config"
+                        || a.starts_with("config.")
+                        || a == "alias"
+                        || a.starts_with("alias.")
+                        || a == "-c"
+                })
+            }
+            _ => true,
+        }
+    }
+
     /// Check if a shell command is allowed.
     ///
     /// Validates the **entire** command string, not just the first word:
@@ -350,7 +373,13 @@ impl SecurityPolicy {
 
         // Block subshell/expansion operators — these allow hiding arbitrary
         // commands inside an allowed command (e.g. `echo $(rm -rf /)`)
-        if command.contains('`') || command.contains("$(") || command.contains("${") {
+        // Also block process substitution <(...) and >(...) which open subshells.
+        if command.contains('`')
+            || command.contains("$(")
+            || command.contains("${")
+            || command.contains("<(")
+            || command.contains(">(")
+        {
             return false;
         }
 
@@ -362,6 +391,15 @@ impl SecurityPolicy {
         // Block background command chaining (`&`), which can hide extra
         // sub-commands and outlive timeout expectations. Keep `&&` allowed.
         if contains_single_ampersand(command) {
+            return false;
+        }
+
+        // Block `tee` — it can write to arbitrary file paths, bypassing the
+        // redirect (`>`) check since tee takes the path as an argument.
+        if command
+            .split_whitespace()
+            .any(|w| w == "tee" || w.ends_with("/tee"))
+        {
             return false;
         }
 
@@ -401,6 +439,17 @@ impl SecurityPolicy {
                 .iter()
                 .any(|allowed| allowed == base_cmd)
             {
+                return false;
+            }
+
+            // Argument-level injection check: block dangerous sub-execution flags
+            // on otherwise-allowed commands (e.g. find -exec, git config).
+            let args: Vec<String> = cmd_part
+                .split_whitespace()
+                .skip(1) // skip the base command itself
+                .map(|w| w.to_ascii_lowercase())
+                .collect();
+            if !self.is_args_safe(base_cmd, &args) {
                 return false;
             }
         }
@@ -986,6 +1035,49 @@ mod tests {
     fn command_injection_dollar_brace_blocked() {
         let p = default_policy();
         assert!(!p.is_command_allowed("echo ${IFS}cat${IFS}/etc/passwd"));
+    }
+
+    #[test]
+    fn process_substitution_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("cat <(echo pwned)"));
+        assert!(!p.is_command_allowed("ls >(cat /etc/passwd)"));
+    }
+
+    #[test]
+    fn tee_command_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("echo secret | tee /etc/crontab"));
+        assert!(!p.is_command_allowed("ls | /usr/bin/tee outfile"));
+    }
+
+    #[test]
+    fn find_exec_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("find . -exec rm -rf {} +"));
+        assert!(!p.is_command_allowed("find / -ok cat {} \\;"));
+    }
+
+    #[test]
+    fn find_safe_args_allowed() {
+        let p = default_policy();
+        assert!(p.is_command_allowed("find . -name '*.txt'"));
+    }
+
+    #[test]
+    fn git_config_injection_blocked() {
+        let p = default_policy();
+        // git config blocked
+        assert!(!p.is_command_allowed("git config core.editor \"rm -rf /\""));
+        // git -c blocked
+        assert!(!p.is_command_allowed("git -c core.editor=calc.exe commit"));
+    }
+
+    #[test]
+    fn git_safe_args_allowed() {
+        let p = default_policy();
+        assert!(p.is_command_allowed("git status"));
+        assert!(p.is_command_allowed("git log --oneline"));
     }
 
     #[test]
