@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+/// Cap LIKE keyword count to improve prepared statement cache efficiency.
+const MAX_LIKE_KEYWORDS: usize = 8;
+
 /// SQLite-backed persistent memory — the brain
 ///
 /// Full-stack search engine:
@@ -17,7 +20,7 @@ use uuid::Uuid;
 /// - **Embedding Cache**: LRU-evicted cache to avoid redundant API calls
 /// - **Safe Reindex**: temp DB → seed → sync → atomic swap → rollback
 pub struct SqliteMemory {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
     db_path: PathBuf,
     embedder: Arc<dyn EmbeddingProvider>,
     vector_weight: f32,
@@ -68,7 +71,7 @@ impl SqliteMemory {
         Self::init_schema(&conn)?;
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
             db_path,
             embedder,
             vector_weight,
@@ -123,6 +126,14 @@ impl SqliteMemory {
             );
             CREATE INDEX IF NOT EXISTS idx_cache_accessed ON embedding_cache(accessed_at);",
         )?;
+
+        // Migration: add session_id column if it doesn't exist yet (idempotent)
+        // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we ignore the error.
+        let _ = conn.execute_batch(
+            "ALTER TABLE memories ADD COLUMN session_id TEXT;
+             CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);",
+        );
+
         Ok(())
     }
 
@@ -167,7 +178,8 @@ impl SqliteMemory {
         )
     }
 
-    /// Get embedding from cache, or compute + cache it
+    /// Get embedding from cache, or compute + cache it.
+    /// Uses spawn_blocking for all SQLite operations to avoid blocking the async executor.
     async fn get_or_compute_embedding(&self, text: &str) -> anyhow::Result<Option<Vec<f32>>> {
         if self.embedder.dimensions() == 0 {
             return Ok(None); // Noop embedder
@@ -176,47 +188,48 @@ impl SqliteMemory {
         let hash = Self::content_hash(text);
         let now = Local::now().to_rfc3339();
 
-        // Check cache
-        {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-
+        // Phase 1: cache check (spawn_blocking)
+        let conn = self.conn.clone();
+        let hash_clone = hash.clone();
+        let now_clone = now.clone();
+        let cached = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<u8>>> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
             let mut stmt =
                 conn.prepare("SELECT embedding FROM embedding_cache WHERE content_hash = ?1")?;
-            let cached: Option<Vec<u8>> = stmt.query_row(params![hash], |row| row.get(0)).ok();
-
-            if let Some(bytes) = cached {
-                // Update accessed_at for LRU
+            let cached: Option<Vec<u8>> = stmt
+                .query_row(params![hash_clone], |row| row.get(0))
+                .ok();
+            if cached.is_some() {
                 conn.execute(
                     "UPDATE embedding_cache SET accessed_at = ?1 WHERE content_hash = ?2",
-                    params![now, hash],
+                    params![now_clone, hash_clone],
                 )?;
-                return Ok(Some(vector::bytes_to_vec(&bytes)));
             }
+            Ok(cached)
+        })
+        .await??;
+
+        if let Some(bytes) = cached {
+            return Ok(Some(vector::bytes_to_vec(&bytes)));
         }
 
-        // Compute embedding
+        // Phase 2: async embedding computation
         let embedding = self.embedder.embed_one(text).await?;
         let bytes = vector::vec_to_bytes(&embedding);
 
-        // Store in cache + LRU eviction
-        {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-
+        // Phase 3: cache store + LRU eviction (spawn_blocking)
+        let conn = self.conn.clone();
+        let cache_max = self.cache_max;
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
             conn.execute(
                 "INSERT OR REPLACE INTO embedding_cache (content_hash, embedding, created_at, accessed_at)
                  VALUES (?1, ?2, ?3, ?4)",
                 params![hash, bytes, now, now],
             )?;
-
             // LRU eviction: keep only cache_max entries
             #[allow(clippy::cast_possible_wrap)]
-            let max = self.cache_max as i64;
+            let max = cache_max as i64;
             conn.execute(
                 "DELETE FROM embedding_cache WHERE content_hash IN (
                     SELECT content_hash FROM embedding_cache
@@ -225,7 +238,9 @@ impl SqliteMemory {
                 )",
                 params![max],
             )?;
-        }
+            Ok(())
+        })
+        .await??;
 
         Ok(Some(embedding))
     }
@@ -273,16 +288,52 @@ impl SqliteMemory {
         Ok(results)
     }
 
-    /// Vector similarity search: scan embeddings and compute cosine similarity
+    /// Vector similarity search: scan embeddings and compute cosine similarity.
+    ///
+    /// Optional `category` and `session_id` filters build dynamic SQL so callers
+    /// can restrict results without a post-scan filter pass.
     fn vector_search(
         conn: &Connection,
         query_embedding: &[f32],
         limit: usize,
+        category: Option<&str>,
+        session_id: Option<&str>,
     ) -> anyhow::Result<Vec<(String, f32)>> {
-        let mut stmt =
-            conn.prepare("SELECT id, embedding FROM memories WHERE embedding IS NOT NULL")?;
+        // Build dynamic WHERE clause for optional filters
+        let mut extra_conditions: Vec<String> = Vec::new();
+        let mut param_idx: usize = 1;
+        if category.is_some() {
+            param_idx += 1;
+            extra_conditions.push(format!("category = ?{param_idx}"));
+        }
+        if session_id.is_some() {
+            param_idx += 1;
+            extra_conditions.push(format!("session_id = ?{param_idx}"));
+        }
+        let where_clause = if extra_conditions.is_empty() {
+            "WHERE embedding IS NOT NULL".to_string()
+        } else {
+            format!(
+                "WHERE embedding IS NOT NULL AND {}",
+                extra_conditions.join(" AND ")
+            )
+        };
+        let sql = format!("SELECT id, embedding FROM memories {where_clause}");
 
-        let rows = stmt.query_map([], |row| {
+        let mut stmt = conn.prepare(&sql)?;
+
+        // Build params dynamically (first param would be ?1 but we have none for base query)
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(cat) = category {
+            params_vec.push(Box::new(cat.to_string()));
+        }
+        if let Some(sid) = session_id {
+            params_vec.push(Box::new(sid.to_string()));
+        }
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(AsRef::as_ref).collect();
+
+        let rows = stmt.query_map(params_ref.as_slice(), |row| {
             let id: String = row.get(0)?;
             let blob: Vec<u8> = row.get(1)?;
             Ok((id, blob))
@@ -306,15 +357,14 @@ impl SqliteMemory {
     /// Safe reindex: rebuild FTS5 + embeddings with rollback on failure
     #[allow(dead_code)]
     pub async fn reindex(&self) -> anyhow::Result<usize> {
-        // Step 1: Rebuild FTS5
-        {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-
+        // Step 1: Rebuild FTS5 (spawn_blocking)
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
             conn.execute_batch("INSERT INTO memories_fts(memories_fts) VALUES('rebuild');")?;
-        }
+            Ok(())
+        })
+        .await??;
 
         // Step 2: Re-embed all memories that lack embeddings
         if self.embedder.dimensions() == 0 {
@@ -322,31 +372,34 @@ impl SqliteMemory {
         }
 
         let entries: Vec<(String, String)> = {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-
-            let mut stmt =
-                conn.prepare("SELECT id, content FROM memories WHERE embedding IS NULL")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            rows.filter_map(std::result::Result::ok).collect()
+            let conn = self.conn.clone();
+            tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(String, String)>> {
+                let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
+                let mut stmt =
+                    conn.prepare("SELECT id, content FROM memories WHERE embedding IS NULL")?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                Ok(rows.filter_map(std::result::Result::ok).collect())
+            })
+            .await??
         };
 
         let mut count = 0;
         for (id, content) in &entries {
             if let Ok(Some(emb)) = self.get_or_compute_embedding(content).await {
                 let bytes = vector::vec_to_bytes(&emb);
-                let conn = self
-                    .conn
-                    .lock()
-                    .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-                conn.execute(
-                    "UPDATE memories SET embedding = ?1 WHERE id = ?2",
-                    params![bytes, id],
-                )?;
+                let conn = self.conn.clone();
+                let id = id.clone();
+                tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                    let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
+                    conn.execute(
+                        "UPDATE memories SET embedding = ?1 WHERE id = ?2",
+                        params![bytes, id],
+                    )?;
+                    Ok(())
+                })
+                .await??;
                 count += 1;
             }
         }
@@ -373,24 +426,27 @@ impl Memory for SqliteMemory {
             .await?
             .map(|emb| vector::vec_to_bytes(&emb));
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-        let now = Local::now().to_rfc3339();
-        let cat = Self::category_to_str(&category);
-        let id = Uuid::new_v4().to_string();
-
-        conn.execute(
-            "INSERT INTO memories (id, key, content, category, embedding, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(key) DO UPDATE SET
-                content = excluded.content,
-                category = excluded.category,
-                embedding = excluded.embedding,
-                updated_at = excluded.updated_at",
-            params![id, key, content, cat, embedding_bytes, now, now],
-        )?;
+        let conn = self.conn.clone();
+        let key = key.to_string();
+        let content = content.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
+            let now = Local::now().to_rfc3339();
+            let cat = Self::category_to_str(&category);
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO memories (id, key, content, category, embedding, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(key) DO UPDATE SET
+                    content = excluded.content,
+                    category = excluded.category,
+                    embedding = excluded.embedding,
+                    updated_at = excluded.updated_at",
+                params![id, key, content, cat, embedding_bytes, now, now],
+            )?;
+            Ok(())
+        })
+        .await??;
 
         Ok(())
     }
@@ -403,50 +459,160 @@ impl Memory for SqliteMemory {
         // Compute query embedding (async, before lock)
         let query_embedding = self.get_or_compute_embedding(query).await?;
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
+        let conn = self.conn.clone();
+        let query = query.to_string();
+        let vector_weight = self.vector_weight;
+        let keyword_weight = self.keyword_weight;
 
-        // FTS5 BM25 keyword search
-        let keyword_results = Self::fts5_search(&conn, query, limit * 2).unwrap_or_default();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<MemoryEntry>> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
 
-        // Vector similarity search (if embeddings available)
-        let vector_results = if let Some(ref qe) = query_embedding {
-            Self::vector_search(&conn, qe, limit * 2).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+            // FTS5 BM25 keyword search
+            let keyword_results = Self::fts5_search(&conn, &query, limit * 2).unwrap_or_default();
 
-        // Hybrid merge
-        let merged = if vector_results.is_empty() {
-            // No embeddings — use keyword results only
-            keyword_results
-                .iter()
-                .map(|(id, score)| vector::ScoredResult {
-                    id: id.clone(),
-                    vector_score: None,
-                    keyword_score: Some(*score),
-                    final_score: *score,
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vector::hybrid_merge(
-                &vector_results,
-                &keyword_results,
-                self.vector_weight,
-                self.keyword_weight,
-                limit,
-            )
-        };
+            // Vector similarity search (if embeddings available)
+            let vector_results = if let Some(ref qe) = query_embedding {
+                Self::vector_search(&conn, qe, limit * 2, None, None).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
 
-        // Fetch full entries for merged results
-        let mut results = Vec::new();
-        for scored in &merged {
+            // Hybrid merge
+            let merged = if vector_results.is_empty() {
+                // No embeddings — use keyword results only
+                keyword_results
+                    .iter()
+                    .map(|(id, score)| vector::ScoredResult {
+                        id: id.clone(),
+                        vector_score: None,
+                        keyword_score: Some(*score),
+                        final_score: *score,
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vector::hybrid_merge(
+                    &vector_results,
+                    &keyword_results,
+                    vector_weight,
+                    keyword_weight,
+                    limit,
+                )
+            };
+
+            // Batch fetch full entries for merged results (avoid N+1)
+            let mut results: Vec<MemoryEntry> = Vec::new();
+            if !merged.is_empty() {
+                let ids: Vec<String> = merged.iter().map(|s| s.id.clone()).collect();
+                let score_map: std::collections::HashMap<String, f32> =
+                    merged.iter().map(|s| (s.id.clone(), s.final_score)).collect();
+
+                let placeholders: String = ids
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "SELECT id, key, content, category, created_at FROM memories WHERE id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+                let rows = stmt.query_map(param_refs.as_slice(), |row| {
+                    let id: String = row.get(0)?;
+                    Ok((
+                        id.clone(),
+                        MemoryEntry {
+                            id,
+                            key: row.get(1)?,
+                            content: row.get(2)?,
+                            category: Self::str_to_category(&row.get::<_, String>(3)?),
+                            timestamp: row.get(4)?,
+                            session_id: None,
+                            score: None, // filled below
+                        },
+                    ))
+                })?;
+                let mut by_id: std::collections::HashMap<String, MemoryEntry> =
+                    std::collections::HashMap::new();
+                for row in rows {
+                    let (id, entry) = row?;
+                    by_id.insert(id, entry);
+                }
+                // Restore merge order and attach scores
+                for scored in &merged {
+                    if let Some(mut entry) = by_id.remove(&scored.id) {
+                        entry.score = Some(f64::from(*score_map.get(&scored.id).unwrap_or(&0.0)));
+                        results.push(entry);
+                    }
+                }
+            }
+
+            // If hybrid returned nothing, fall back to LIKE search (capped keywords)
+            if results.is_empty() {
+                let keywords: Vec<String> = query
+                    .split_whitespace()
+                    .take(MAX_LIKE_KEYWORDS)
+                    .map(|w| format!("%{w}%"))
+                    .collect();
+                if !keywords.is_empty() {
+                    let conditions: Vec<String> = keywords
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| {
+                            format!("(content LIKE ?{} OR key LIKE ?{})", i * 2 + 1, i * 2 + 2)
+                        })
+                        .collect();
+                    let where_clause = conditions.join(" OR ");
+                    let sql = format!(
+                        "SELECT id, key, content, category, created_at FROM memories
+                         WHERE {where_clause}
+                         ORDER BY updated_at DESC
+                         LIMIT ?{}",
+                        keywords.len() * 2 + 1
+                    );
+                    let mut stmt = conn.prepare(&sql)?;
+                    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+                    for kw in &keywords {
+                        param_values.push(Box::new(kw.clone()));
+                        param_values.push(Box::new(kw.clone()));
+                    }
+                    #[allow(clippy::cast_possible_wrap)]
+                    param_values.push(Box::new(limit as i64));
+                    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                        param_values.iter().map(AsRef::as_ref).collect();
+                    let rows = stmt.query_map(params_ref.as_slice(), |row| {
+                        Ok(MemoryEntry {
+                            id: row.get(0)?,
+                            key: row.get(1)?,
+                            content: row.get(2)?,
+                            category: Self::str_to_category(&row.get::<_, String>(3)?),
+                            timestamp: row.get(4)?,
+                            session_id: None,
+                            score: Some(1.0),
+                        })
+                    })?;
+                    for row in rows {
+                        results.push(row?);
+                    }
+                }
+            }
+
+            results.truncate(limit);
+            Ok(results)
+        })
+        .await?
+    }
+
+    async fn get(&self, key: &str) -> anyhow::Result<Option<MemoryEntry>> {
+        let conn = self.conn.clone();
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<MemoryEntry>> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
             let mut stmt = conn.prepare(
-                "SELECT id, key, content, category, created_at FROM memories WHERE id = ?1",
+                "SELECT id, key, content, category, created_at FROM memories WHERE key = ?1",
             )?;
-            if let Ok(entry) = stmt.query_row(params![scored.id], |row| {
+            let mut rows = stmt.query_map(params![key], |row| {
                 Ok(MemoryEntry {
                     id: row.get(0)?,
                     key: row.get(1)?,
@@ -454,160 +620,90 @@ impl Memory for SqliteMemory {
                     category: Self::str_to_category(&row.get::<_, String>(3)?),
                     timestamp: row.get(4)?,
                     session_id: None,
-                    score: Some(f64::from(scored.final_score)),
+                    score: None,
                 })
-            }) {
-                results.push(entry);
+            })?;
+            match rows.next() {
+                Some(Ok(entry)) => Ok(Some(entry)),
+                _ => Ok(None),
             }
-        }
+        })
+        .await?
+    }
 
-        // If hybrid returned nothing, fall back to LIKE search
-        if results.is_empty() {
-            let keywords: Vec<String> =
-                query.split_whitespace().map(|w| format!("%{w}%")).collect();
-            if !keywords.is_empty() {
-                let conditions: Vec<String> = keywords
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| {
-                        format!("(content LIKE ?{} OR key LIKE ?{})", i * 2 + 1, i * 2 + 2)
-                    })
-                    .collect();
-                let where_clause = conditions.join(" OR ");
-                let sql = format!(
+    async fn list(&self, category: Option<&MemoryCategory>) -> anyhow::Result<Vec<MemoryEntry>> {
+        let conn = self.conn.clone();
+        let cat_str = category.map(Self::category_to_str);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<MemoryEntry>> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
+            let mut results = Vec::new();
+            let row_mapper = |row: &rusqlite::Row| -> rusqlite::Result<MemoryEntry> {
+                Ok(MemoryEntry {
+                    id: row.get(0)?,
+                    key: row.get(1)?,
+                    content: row.get(2)?,
+                    category: Self::str_to_category(&row.get::<_, String>(3)?),
+                    timestamp: row.get(4)?,
+                    session_id: None,
+                    score: None,
+                })
+            };
+            if let Some(cat) = cat_str {
+                let mut stmt = conn.prepare(
                     "SELECT id, key, content, category, created_at FROM memories
-                     WHERE {where_clause}
-                     ORDER BY updated_at DESC
-                     LIMIT ?{}",
-                    keywords.len() * 2 + 1
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-                for kw in &keywords {
-                    param_values.push(Box::new(kw.clone()));
-                    param_values.push(Box::new(kw.clone()));
+                     WHERE category = ?1 ORDER BY updated_at DESC LIMIT 1000",
+                )?;
+                let rows = stmt.query_map(params![cat], row_mapper)?;
+                for row in rows {
+                    results.push(row?);
                 }
-                #[allow(clippy::cast_possible_wrap)]
-                param_values.push(Box::new(limit as i64));
-                let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-                    param_values.iter().map(AsRef::as_ref).collect();
-                let rows = stmt.query_map(params_ref.as_slice(), |row| {
-                    Ok(MemoryEntry {
-                        id: row.get(0)?,
-                        key: row.get(1)?,
-                        content: row.get(2)?,
-                        category: Self::str_to_category(&row.get::<_, String>(3)?),
-                        timestamp: row.get(4)?,
-                        session_id: None,
-                        score: Some(1.0),
-                    })
-                })?;
+            } else {
+                let mut stmt = conn.prepare(
+                    "SELECT id, key, content, category, created_at FROM memories
+                     ORDER BY updated_at DESC LIMIT 1000",
+                )?;
+                let rows = stmt.query_map([], row_mapper)?;
                 for row in rows {
                     results.push(row?);
                 }
             }
-        }
-
-        results.truncate(limit);
-        Ok(results)
-    }
-
-    async fn get(&self, key: &str) -> anyhow::Result<Option<MemoryEntry>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-
-        let mut stmt = conn.prepare(
-            "SELECT id, key, content, category, created_at FROM memories WHERE key = ?1",
-        )?;
-
-        let mut rows = stmt.query_map(params![key], |row| {
-            Ok(MemoryEntry {
-                id: row.get(0)?,
-                key: row.get(1)?,
-                content: row.get(2)?,
-                category: Self::str_to_category(&row.get::<_, String>(3)?),
-                timestamp: row.get(4)?,
-                session_id: None,
-                score: None,
-            })
-        })?;
-
-        match rows.next() {
-            Some(Ok(entry)) => Ok(Some(entry)),
-            _ => Ok(None),
-        }
-    }
-
-    async fn list(&self, category: Option<&MemoryCategory>) -> anyhow::Result<Vec<MemoryEntry>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-
-        let mut results = Vec::new();
-
-        let row_mapper = |row: &rusqlite::Row| -> rusqlite::Result<MemoryEntry> {
-            Ok(MemoryEntry {
-                id: row.get(0)?,
-                key: row.get(1)?,
-                content: row.get(2)?,
-                category: Self::str_to_category(&row.get::<_, String>(3)?),
-                timestamp: row.get(4)?,
-                session_id: None,
-                score: None,
-            })
-        };
-
-        if let Some(cat) = category {
-            let cat_str = Self::category_to_str(cat);
-            let mut stmt = conn.prepare(
-                "SELECT id, key, content, category, created_at FROM memories
-                 WHERE category = ?1 ORDER BY updated_at DESC",
-            )?;
-            let rows = stmt.query_map(params![cat_str], row_mapper)?;
-            for row in rows {
-                results.push(row?);
-            }
-        } else {
-            let mut stmt = conn.prepare(
-                "SELECT id, key, content, category, created_at FROM memories
-                 ORDER BY updated_at DESC",
-            )?;
-            let rows = stmt.query_map([], row_mapper)?;
-            for row in rows {
-                results.push(row?);
-            }
-        }
-
-        Ok(results)
+            Ok(results)
+        })
+        .await?
     }
 
     async fn forget(&self, key: &str) -> anyhow::Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-        let affected = conn.execute("DELETE FROM memories WHERE key = ?1", params![key])?;
-        Ok(affected > 0)
+        let conn = self.conn.clone();
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
+            let affected = conn.execute("DELETE FROM memories WHERE key = ?1", params![key])?;
+            Ok(affected > 0)
+        })
+        .await?
     }
 
     async fn count(&self) -> anyhow::Result<usize> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        Ok(count as usize)
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+            let conn = conn.lock().map_err(|e| anyhow::anyhow!("Lock error: {e}"))?;
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            Ok(count as usize)
+        })
+        .await?
     }
 
     async fn health_check(&self) -> bool {
-        self.conn
-            .lock()
-            .map(|c| c.execute_batch("SELECT 1").is_ok())
-            .unwrap_or(false)
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || {
+            conn.lock()
+                .map(|c| c.execute_batch("SELECT 1").is_ok())
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false)
     }
 }
 
