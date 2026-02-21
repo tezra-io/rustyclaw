@@ -321,6 +321,9 @@ pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
     })
 }
 
+/// Maximum number of run-history rows to retain per job.
+const CRON_RUN_HISTORY_LIMIT: i64 = 100;
+
 pub fn reschedule_after_run(
     config: &Config,
     job: &CronJob,
@@ -341,7 +344,9 @@ pub fn reschedule_after_run(
     let status = if success { "ok" } else { "error" };
 
     with_connection(config, |conn| {
-        conn.execute(
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
             "UPDATE cron_jobs
              SET next_run = ?1, last_run = ?2, last_status = ?3, last_output = ?4
              WHERE id = ?5",
@@ -354,6 +359,25 @@ pub fn reschedule_after_run(
             ],
         )
         .context("Failed to update cron job run state")?;
+
+        tx.execute(
+            "INSERT INTO cron_runs (job_id, started_at, success, output) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                job.id,
+                now.to_rfc3339(),
+                i64::from(success),
+                output,
+            ],
+        )
+        .context("Failed to insert cron run record")?;
+
+        tx.execute(
+            "DELETE FROM cron_runs WHERE job_id = ?1 AND id NOT IN (SELECT id FROM cron_runs WHERE job_id = ?1 ORDER BY started_at DESC LIMIT ?2)",
+            params![job.id, CRON_RUN_HISTORY_LIMIT],
+        )
+        .context("Failed to prune cron run history")?;
+
+        tx.commit().context("Failed to commit cron run transaction")?;
         Ok(())
     })
 }
@@ -433,15 +457,6 @@ fn with_connection<T>(config: &Config, f: impl FnOnce(&Connection) -> Result<T>)
     .context("Failed to set cron DB PRAGMAs")?;
 
     conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA synchronous  = NORMAL;
-         PRAGMA mmap_size    = 8388608;
-         PRAGMA cache_size   = -2000;
-         PRAGMA temp_store   = MEMORY;",
-    )
-    .context("Failed to set cron DB PRAGMAs")?;
-
-    conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS cron_jobs (
             id          TEXT PRIMARY KEY,
             expression  TEXT NOT NULL,
@@ -454,16 +469,72 @@ fn with_connection<T>(config: &Config, f: impl FnOnce(&Connection) -> Result<T>)
             paused      INTEGER NOT NULL DEFAULT 0,
             one_shot    INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_run ON cron_jobs(next_run);",
+        CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_run ON cron_jobs(next_run);
+        CREATE TABLE IF NOT EXISTS cron_runs (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id     TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            success    INTEGER NOT NULL,
+            output     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_cron_runs_job_started ON cron_runs(job_id, started_at);",
     )
     .context("Failed to initialize cron schema")?;
 
     for column in ["paused", "one_shot"] {
-        let alter = format!("ALTER TABLE cron_jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0");
-        let _ = conn.execute_batch(&alter);
+        add_column_if_missing(&conn, column, "INTEGER NOT NULL DEFAULT 0")?;
     }
 
+    // idx_cron_jobs_next_run_paused must be created *after* add_column_if_missing
+    // ensures the `paused` column exists in old-schema databases.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_run_paused ON cron_jobs(next_run, paused);",
+    )
+    .context("Failed to create cron_jobs composite index")?;
+
     f(&conn)
+}
+
+/// Add a column to `cron_jobs` if it does not already exist.
+///
+/// Drops the PRAGMA statement and rows before issuing ALTER so SQLite does not
+/// hold a read lock that conflicts with a concurrent schema write.  Catches
+/// "duplicate column name" to tolerate concurrent migrations from multiple
+/// processes.
+fn add_column_if_missing(conn: &Connection, name: &str, sql_type: &str) -> Result<()> {
+    let already_exists = {
+        let mut stmt = conn.prepare("PRAGMA table_info(cron_jobs)")?;
+        let mut rows = stmt.query([])?;
+        let mut found = false;
+        while let Some(row) = rows.next()? {
+            let col_name: String = row.get(1)?;
+            if col_name == name {
+                found = true;
+                break;
+            }
+        }
+        // rows and stmt drop here, releasing any implicit locks before ALTER
+        found
+    };
+
+    if already_exists {
+        return Ok(());
+    }
+
+    match conn.execute(
+        &format!("ALTER TABLE cron_jobs ADD COLUMN {name} {sql_type}"),
+        [],
+    ) {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(_, Some(ref msg)))
+            if msg.contains("duplicate column name") =>
+        {
+            // Another process added the column concurrently — that's fine.
+            tracing::debug!("Column cron_jobs.{name} already exists (concurrent migration)");
+            Ok(())
+        }
+        Err(e) => Err(e).with_context(|| format!("Failed to add column cron_jobs.{name}")),
+    }
 }
 
 #[cfg(test)]
