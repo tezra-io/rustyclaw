@@ -78,6 +78,9 @@ pub struct Config {
     pub http_request: HttpRequestConfig,
 
     #[serde(default)]
+    pub web_search: WebSearchConfig,
+
+    #[serde(default)]
     pub identity: IdentityConfig,
 
     #[serde(default)]
@@ -708,6 +711,51 @@ fn default_http_timeout_secs() -> u64 {
     30
 }
 
+// ── Web Search ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchConfig {
+    /// Enable `web_search_tool` for web queries
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Search provider: "duckduckgo" or "brave"
+    #[serde(default = "default_web_search_provider")]
+    pub provider: String,
+    /// Brave Search API key (required when provider = "brave")
+    #[serde(default)]
+    pub brave_api_key: Option<String>,
+    /// Maximum results to return (default: 5)
+    #[serde(default = "default_web_search_max_results")]
+    pub max_results: usize,
+    /// Request timeout in seconds (default: 15)
+    #[serde(default = "default_web_search_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for WebSearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            provider: default_web_search_provider(),
+            brave_api_key: None,
+            max_results: default_web_search_max_results(),
+            timeout_secs: default_web_search_timeout_secs(),
+        }
+    }
+}
+
+fn default_web_search_provider() -> String {
+    "duckduckgo".to_string()
+}
+
+fn default_web_search_max_results() -> usize {
+    5
+}
+
+fn default_web_search_timeout_secs() -> u64 {
+    15
+}
+
 // ── Memory ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -749,6 +797,9 @@ pub struct MemoryConfig {
     /// Max tokens per chunk for document splitting
     #[serde(default = "default_chunk_size")]
     pub chunk_max_tokens: usize,
+    /// Minimum hybrid relevance score for recall results (0.0–1.0)
+    #[serde(default = "default_min_relevance_score")]
+    pub min_relevance_score: f64,
 
     // ── Response Cache (saves tokens on repeated prompts) ──────
     /// Enable LLM response caching to avoid paying for duplicate prompts
@@ -800,6 +851,9 @@ fn default_vector_weight() -> f64 {
 fn default_keyword_weight() -> f64 {
     0.3
 }
+fn default_min_relevance_score() -> f64 {
+    0.4
+}
 fn default_cache_size() -> usize {
     10_000
 }
@@ -829,6 +883,7 @@ impl Default for MemoryConfig {
             keyword_weight: default_keyword_weight(),
             embedding_cache_size: default_cache_size(),
             chunk_max_tokens: default_chunk_size(),
+            min_relevance_score: default_min_relevance_score(),
             response_cache_enabled: false,
             response_cache_ttl_minutes: default_response_cache_ttl(),
             response_cache_max_entries: default_response_cache_max(),
@@ -1686,6 +1741,7 @@ impl Default for Config {
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
             http_request: HttpRequestConfig::default(),
+            web_search: WebSearchConfig::default(),
             identity: IdentityConfig::default(),
             cost: CostConfig::default(),
             peripherals: PeripheralsConfig::default(),
@@ -2103,6 +2159,7 @@ mod tests {
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
             http_request: HttpRequestConfig::default(),
+            web_search: WebSearchConfig::default(),
             agent: AgentConfig::default(),
             identity: IdentityConfig::default(),
             cost: CostConfig::default(),
@@ -2212,6 +2269,7 @@ tool_dispatcher = "xml"
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
             http_request: HttpRequestConfig::default(),
+            web_search: WebSearchConfig::default(),
             agent: AgentConfig::default(),
             identity: IdentityConfig::default(),
             cost: CostConfig::default(),

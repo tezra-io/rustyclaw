@@ -18,6 +18,7 @@ pub mod schedule;
 pub mod screenshot;
 pub mod shell;
 pub mod traits;
+pub mod web_search_tool;
 
 pub use agent_manage::AgentManageTool;
 pub use browser::{BrowserTool, ComputerUseConfig};
@@ -41,6 +42,7 @@ pub use shell::ShellTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
 pub use traits::{ToolResult, ToolSpec};
+pub use web_search_tool::WebSearchTool;
 
 use crate::config::DelegateAgentConfig;
 use crate::memory::Memory;
@@ -157,6 +159,15 @@ pub fn all_tools_with_runtime(
             http_config.allowed_domains.clone(),
             http_config.max_response_size,
             http_config.timeout_secs,
+        )));
+    }
+
+    if config.web_search.enabled {
+        tools.push(Box::new(WebSearchTool::new(
+            config.web_search.provider.clone(),
+            config.web_search.brave_api_key.clone(),
+            config.web_search.max_results,
+            config.web_search.timeout_secs,
         )));
     }
 
