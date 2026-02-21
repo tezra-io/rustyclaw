@@ -154,7 +154,7 @@ pub async fn run_persistent_agent(
         .memory(memory)
         .observer(observer)
         .tool_dispatcher(tool_dispatcher)
-        .memory_loader(Box::new(DefaultMemoryLoader::default()))
+        .memory_loader(Box::new(DefaultMemoryLoader::new(5, config.memory.min_relevance_score)))
         .prompt_builder(prompt_builder)
         .config(agent_config)
         .model_name(model_name)
