@@ -42,12 +42,47 @@ struct ContentBlock {
     text: Option<String>,
 }
 
+// ── Prompt caching types ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
+}
+
+impl CacheControl {
+    fn ephemeral() -> Self {
+        Self {
+            cache_type: "ephemeral".to_string(),
+        }
+    }
+}
+
+/// System prompt: either a plain string or a list of blocks (for caching).
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum SystemPrompt {
+    String(String),
+    Blocks(Vec<SystemBlock>),
+}
+
+#[derive(Debug, Serialize)]
+struct SystemBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+// ── Native API types ────────────────────────────────────────────
+
 #[derive(Debug, Serialize)]
 struct NativeChatRequest {
     model: String,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<SystemPrompt>,
     messages: Vec<NativeMessage>,
     temperature: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,17 +99,25 @@ struct NativeMessage {
 #[serde(tag = "type")]
 enum NativeContentOut {
     #[serde(rename = "text")]
-    Text { text: String },
+    Text {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
+    },
     #[serde(rename = "tool_use")]
     ToolUse {
         id: String,
         name: String,
         input: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     #[serde(rename = "tool_result")]
     ToolResult {
         tool_use_id: String,
         content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
 }
 
@@ -83,6 +126,8 @@ struct NativeToolSpec {
     name: String,
     description: String,
     input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,21 +190,51 @@ impl AnthropicProvider {
         }
     }
 
+    // ── Prompt caching helpers ──────────────────────────────────
+
+    /// Cache system prompts longer than 3 KB (3072 bytes).
+    fn should_cache_system(text: &str) -> bool {
+        text.len() > 3072
+    }
+
+    /// Cache conversation context after more than 4 non-system turns.
+    fn should_cache_conversation(messages: &[ChatMessage]) -> bool {
+        messages.iter().filter(|m| m.role != "system").count() > 4
+    }
+
+    /// Set `cache_control` on the last content block of the last message.
+    fn apply_cache_to_last_message(messages: &mut [NativeMessage]) {
+        if let Some(last_msg) = messages.last_mut() {
+            if let Some(last_content) = last_msg.content.last_mut() {
+                let cache_control = match last_content {
+                    NativeContentOut::Text { cache_control, .. }
+                    | NativeContentOut::ToolResult { cache_control, .. }
+                    | NativeContentOut::ToolUse { cache_control, .. } => cache_control,
+                };
+                *cache_control = Some(CacheControl::ephemeral());
+            }
+        }
+    }
+
     fn convert_tools(tools: Option<&[ToolSpec]>) -> Option<Vec<NativeToolSpec>> {
         let items = tools?;
         if items.is_empty() {
             return None;
         }
-        Some(
-            items
-                .iter()
-                .map(|tool| NativeToolSpec {
-                    name: tool.name.clone(),
-                    description: tool.description.clone(),
-                    input_schema: tool.parameters.clone(),
-                })
-                .collect(),
-        )
+        let mut native_tools: Vec<NativeToolSpec> = items
+            .iter()
+            .map(|tool| NativeToolSpec {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                input_schema: tool.parameters.clone(),
+                cache_control: None,
+            })
+            .collect();
+        // Cache all tools up to the last one by marking the last tool.
+        if let Some(last) = native_tools.last_mut() {
+            last.cache_control = Some(CacheControl::ephemeral());
+        }
+        Some(native_tools)
     }
 
     fn parse_assistant_tool_call_message(content: &str) -> Option<Vec<NativeContentOut>> {
@@ -177,6 +252,7 @@ impl AnthropicProvider {
         {
             blocks.push(NativeContentOut::Text {
                 text: text.to_string(),
+                cache_control: None,
             });
         }
         for call in tool_calls {
@@ -186,6 +262,7 @@ impl AnthropicProvider {
                 id: call.id,
                 name: call.name,
                 input,
+                cache_control: None,
             });
         }
         Some(blocks)
@@ -207,19 +284,22 @@ impl AnthropicProvider {
             content: vec![NativeContentOut::ToolResult {
                 tool_use_id,
                 content: result,
+                cache_control: None,
             }],
         })
     }
 
-    fn convert_messages(messages: &[ChatMessage]) -> (Option<String>, Vec<NativeMessage>) {
-        let mut system_prompt = None;
+    fn convert_messages(
+        messages: &[ChatMessage],
+    ) -> (Option<SystemPrompt>, Vec<NativeMessage>) {
+        let mut system_text = None;
         let mut native_messages = Vec::new();
 
         for msg in messages {
             match msg.role.as_str() {
                 "system" => {
-                    if system_prompt.is_none() {
-                        system_prompt = Some(msg.content.clone());
+                    if system_text.is_none() {
+                        system_text = Some(msg.content.clone());
                     }
                 }
                 "assistant" => {
@@ -233,6 +313,7 @@ impl AnthropicProvider {
                             role: "assistant".to_string(),
                             content: vec![NativeContentOut::Text {
                                 text: msg.content.clone(),
+                                cache_control: None,
                             }],
                         });
                     }
@@ -245,6 +326,7 @@ impl AnthropicProvider {
                             role: "user".to_string(),
                             content: vec![NativeContentOut::Text {
                                 text: msg.content.clone(),
+                                cache_control: None,
                             }],
                         });
                     }
@@ -254,11 +336,24 @@ impl AnthropicProvider {
                         role: "user".to_string(),
                         content: vec![NativeContentOut::Text {
                             text: msg.content.clone(),
+                            cache_control: None,
                         }],
                     });
                 }
             }
         }
+
+        let system_prompt = system_text.map(|text| {
+            if Self::should_cache_system(&text) {
+                SystemPrompt::Blocks(vec![SystemBlock {
+                    block_type: "text".to_string(),
+                    text,
+                    cache_control: Some(CacheControl::ephemeral()),
+                }])
+            } else {
+                SystemPrompt::String(text)
+            }
+        });
 
         (system_prompt, native_messages)
     }
@@ -371,7 +466,13 @@ impl Provider for AnthropicProvider {
             )
         })?;
 
-        let (system_prompt, messages) = Self::convert_messages(request.messages);
+        let (system_prompt, mut messages) = Self::convert_messages(request.messages);
+
+        // Apply conversation-level caching for long contexts
+        if Self::should_cache_conversation(request.messages) {
+            Self::apply_cache_to_last_message(&mut messages);
+        }
+
         let native_request = NativeChatRequest {
             model: model.to_string(),
             max_tokens: 4096,
@@ -559,5 +660,195 @@ mod tests {
             let json = serde_json::to_string(&req).unwrap();
             assert!(json.contains(&format!("{temp}")));
         }
+    }
+
+    // ── Prompt caching tests ────────────────────────────────────
+
+    #[test]
+    fn cache_control_serializes_correctly() {
+        let cc = CacheControl::ephemeral();
+        let json = serde_json::to_string(&cc).unwrap();
+        assert_eq!(json, r#"{"type":"ephemeral"}"#);
+    }
+
+    #[test]
+    fn system_prompt_string_variant_no_cache_control_field() {
+        let sp = SystemPrompt::String("Hello".to_string());
+        let json = serde_json::to_string(&sp).unwrap();
+        assert_eq!(json, r#""Hello""#);
+    }
+
+    #[test]
+    fn system_prompt_blocks_variant_serializes() {
+        let sp = SystemPrompt::Blocks(vec![SystemBlock {
+            block_type: "text".to_string(),
+            text: "You are helpful.".to_string(),
+            cache_control: Some(CacheControl::ephemeral()),
+        }]);
+        let json = serde_json::to_string(&sp).unwrap();
+        assert!(json.contains("\"type\":\"text\""));
+        assert!(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
+        assert!(json.contains("You are helpful."));
+    }
+
+    #[test]
+    fn should_cache_system_boundary() {
+        let short = "x".repeat(3072);
+        let long = "x".repeat(3073);
+        assert!(!AnthropicProvider::should_cache_system(&short));
+        assert!(AnthropicProvider::should_cache_system(&long));
+    }
+
+    #[test]
+    fn should_cache_conversation_boundary() {
+        use crate::providers::traits::ChatMessage;
+        let make_msg = |role: &str| ChatMessage {
+            role: role.to_string(),
+            content: "hi".to_string(),
+        };
+        let four = vec![
+            make_msg("user"),
+            make_msg("assistant"),
+            make_msg("user"),
+            make_msg("assistant"),
+        ];
+        let five = {
+            let mut v = four.clone();
+            v.push(make_msg("user"));
+            v
+        };
+        assert!(!AnthropicProvider::should_cache_conversation(&four));
+        assert!(AnthropicProvider::should_cache_conversation(&five));
+    }
+
+    #[test]
+    fn convert_tools_sets_cache_on_last_only() {
+        use crate::tools::ToolSpec;
+        let tools = vec![
+            ToolSpec {
+                name: "tool_a".to_string(),
+                description: "A".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+            ToolSpec {
+                name: "tool_b".to_string(),
+                description: "B".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+        ];
+        let native = AnthropicProvider::convert_tools(Some(&tools)).unwrap();
+        assert!(native[0].cache_control.is_none());
+        assert!(native[1].cache_control.is_some());
+    }
+
+    #[test]
+    fn convert_tools_empty_returns_none() {
+        let result = AnthropicProvider::convert_tools(Some(&[]));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn convert_messages_small_system_returns_string() {
+        use crate::providers::traits::ChatMessage;
+        let messages = vec![ChatMessage {
+            role: "system".to_string(),
+            content: "short prompt".to_string(),
+        }];
+        let (sys, _) = AnthropicProvider::convert_messages(&messages);
+        let sys = sys.unwrap();
+        let json = serde_json::to_string(&sys).unwrap();
+        assert_eq!(json, r#""short prompt""#);
+    }
+
+    #[test]
+    fn convert_messages_large_system_returns_blocks_with_cache() {
+        use crate::providers::traits::ChatMessage;
+        let large_text = "x".repeat(3073);
+        let messages = vec![ChatMessage {
+            role: "system".to_string(),
+            content: large_text.clone(),
+        }];
+        let (sys, _) = AnthropicProvider::convert_messages(&messages);
+        let sys = sys.unwrap();
+        let json = serde_json::to_string(&sys).unwrap();
+        assert!(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
+    }
+
+    #[test]
+    fn native_content_out_text_no_cache_serializes_without_cache_field() {
+        let block = NativeContentOut::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        };
+        let json = serde_json::to_string(&block).unwrap();
+        assert!(!json.contains("cache_control"));
+        assert!(json.contains("\"text\":\"hello\""));
+    }
+
+    #[test]
+    fn native_content_out_tool_result_with_cache_serializes() {
+        let block = NativeContentOut::ToolResult {
+            tool_use_id: "id-1".to_string(),
+            content: "result".to_string(),
+            cache_control: Some(CacheControl::ephemeral()),
+        };
+        let json = serde_json::to_string(&block).unwrap();
+        assert!(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
+    }
+
+    #[test]
+    fn apply_cache_to_last_message_on_text() {
+        let mut messages = vec![NativeMessage {
+            role: "user".to_string(),
+            content: vec![NativeContentOut::Text {
+                text: "hello".to_string(),
+                cache_control: None,
+            }],
+        }];
+        AnthropicProvider::apply_cache_to_last_message(&mut messages);
+        match &messages[0].content[0] {
+            NativeContentOut::Text { cache_control, .. } => {
+                assert!(cache_control.is_some());
+            }
+            _ => panic!("Expected Text variant"),
+        }
+    }
+
+    #[test]
+    fn apply_cache_to_last_message_on_tool_result() {
+        let mut messages = vec![NativeMessage {
+            role: "user".to_string(),
+            content: vec![NativeContentOut::ToolResult {
+                tool_use_id: "id-1".to_string(),
+                content: "result".to_string(),
+                cache_control: None,
+            }],
+        }];
+        AnthropicProvider::apply_cache_to_last_message(&mut messages);
+        match &messages[0].content[0] {
+            NativeContentOut::ToolResult { cache_control, .. } => {
+                assert!(cache_control.is_some());
+            }
+            _ => panic!("Expected ToolResult variant"),
+        }
+    }
+
+    #[test]
+    fn apply_cache_to_last_message_empty_noop() {
+        let mut messages: Vec<NativeMessage> = Vec::new();
+        // Should not panic
+        AnthropicProvider::apply_cache_to_last_message(&mut messages);
+    }
+
+    #[test]
+    fn native_tool_spec_no_cache_backward_compat() {
+        let spec = NativeToolSpec {
+            name: "my_tool".to_string(),
+            description: "does stuff".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            cache_control: None,
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(!json.contains("cache_control"));
     }
 }
