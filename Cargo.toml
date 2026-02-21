@@ -124,7 +124,7 @@ pdf-extract = { version = "0.10", optional = true }
 
 # Raspberry Pi GPIO (Linux/RPi only) — target-specific to avoid compile failure on macOS
 [target.'cfg(target_os = "linux")'.dependencies]
-rppal = { version = "0.14", optional = true }
+rppal = { version = "0.22", optional = true }
 
 [features]
 default = ["hardware"]
