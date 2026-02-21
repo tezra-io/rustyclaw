@@ -7,16 +7,59 @@ use crate::security::SecurityPolicy;
 use crate::tools::{self, Tool};
 use crate::util::truncate_with_ellipsis;
 use anyhow::Result;
+use regex::Regex;
 use std::fmt::Write;
 use std::io::Write as _;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 use uuid::Uuid;
-/// Maximum agentic tool-use iterations per user message to prevent runaway loops.
-const MAX_TOOL_ITERATIONS: usize = 10;
 
-/// Trigger auto-compaction when non-system message count exceeds this threshold.
-const MAX_HISTORY_MESSAGES: usize = 50;
+/// Regex that matches credential-like key=value and "key": "value" patterns.
+/// The value must be at least 8 characters to avoid false positives on short strings.
+static SENSITIVE_KV_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)(token|api[_-]?key|password|secret|user[_-]?key|bearer|credential)["']?\s*[:=]\s*(?:"([^"]{8,})"|'([^']{8,})'|([a-zA-Z0-9_\-\.]{8,}))"#,
+    )
+    .expect("SENSITIVE_KV_REGEX is valid")
+});
+
+/// Scrub credential values from tool output before it enters conversation history.
+/// Preserves the first 4 characters of each redacted value for debugging context.
+fn scrub_credentials(input: &str) -> String {
+    SENSITIVE_KV_REGEX
+        .replace_all(input, |caps: &regex::Captures| {
+            let full_match = &caps[0];
+            let key = &caps[1];
+            let val = caps
+                .get(2)
+                .or_else(|| caps.get(3))
+                .or_else(|| caps.get(4))
+                .map(|m| m.as_str())
+                .unwrap_or("");
+            let prefix = if val.len() > 4 { &val[..4] } else { "" };
+            if full_match.contains(':') {
+                if full_match.contains('"') {
+                    format!("\"{key}\": \"{prefix}*[REDACTED]\"")
+                } else {
+                    format!("{key}: {prefix}*[REDACTED]")
+                }
+            } else if full_match.contains('=') {
+                if full_match.contains('"') {
+                    format!("{key}=\"{prefix}*[REDACTED]\"")
+                } else {
+                    format!("{key}={prefix}*[REDACTED]")
+                }
+            } else {
+                format!("{key}: {prefix}*[REDACTED]")
+            }
+        })
+        .to_string()
+}
+/// Default agentic tool-use iteration cap (overridden by config.agent.max_tool_iterations).
+const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
+
+/// Default auto-compaction threshold (overridden by config.agent.max_history_messages).
+const DEFAULT_MAX_HISTORY_MESSAGES: usize = 50;
 
 /// Keep this many most-recent non-system messages after compaction.
 const COMPACTION_KEEP_RECENT_MESSAGES: usize = 20;
@@ -33,7 +76,7 @@ fn autosave_memory_key(prefix: &str) -> String {
 
 /// Trim conversation history to prevent unbounded growth.
 /// Preserves the system prompt (first message if role=system) and the most recent messages.
-fn trim_history(history: &mut Vec<ChatMessage>) {
+fn trim_history(history: &mut Vec<ChatMessage>, max_history: usize) {
     // Nothing to trim if within limit
     let has_system = history.first().map_or(false, |m| m.role == "system");
     let non_system_count = if has_system {
@@ -42,12 +85,12 @@ fn trim_history(history: &mut Vec<ChatMessage>) {
         history.len()
     };
 
-    if non_system_count <= MAX_HISTORY_MESSAGES {
+    if non_system_count <= max_history {
         return;
     }
 
     let start = if has_system { 1 } else { 0 };
-    let to_remove = non_system_count - MAX_HISTORY_MESSAGES;
+    let to_remove = non_system_count - max_history;
     history.drain(start..start + to_remove);
 }
 
@@ -79,6 +122,7 @@ async fn auto_compact_history(
     history: &mut Vec<ChatMessage>,
     provider: &dyn Provider,
     model: &str,
+    max_history: usize,
 ) -> Result<bool> {
     let has_system = history.first().map_or(false, |m| m.role == "system");
     let non_system_count = if has_system {
@@ -87,7 +131,7 @@ async fn auto_compact_history(
         history.len()
     };
 
-    if non_system_count <= MAX_HISTORY_MESSAGES {
+    if non_system_count <= max_history {
         return Ok(false);
     }
 
@@ -358,12 +402,51 @@ fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) {
         }
     }
 
+    // Markdown code block fallback: some models (e.g. via OpenRouter) output tool
+    // calls wrapped in ```tool_call ... ``` blocks instead of XML or native API calls.
+    // This is still an explicit wrapper, so it doesn't enable arbitrary JSON injection.
+    if calls.is_empty() {
+        static MD_TOOL_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(?s)```tool[_-]?call\s*\n(.*?)(?:```|</tool[_-]?call>|</toolcall>)")
+                .expect("MD_TOOL_CALL_RE is valid")
+        });
+        let mut md_calls = Vec::new();
+        let mut md_text_parts = Vec::new();
+        let mut last_end = 0;
+        for cap in MD_TOOL_CALL_RE.captures_iter(remaining) {
+            let full_match = cap.get(0).unwrap();
+            let before = &remaining[last_end..full_match.start()];
+            if !before.trim().is_empty() {
+                md_text_parts.push(before.trim().to_string());
+            }
+            let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+            let json_values = extract_json_values(inner);
+            for value in json_values {
+                md_calls.extend(parse_tool_calls_from_json_value(&value));
+            }
+            last_end = full_match.end();
+        }
+        if !md_calls.is_empty() {
+            let after = &remaining[last_end..];
+            if !after.trim().is_empty() {
+                md_text_parts.push(after.trim().to_string());
+            }
+            // Replace both the accumulated text_parts and calls with markdown results.
+            // text_parts before the markdown section are already pushed; use md_text_parts
+            // only for the portion of `remaining` that the markdown parser covered.
+            text_parts.extend(md_text_parts);
+            calls = md_calls;
+            return (text_parts.join("\n"), calls);
+        }
+    }
+
     // SECURITY: We do NOT fall back to extracting arbitrary JSON from the response
     // here. That would enable prompt injection attacks where malicious content
     // (e.g., in emails, files, or web pages) could include JSON that mimics a
     // tool call. Tool calls MUST be explicitly wrapped in either:
     // 1. OpenAI-style JSON with a "tool_calls" array
     // 2. RustyClaw <invoke>...</invoke> tags
+    // 3. Markdown ```tool_call ... ``` code blocks
     // This ensures only the LLM's intentional tool calls are executed.
 
     // Remaining text after last tool call
@@ -406,6 +489,29 @@ fn build_assistant_history_with_tool_calls(text: &str, tool_calls: &[ToolCall]) 
     parts.join("\n")
 }
 
+/// Build assistant history content for native (OpenAI-style) tool calling.
+///
+/// Unlike the XML-tag format used for text-based tool parsing, native tool calls
+/// are serialized as JSON so that providers expecting OpenAI-style history
+/// (role: "assistant" with tool_calls array) can reconstruct the structured format.
+fn build_native_assistant_history(text: &str, tool_calls: &[ToolCall]) -> String {
+    let calls_json: Vec<serde_json::Value> = tool_calls
+        .iter()
+        .map(|tc| {
+            serde_json::json!({
+                "id": tc.id,
+                "name": tc.name,
+                "arguments": tc.arguments,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "content": text,
+        "tool_calls": calls_json,
+    })
+    .to_string()
+}
+
 #[derive(Debug)]
 struct ParsedToolCall {
     name: String,
@@ -424,6 +530,7 @@ pub(crate) async fn agent_turn(
     model: &str,
     temperature: f64,
     silent: bool,
+    max_tool_iterations: usize,
 ) -> Result<String> {
     run_tool_call_loop(
         provider,
@@ -434,12 +541,15 @@ pub(crate) async fn agent_turn(
         model,
         temperature,
         silent,
+        max_tool_iterations,
     )
     .await
 }
 
 /// Execute a single turn of the agent loop: send messages, parse tool calls,
 /// execute tools, and loop until the LLM produces a final text response.
+///
+/// `max_tool_iterations` overrides the default cap; pass 0 to use `DEFAULT_MAX_TOOL_ITERATIONS`.
 pub(crate) async fn run_tool_call_loop(
     provider: &dyn Provider,
     history: &mut Vec<ChatMessage>,
@@ -449,8 +559,14 @@ pub(crate) async fn run_tool_call_loop(
     model: &str,
     temperature: f64,
     silent: bool,
+    max_tool_iterations: usize,
 ) -> Result<String> {
-    for _iteration in 0..MAX_TOOL_ITERATIONS {
+    let iteration_limit = if max_tool_iterations == 0 {
+        DEFAULT_MAX_TOOL_ITERATIONS
+    } else {
+        max_tool_iterations
+    };
+    for _iteration in 0..iteration_limit {
         observer.record_event(&ObserverEvent::LlmRequest {
             provider: provider_name.to_string(),
             model: model.to_string(),
@@ -522,7 +638,7 @@ pub(crate) async fn run_tool_call_loop(
                             success: r.success,
                         });
                         if r.success {
-                            r.output
+                            scrub_credentials(&r.output)
                         } else {
                             format!("Error: {}", r.error.unwrap_or_else(|| r.output))
                         }
@@ -552,7 +668,7 @@ pub(crate) async fn run_tool_call_loop(
         history.push(ChatMessage::user(format!("[Tool results]\n{tool_results}")));
     }
 
-    anyhow::bail!("Agent exceeded maximum tool iterations ({MAX_TOOL_ITERATIONS})")
+    anyhow::bail!("Agent exceeded maximum tool iterations ({iteration_limit})")
 }
 
 /// Build the tool instruction block for the system prompt so the LLM knows
@@ -843,6 +959,7 @@ pub async fn run(
             model_name,
             temperature,
             false,
+            config.agent.max_tool_iterations,
         )
         .await?;
         println!("{response}");
@@ -911,6 +1028,7 @@ pub async fn run(
                 model_name,
                 temperature,
                 false,
+                config.agent.max_tool_iterations,
             )
             .await
             {
@@ -924,8 +1042,14 @@ pub async fn run(
             observer.record_event(&ObserverEvent::TurnComplete);
 
             // Auto-compaction before hard trimming to preserve long-context signal.
+            let max_history = if config.agent.max_history_messages == 0 {
+                DEFAULT_MAX_HISTORY_MESSAGES
+            } else {
+                config.agent.max_history_messages
+            };
             if let Ok(compacted) =
-                auto_compact_history(&mut history, provider.as_ref(), model_name).await
+                auto_compact_history(&mut history, provider.as_ref(), model_name, max_history)
+                    .await
             {
                 if compacted {
                     println!("🧹 Auto-compaction complete");
@@ -933,7 +1057,7 @@ pub async fn run(
             }
 
             // Hard cap as a safety net.
-            trim_history(&mut history);
+            trim_history(&mut history, max_history);
 
             if config.memory.auto_save {
                 let summary = truncate_with_ellipsis(&response, 100);
@@ -1110,6 +1234,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         &model_name,
         config.default_temperature,
         true,
+        config.agent.max_tool_iterations,
     )
     .await
 }
@@ -1119,6 +1244,59 @@ mod tests {
     use super::*;
     use crate::memory::{Memory, MemoryCategory, SqliteMemory};
     use tempfile::TempDir;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Credential Scrubbing Tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn scrub_api_key_env_var() {
+        let input = "API_KEY=sk-1234567890abcdef";
+        let output = scrub_credentials(input);
+        assert!(output.contains("sk-1*[REDACTED]"), "got: {output}");
+        assert!(!output.contains("1234567890abcdef"), "got: {output}");
+    }
+
+    #[test]
+    fn scrub_token_colon_value() {
+        let input = "token: 1234567890";
+        let output = scrub_credentials(input);
+        assert!(output.contains("1234*[REDACTED]"), "got: {output}");
+        assert!(!output.contains("1234567890\n") && !output.ends_with("1234567890"), "got: {output}");
+    }
+
+    #[test]
+    fn scrub_password_quoted() {
+        let input = "password=\"secret123456\"";
+        let output = scrub_credentials(input);
+        assert!(output.contains("secr*[REDACTED]"), "got: {output}");
+        assert!(!output.contains("secret123456"), "got: {output}");
+    }
+
+    #[test]
+    fn scrub_json_api_key_preserves_other_fields() {
+        let input = r#"{"api_key": "sk-1234567890", "other": "public"}"#;
+        let output = scrub_credentials(input);
+        assert!(output.contains("[REDACTED]"), "got: {output}");
+        assert!(output.contains("public"), "got: {output}");
+        assert!(!output.contains("sk-1234567890"), "got: {output}");
+    }
+
+    #[test]
+    fn scrub_short_values_not_redacted() {
+        // Values shorter than 8 chars should not match to avoid false positives
+        let input = "token=abc";
+        let output = scrub_credentials(input);
+        // 3-char value: should NOT be redacted (below threshold)
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn scrub_leaves_non_sensitive_content_intact() {
+        let input = "name: Alice\nage: 30\nstatus: active";
+        let output = scrub_credentials(input);
+        assert_eq!(output, input);
+    }
 
     #[test]
     fn parse_tool_calls_extracts_single_call() {
@@ -1294,22 +1472,22 @@ I will now call the tool with this payload:
     #[test]
     fn trim_history_preserves_system_prompt() {
         let mut history = vec![ChatMessage::system("system prompt")];
-        for i in 0..MAX_HISTORY_MESSAGES + 20 {
+        for i in 0..DEFAULT_MAX_HISTORY_MESSAGES + 20 {
             history.push(ChatMessage::user(format!("msg {i}")));
         }
         let original_len = history.len();
-        assert!(original_len > MAX_HISTORY_MESSAGES + 1);
+        assert!(original_len > DEFAULT_MAX_HISTORY_MESSAGES + 1);
 
-        trim_history(&mut history);
+        trim_history(&mut history, DEFAULT_MAX_HISTORY_MESSAGES);
 
         // System prompt preserved
         assert_eq!(history[0].role, "system");
         assert_eq!(history[0].content, "system prompt");
         // Trimmed to limit
-        assert_eq!(history.len(), MAX_HISTORY_MESSAGES + 1); // +1 for system
+        assert_eq!(history.len(), DEFAULT_MAX_HISTORY_MESSAGES + 1); // +1 for system
                                                              // Most recent messages preserved
         let last = &history[history.len() - 1];
-        assert_eq!(last.content, format!("msg {}", MAX_HISTORY_MESSAGES + 19));
+        assert_eq!(last.content, format!("msg {}", DEFAULT_MAX_HISTORY_MESSAGES + 19));
     }
 
     #[test]
@@ -1319,7 +1497,7 @@ I will now call the tool with this payload:
             ChatMessage::user("hello"),
             ChatMessage::assistant("hi"),
         ];
-        trim_history(&mut history);
+        trim_history(&mut history, DEFAULT_MAX_HISTORY_MESSAGES);
         assert_eq!(history.len(), 3);
     }
 
@@ -1443,22 +1621,22 @@ Done."#;
     fn trim_history_with_no_system_prompt() {
         // Recovery: History without system prompt should trim correctly
         let mut history = vec![];
-        for i in 0..MAX_HISTORY_MESSAGES + 20 {
+        for i in 0..DEFAULT_MAX_HISTORY_MESSAGES + 20 {
             history.push(ChatMessage::user(format!("msg {i}")));
         }
-        trim_history(&mut history);
-        assert_eq!(history.len(), MAX_HISTORY_MESSAGES);
+        trim_history(&mut history, DEFAULT_MAX_HISTORY_MESSAGES);
+        assert_eq!(history.len(), DEFAULT_MAX_HISTORY_MESSAGES);
     }
 
     #[test]
     fn trim_history_preserves_role_ordering() {
         // Recovery: After trimming, role ordering should remain consistent
         let mut history = vec![ChatMessage::system("system")];
-        for i in 0..MAX_HISTORY_MESSAGES + 10 {
+        for i in 0..DEFAULT_MAX_HISTORY_MESSAGES + 10 {
             history.push(ChatMessage::user(format!("user {i}")));
             history.push(ChatMessage::assistant(format!("assistant {i}")));
         }
-        trim_history(&mut history);
+        trim_history(&mut history, DEFAULT_MAX_HISTORY_MESSAGES);
         assert_eq!(history[0].role, "system");
         assert_eq!(history[history.len() - 1].role, "assistant");
     }
@@ -1467,7 +1645,7 @@ Done."#;
     fn trim_history_with_only_system_prompt() {
         // Recovery: Only system prompt should not be trimmed
         let mut history = vec![ChatMessage::system("system prompt")];
-        trim_history(&mut history);
+        trim_history(&mut history, DEFAULT_MAX_HISTORY_MESSAGES);
         assert_eq!(history.len(), 1);
     }
 
@@ -1531,10 +1709,10 @@ Done."#;
     // ═══════════════════════════════════════════════════════════════════════
 
     const _: () = {
-        assert!(MAX_TOOL_ITERATIONS > 0);
-        assert!(MAX_TOOL_ITERATIONS <= 100);
-        assert!(MAX_HISTORY_MESSAGES > 0);
-        assert!(MAX_HISTORY_MESSAGES <= 1000);
+        assert!(DEFAULT_MAX_TOOL_ITERATIONS > 0);
+        assert!(DEFAULT_MAX_TOOL_ITERATIONS <= 100);
+        assert!(DEFAULT_MAX_HISTORY_MESSAGES > 0);
+        assert!(DEFAULT_MAX_HISTORY_MESSAGES <= 1000);
     };
 
     #[test]
