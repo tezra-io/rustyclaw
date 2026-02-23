@@ -754,6 +754,7 @@ mod tests {
         config.channels_config.telegram = Some(TelegramConfig {
             bot_token: "123:ABC".into(),
             allowed_users: vec!["user".into()],
+            mention_only: false,
         });
         let entries = all_integrations();
         let tg = entries.iter().find(|e| e.name == "Telegram").unwrap();

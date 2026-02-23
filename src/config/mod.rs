@@ -35,6 +35,7 @@ mod tests {
         let telegram = TelegramConfig {
             bot_token: "token".into(),
             allowed_users: vec!["alice".into()],
+            mention_only: false,
         };
 
         let discord = DiscordConfig {
@@ -42,6 +43,7 @@ mod tests {
             guild_id: Some("123".into()),
             allowed_users: vec![],
             listen_to_bots: false,
+            mention_only: false,
         };
 
         let lark = LarkConfig {

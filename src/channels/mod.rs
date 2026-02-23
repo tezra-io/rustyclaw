@@ -609,6 +609,7 @@ pub async fn doctor_channels(config: Config) -> Result<()> {
             Arc::new(TelegramChannel::new(
                 tg.bot_token.clone(),
                 tg.allowed_users.clone(),
+                tg.mention_only,
             )),
         ));
     }
@@ -621,6 +622,7 @@ pub async fn doctor_channels(config: Config) -> Result<()> {
                 dc.guild_id.clone(),
                 dc.allowed_users.clone(),
                 dc.listen_to_bots,
+                dc.mention_only,
             )),
         ));
     }
@@ -895,6 +897,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         channels.push(Arc::new(TelegramChannel::new(
             tg.bot_token.clone(),
             tg.allowed_users.clone(),
+            tg.mention_only,
         )));
     }
 
@@ -904,6 +907,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
             dc.guild_id.clone(),
             dc.allowed_users.clone(),
             dc.listen_to_bots,
+            dc.mention_only,
         )));
     }
 
