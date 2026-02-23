@@ -2426,6 +2426,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 config.telegram = Some(TelegramConfig {
                     bot_token: token,
                     allowed_users,
+                    mention_only: false,
                 });
             }
             1 => {
@@ -2524,6 +2525,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     guild_id: if guild.is_empty() { None } else { Some(guild) },
                     allowed_users,
                     listen_to_bots: false,
+                    mention_only: false,
                 });
             }
             2 => {

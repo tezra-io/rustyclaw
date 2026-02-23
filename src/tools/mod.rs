@@ -6,6 +6,7 @@ pub mod delegate;
 pub mod file_read;
 pub mod file_write;
 pub mod git_operations;
+pub mod glob_search;
 pub mod hardware_board_info;
 pub mod hardware_memory_map;
 pub mod hardware_memory_read;
@@ -14,6 +15,7 @@ pub mod image_info;
 pub mod memory_forget;
 pub mod memory_recall;
 pub mod memory_store;
+pub mod pdf_read;
 pub mod schedule;
 pub mod screenshot;
 pub mod shell;
@@ -28,6 +30,7 @@ pub use delegate::DelegateTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
 pub use git_operations::GitOperationsTool;
+pub use glob_search::GlobSearchTool;
 pub use hardware_board_info::HardwareBoardInfoTool;
 pub use hardware_memory_map::HardwareMemoryMapTool;
 pub use hardware_memory_read::HardwareMemoryReadTool;
@@ -36,6 +39,7 @@ pub use image_info::ImageInfoTool;
 pub use memory_forget::MemoryForgetTool;
 pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
+pub use pdf_read::PdfReadTool;
 pub use schedule::ScheduleTool;
 pub use screenshot::ScreenshotTool;
 pub use shell::ShellTool;
@@ -170,6 +174,12 @@ pub fn all_tools_with_runtime(
             config.web_search.timeout_secs,
         )));
     }
+
+    // Glob search — always available for workspace file discovery
+    tools.push(Box::new(GlobSearchTool::new(security.clone())));
+
+    // PDF read — always registered (returns clear error when rag-pdf feature is disabled)
+    tools.push(Box::new(PdfReadTool::new(security.clone())));
 
     // Vision tools are always available
     tools.push(Box::new(ScreenshotTool::new(security.clone())));
