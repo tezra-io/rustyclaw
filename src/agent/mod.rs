@@ -14,7 +14,8 @@ pub mod runner;
 
 #[allow(unused_imports)]
 pub use agent::{Agent, AgentBuilder};
-pub use loop_::{process_message, run};
+#[allow(unused_imports)]
+pub use loop_::{run, process_message};
 pub use runner::run_persistent_agent;
 
 #[cfg(test)]

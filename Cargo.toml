@@ -134,6 +134,10 @@ peripheral-rpi = ["rppal"]
 probe = ["dep:probe-rs"]
 # rag-pdf = PDF ingestion for datasheet RAG
 rag-pdf = ["dep:pdf-extract"]
+# Platform-specific features (not built by default)
+browser-native = []
+sandbox-bubblewrap = []
+sandbox-landlock = ["landlock"]
 
 [profile.release]
 opt-level = "z"      # Optimize for size
