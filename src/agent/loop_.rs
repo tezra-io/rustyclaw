@@ -171,9 +171,10 @@ async fn auto_compact_history(
 ///
 /// Delegates to the personalization engine which orders entries by category
 /// (Preference/UserModel first, then Fact, then other) and enforces a char
-/// budget.  See `src/agent/personalization.rs`.
-async fn build_context(mem: &dyn Memory, user_msg: &str) -> String {
-    crate::agent::personalization::build_context(mem, user_msg).await
+/// budget.  Entries scoring below `min_relevance_score` are filtered out.
+/// See `src/agent/personalization.rs`.
+async fn build_context(mem: &dyn Memory, user_msg: &str, min_relevance_score: f64) -> String {
+    crate::agent::personalization::build_context(mem, user_msg, min_relevance_score).await
 }
 
 /// Load all UserModel entries for unconditional session-start injection.
@@ -932,7 +933,7 @@ pub async fn run(
         // UserModel entries are loaded unconditionally (session-start injection),
         // then query-relevant memories are appended in category order.
         let user_model_ctx = build_user_model_context(mem.as_ref()).await;
-        let mem_context = build_context(mem.as_ref(), &msg).await;
+        let mem_context = build_context(mem.as_ref(), &msg, config.memory.min_relevance_score).await;
         let rag_limit = if config.agent.compact_context { 2 } else { 5 };
         let hw_context = hardware_rag
             .as_ref()
@@ -1004,7 +1005,7 @@ pub async fn run(
             // UserModel entries are loaded unconditionally (session-start injection),
             // then query-relevant memories are appended in category order.
             let user_model_ctx = build_user_model_context(mem.as_ref()).await;
-            let mem_context = build_context(mem.as_ref(), &msg.content).await;
+            let mem_context = build_context(mem.as_ref(), &msg.content, config.memory.min_relevance_score).await;
             let rag_limit = if config.agent.compact_context { 2 } else { 5 };
             let hw_context = hardware_rag
                 .as_ref()
@@ -1207,7 +1208,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     system_prompt.push_str(&build_tool_instructions(&tools_registry));
 
     let user_model_ctx = build_user_model_context(mem.as_ref()).await;
-    let mem_context = build_context(mem.as_ref(), message).await;
+    let mem_context = build_context(mem.as_ref(), message, config.memory.min_relevance_score).await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };
     let hw_context = hardware_rag
         .as_ref()

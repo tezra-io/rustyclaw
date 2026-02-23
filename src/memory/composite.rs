@@ -78,10 +78,7 @@ impl Memory for CompositeMemory {
     }
 
     /// List from agent memory only (listing workspace would be too noisy)
-    async fn list(
-        &self,
-        category: Option<&MemoryCategory>,
-    ) -> anyhow::Result<Vec<MemoryEntry>> {
+    async fn list(&self, category: Option<&MemoryCategory>) -> anyhow::Result<Vec<MemoryEntry>> {
         self.write_target.list(category).await
     }
 
@@ -199,10 +196,7 @@ mod tests {
             .store("ws", "1", MemoryCategory::Core)
             .await
             .unwrap();
-        agent
-            .store("ag", "2", MemoryCategory::Core)
-            .await
-            .unwrap();
+        agent.store("ag", "2", MemoryCategory::Core).await.unwrap();
         assert_eq!(composite.count().await.unwrap(), 1);
     }
 
@@ -213,10 +207,7 @@ mod tests {
             .store("ws", "1", MemoryCategory::Core)
             .await
             .unwrap();
-        agent
-            .store("ag", "2", MemoryCategory::Core)
-            .await
-            .unwrap();
+        agent.store("ag", "2", MemoryCategory::Core).await.unwrap();
         let entries = composite.list(None).await.unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key, "ag");

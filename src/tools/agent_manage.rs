@@ -257,10 +257,7 @@ impl Tool for AgentManageTool {
                     let running = self.bus.is_registered(name).await;
                     Ok(ToolResult {
                         success: true,
-                        output: format!(
-                            "{name}: {}",
-                            if running { "RUNNING" } else { "stopped" }
-                        ),
+                        output: format!("{name}: {}", if running { "RUNNING" } else { "stopped" }),
                         error: None,
                     })
                 }
@@ -486,10 +483,7 @@ mod tests {
     async fn unknown_action() {
         let (_tmp, registry, bus) = setup();
         let tool = AgentManageTool::new(registry, bus);
-        let result = tool
-            .execute(json!({"action": "explode"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"action": "explode"})).await.unwrap();
         assert!(!result.success);
         assert!(result.output.contains("Unknown action"));
     }

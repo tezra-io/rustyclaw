@@ -30,12 +30,28 @@ pub async fn build_user_model_context(mem: &dyn Memory) -> String {
 ///   2. [Known facts about user] — Fact entries from recall
 ///   3. [Relevant memory] — everything else from recall
 ///
+/// Entries with a score below `min_relevance_score` are filtered out to
+/// prevent cross-topic bleed. Entries without a score are always included.
+///
 /// The combined output is truncated to `PERSONALIZATION_BUDGET_CHARS` if
 /// necessary, removing entries from the least-relevant (last) section first.
-pub async fn build_context(mem: &dyn Memory, user_msg: &str) -> String {
+pub async fn build_context(mem: &dyn Memory, user_msg: &str, min_relevance_score: f64) -> String {
     let Ok(entries) = mem.recall(user_msg, 10).await else {
         return String::new();
     };
+    if entries.is_empty() {
+        return String::new();
+    }
+
+    // Filter low-relevance entries; include entries without a score.
+    let entries: Vec<_> = entries
+        .into_iter()
+        .filter(|e| match e.score {
+            Some(score) => score >= min_relevance_score,
+            None => true,
+        })
+        .collect();
+
     if entries.is_empty() {
         return String::new();
     }
@@ -202,7 +218,7 @@ mod tests {
             list_entries: vec![],
         };
 
-        let ctx = build_context(&mem, "tell me about rust").await;
+        let ctx = build_context(&mem, "tell me about rust", 0.0).await;
 
         let pref_pos = ctx.find("[User preferences]").unwrap();
         let fact_pos = ctx.find("[Known facts about user]").unwrap();
@@ -222,7 +238,7 @@ mod tests {
             list_entries: vec![],
         };
 
-        let ctx = build_context(&mem, "help me").await;
+        let ctx = build_context(&mem, "help me", 0.0).await;
 
         // UserModel should appear under [User preferences]
         assert!(ctx.contains("[User preferences]"));
@@ -242,7 +258,7 @@ mod tests {
             entries: vec![],
             list_entries: vec![],
         };
-        let ctx = build_context(&mem, "anything").await;
+        let ctx = build_context(&mem, "anything", 0.0).await;
         assert!(ctx.is_empty());
     }
 
@@ -257,7 +273,7 @@ mod tests {
             )],
             list_entries: vec![],
         };
-        let ctx = build_context(&mem, "tell me something").await;
+        let ctx = build_context(&mem, "tell me something", 0.0).await;
         assert!(!ctx.contains("[User preferences]"));
         assert!(ctx.contains("[Known facts about user]"));
         assert!(!ctx.contains("[Relevant memory]"));
@@ -326,7 +342,7 @@ mod tests {
             list_entries: vec![],
         };
 
-        let ctx = build_context(&mem, "query").await;
+        let ctx = build_context(&mem, "query", 0.0).await;
         assert!(
             ctx.chars().count() <= PERSONALIZATION_BUDGET_CHARS,
             "context ({} chars) must not exceed budget ({} chars)",
@@ -346,7 +362,7 @@ mod tests {
             list_entries: vec![],
         };
 
-        let ctx = build_context(&mem, "query").await;
+        let ctx = build_context(&mem, "query", 0.0).await;
         assert!(!ctx.contains("[... memory truncated for budget ...]"));
     }
 

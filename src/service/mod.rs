@@ -57,7 +57,8 @@ fn stop(config: &Config) -> Result<()> {
         println!("✅ Service stopped");
         Ok(())
     } else if cfg!(target_os = "linux") {
-        let _ = run_checked(Command::new("systemctl").args(["--user", "stop", "rustyclaw.service"]));
+        let _ =
+            run_checked(Command::new("systemctl").args(["--user", "stop", "rustyclaw.service"]));
         println!("✅ Service stopped");
         Ok(())
     } else {

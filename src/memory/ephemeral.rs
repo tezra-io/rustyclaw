@@ -77,10 +77,7 @@ impl Memory for EphemeralMemory {
             .cloned())
     }
 
-    async fn list(
-        &self,
-        category: Option<&MemoryCategory>,
-    ) -> anyhow::Result<Vec<MemoryEntry>> {
+    async fn list(&self, category: Option<&MemoryCategory>) -> anyhow::Result<Vec<MemoryEntry>> {
         let entries = self.entries.lock().expect("ephemeral memory lock poisoned");
         Ok(entries
             .values()
@@ -150,9 +147,13 @@ mod tests {
     async fn recall_respects_limit() {
         let mem = EphemeralMemory::new();
         for i in 0..10 {
-            mem.store(&format!("key-{i}"), &format!("data {i}"), MemoryCategory::Core)
-                .await
-                .unwrap();
+            mem.store(
+                &format!("key-{i}"),
+                &format!("data {i}"),
+                MemoryCategory::Core,
+            )
+            .await
+            .unwrap();
         }
         let results = mem.recall("data", 3).await.unwrap();
         assert_eq!(results.len(), 3);

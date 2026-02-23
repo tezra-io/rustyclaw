@@ -99,8 +99,13 @@ impl AgentRegistry {
             anyhow::bail!("Agent name cannot be a relative path component");
         }
         // Restrict to safe characters
-        if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-            anyhow::bail!("Agent name must contain only alphanumeric characters, hyphens, and underscores");
+        if !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            anyhow::bail!(
+                "Agent name must contain only alphanumeric characters, hyphens, and underscores"
+            );
         }
         Ok(())
     }
