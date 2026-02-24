@@ -522,6 +522,7 @@ struct ParsedToolCall {
 /// Execute a single turn of the agent loop: send messages, parse tool calls,
 /// execute tools, and loop until the LLM produces a final text response.
 /// When `silent` is true, suppresses stdout (for channel use).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn agent_turn(
     provider: &dyn Provider,
     history: &mut Vec<ChatMessage>,
@@ -551,6 +552,7 @@ pub(crate) async fn agent_turn(
 /// execute tools, and loop until the LLM produces a final text response.
 ///
 /// `max_tool_iterations` overrides the default cap; pass 0 to use `DEFAULT_MAX_TOOL_ITERATIONS`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_tool_call_loop(
     provider: &dyn Provider,
     history: &mut Vec<ChatMessage>,
@@ -604,8 +606,6 @@ pub(crate) async fn run_tool_call_loop(
         let response_text = response;
         let assistant_history_content = response_text.clone();
         let (parsed_text, tool_calls) = parse_tool_calls(&response_text);
-        let parsed_text = parsed_text;
-        let tool_calls = tool_calls;
 
         if tool_calls.is_empty() {
             // No tool calls — this is the final response

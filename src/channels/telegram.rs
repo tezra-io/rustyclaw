@@ -40,18 +40,14 @@ fn strip_tool_call_tags(message: &str) -> String {
     let mut result = message.to_string();
     for open_tag in &TOOL_CALL_OPEN_TAGS {
         if let Some(close_tag) = matching_close_tag(open_tag) {
-            loop {
-                if let Some(start) = result.find(open_tag) {
-                    let search_from = start + open_tag.len();
-                    if let Some(rel_end) = result[search_from..].find(close_tag) {
-                        let end = search_from + rel_end + close_tag.len();
-                        result.replace_range(start..end, "");
-                    } else {
-                        // Unclosed tag — remove just the opening tag
-                        result.replace_range(start..start + open_tag.len(), "");
-                    }
+            while let Some(start) = result.find(open_tag) {
+                let search_from = start + open_tag.len();
+                if let Some(rel_end) = result[search_from..].find(close_tag) {
+                    let end = search_from + rel_end + close_tag.len();
+                    result.replace_range(start..end, "");
                 } else {
-                    break;
+                    // Unclosed tag — remove just the opening tag
+                    result.replace_range(start..start + open_tag.len(), "");
                 }
             }
         }

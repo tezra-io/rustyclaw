@@ -235,7 +235,7 @@ impl HardwareRag {
                     let alias_words: Vec<&str> = alias.split('_').collect();
                     let matches = query_words
                         .iter()
-                        .any(|qw| alias_words.iter().any(|aw| *aw == *qw))
+                        .any(|qw| alias_words.contains(qw))
                         || query_lower.contains(&alias.replace('_', " "));
                     if matches {
                         lines.push(format!("{board}: {alias} = pin {pin}"));

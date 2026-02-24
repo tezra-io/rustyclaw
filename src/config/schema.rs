@@ -128,18 +128,13 @@ fn default_max_depth() -> u32 {
 // ── Hardware Config (wizard-driven) ─────────────────────────────
 
 /// Hardware transport mode.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HardwareTransport {
+    #[default]
     None,
     Native,
     Serial,
     Probe,
-}
-
-impl Default for HardwareTransport {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl std::fmt::Display for HardwareTransport {
@@ -177,7 +172,7 @@ pub struct HardwareConfig {
 }
 
 fn default_baud_rate() -> u32 {
-    115200
+    115_200
 }
 
 impl HardwareConfig {
@@ -411,7 +406,7 @@ fn get_default_pricing() -> std::collections::HashMap<String, ModelPricing> {
 
 // ── Peripherals (hardware: STM32, RPi GPIO, etc.) ────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PeripheralsConfig {
     /// Enable peripheral support (boards become agent tools)
     #[serde(default)]
@@ -445,18 +440,9 @@ fn default_peripheral_transport() -> String {
 }
 
 fn default_peripheral_baud() -> u32 {
-    115200
+    115_200
 }
 
-impl Default for PeripheralsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            boards: Vec::new(),
-            datasheet_dir: None,
-        }
-    }
-}
 
 impl Default for PeripheralBoardConfig {
     fn default() -> Self {
@@ -758,6 +744,7 @@ fn default_web_search_timeout_secs() -> u64 {
 
 // ── Memory ───────────────────────────────────────────────────
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
     /// "sqlite" | "lucid" | "markdown" | "none" (`none` = explicit no-op memory)
@@ -2029,7 +2016,7 @@ fn sync_directory(_path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use tempfile::TempDir;
+
 
     // ── Defaults ─────────────────────────────────────────────
 

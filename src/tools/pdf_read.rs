@@ -64,7 +64,11 @@ impl Tool for PdfReadTool {
         let max_chars = args
             .get("max_chars")
             .and_then(|v| v.as_u64())
-            .map(|v| (v as usize).min(MAX_OUTPUT_CHARS))
+            .map(|v| {
+                #[allow(clippy::cast_possible_truncation)]
+                let n = v as usize;
+                n.min(MAX_OUTPUT_CHARS)
+            })
             .unwrap_or(DEFAULT_MAX_CHARS);
 
         // 1. Rate limit check

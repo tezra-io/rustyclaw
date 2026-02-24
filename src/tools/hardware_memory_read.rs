@@ -96,8 +96,9 @@ impl Tool for HardwareMemoryReadTool {
             .unwrap_or("0x20000000");
         let _address = parse_hex_address(address_str).unwrap_or(NUCLEO_RAM_BASE);
 
+        #[allow(clippy::cast_possible_truncation)]
         let length = args.get("length").and_then(|v| v.as_u64()).unwrap_or(128) as usize;
-        let _length = length.min(256).max(1);
+        let _length = length.clamp(1, 256);
 
         #[cfg(feature = "probe")]
         {
