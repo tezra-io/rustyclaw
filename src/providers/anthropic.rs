@@ -479,6 +479,9 @@ impl AnthropicProvider {
                 Some(text_parts.join("\n"))
             },
             tool_calls,
+            // Anthropic uses "thinking" blocks instead of reasoning_content.
+            // Those are handled separately and don't use this field.
+            reasoning_content: None,
         }
     }
 }

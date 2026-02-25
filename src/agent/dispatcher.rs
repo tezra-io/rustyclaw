@@ -197,11 +197,18 @@ impl ToolDispatcher for NativeToolDispatcher {
             .iter()
             .flat_map(|msg| match msg {
                 ConversationMessage::Chat(chat) => vec![chat.clone()],
-                ConversationMessage::AssistantToolCalls { text, tool_calls } => {
-                    let payload = serde_json::json!({
+                ConversationMessage::AssistantToolCalls {
+                    text,
+                    tool_calls,
+                    reasoning_content,
+                } => {
+                    let mut payload = serde_json::json!({
                         "content": text,
                         "tool_calls": tool_calls,
                     });
+                    if let Some(rc) = reasoning_content {
+                        payload["reasoning_content"] = serde_json::Value::String(rc.clone());
+                    }
                     vec![ChatMessage::assistant(payload.to_string())]
                 }
                 ConversationMessage::ToolResults(results) => results
@@ -237,6 +244,7 @@ mod tests {
                     .into(),
             ),
             tool_calls: vec![],
+            reasoning_content: None,
         };
         let dispatcher = XmlToolDispatcher;
         let (_, calls) = dispatcher.parse_response(&response);
@@ -253,6 +261,7 @@ mod tests {
                 name: "file_read".into(),
                 arguments: "{\"path\":\"a.txt\"}".into(),
             }],
+            reasoning_content: None,
         };
         let dispatcher = NativeToolDispatcher;
         let (_, calls) = dispatcher.parse_response(&response);

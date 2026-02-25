@@ -167,6 +167,8 @@ struct ResponseMessage {
     content: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<ToolCall>>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -513,12 +515,14 @@ impl Provider for OpenAiCompatibleProvider {
             return Ok(ProviderChatResponse {
                 text: message.content,
                 tool_calls,
+                reasoning_content: message.reasoning_content,
             });
         }
 
         Ok(ProviderChatResponse {
             text: Some(text),
             tool_calls: vec![],
+            reasoning_content: None,
         })
     }
 
