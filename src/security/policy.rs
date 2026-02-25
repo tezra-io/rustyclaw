@@ -569,6 +569,39 @@ impl SecurityPolicy {
             tracker: ActionTracker::new(),
         }
     }
+
+    /// Create a per-agent security policy. Agent overrides take priority
+    /// over global config; unset fields fall back to the global value.
+    pub fn from_agent_config(
+        agent_override: &crate::agent::definition::AgentAutonomyOverride,
+        global: &crate::config::AutonomyConfig,
+        workspace_dir: &Path,
+    ) -> Self {
+        Self {
+            autonomy: agent_override.level.unwrap_or(global.level),
+            workspace_dir: workspace_dir.to_path_buf(),
+            workspace_only: agent_override.workspace_only.unwrap_or(global.workspace_only),
+            allowed_commands: agent_override
+                .allowed_commands
+                .clone()
+                .unwrap_or_else(|| global.allowed_commands.clone()),
+            forbidden_paths: agent_override
+                .forbidden_paths
+                .clone()
+                .unwrap_or_else(|| global.forbidden_paths.clone()),
+            max_actions_per_hour: agent_override
+                .max_actions_per_hour
+                .unwrap_or(global.max_actions_per_hour),
+            max_cost_per_day_cents: global.max_cost_per_day_cents,
+            require_approval_for_medium_risk: agent_override
+                .require_approval_for_medium_risk
+                .unwrap_or(global.require_approval_for_medium_risk),
+            block_high_risk_commands: agent_override
+                .block_high_risk_commands
+                .unwrap_or(global.block_high_risk_commands),
+            tracker: ActionTracker::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1343,5 +1376,64 @@ mod tests {
                 "Default forbidden_paths must include {dot}"
             );
         }
+    }
+
+    // ── Per-agent autonomy override tests ─────────────────────────
+
+    #[test]
+    fn from_agent_config_overrides_level() {
+        use crate::agent::definition::AgentAutonomyOverride;
+
+        let global = crate::config::AutonomyConfig::default();
+        let agent = AgentAutonomyOverride {
+            level: Some(AutonomyLevel::ReadOnly),
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_agent_config(&agent, &global, Path::new("/tmp"));
+        assert_eq!(policy.autonomy, AutonomyLevel::ReadOnly);
+        // Other fields should inherit from global
+        assert_eq!(policy.workspace_only, global.workspace_only);
+        assert_eq!(policy.max_actions_per_hour, global.max_actions_per_hour);
+    }
+
+    #[test]
+    fn from_agent_config_overrides_commands() {
+        use crate::agent::definition::AgentAutonomyOverride;
+
+        let global = crate::config::AutonomyConfig::default();
+        let agent = AgentAutonomyOverride {
+            allowed_commands: Some(vec!["ls".into(), "cat".into()]),
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_agent_config(&agent, &global, Path::new("/tmp"));
+        assert_eq!(policy.allowed_commands, vec!["ls", "cat"]);
+        // Level should inherit
+        assert_eq!(policy.autonomy, global.level);
+    }
+
+    #[test]
+    fn from_agent_config_inherits_all_when_empty() {
+        use crate::agent::definition::AgentAutonomyOverride;
+
+        let global = crate::config::AutonomyConfig::default();
+        let agent = AgentAutonomyOverride::default();
+        let policy = SecurityPolicy::from_agent_config(&agent, &global, Path::new("/tmp"));
+        assert_eq!(policy.autonomy, global.level);
+        assert_eq!(policy.workspace_only, global.workspace_only);
+        assert_eq!(policy.allowed_commands, global.allowed_commands);
+        assert_eq!(policy.max_actions_per_hour, global.max_actions_per_hour);
+    }
+
+    #[test]
+    fn from_agent_config_overrides_rate_limit() {
+        use crate::agent::definition::AgentAutonomyOverride;
+
+        let global = crate::config::AutonomyConfig::default();
+        let agent = AgentAutonomyOverride {
+            max_actions_per_hour: Some(100),
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_agent_config(&agent, &global, Path::new("/tmp"));
+        assert_eq!(policy.max_actions_per_hour, 100);
     }
 }

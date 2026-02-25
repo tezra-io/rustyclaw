@@ -3,6 +3,26 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::str::FromStr;
 
+/// Per-agent security/autonomy overrides. All fields are optional;
+/// unset fields inherit from the global `[autonomy]` config.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentAutonomyOverride {
+    #[serde(default)]
+    pub level: Option<crate::security::AutonomyLevel>,
+    #[serde(default)]
+    pub workspace_only: Option<bool>,
+    #[serde(default)]
+    pub allowed_commands: Option<Vec<String>>,
+    #[serde(default)]
+    pub forbidden_paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub max_actions_per_hour: Option<u32>,
+    #[serde(default)]
+    pub require_approval_for_medium_risk: Option<bool>,
+    #[serde(default)]
+    pub block_high_risk_commands: Option<bool>,
+}
+
 /// Where agent definition files live: `~/.rustyclaw/agents/<name>.md`
 /// Agent data lives in: `~/.rustyclaw/agents/<name>/`
 pub const AGENTS_DIR_NAME: &str = "agents";
@@ -47,6 +67,9 @@ pub struct AgentDefinition {
     /// Which tools this agent can use. Empty = all tools.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Per-agent security/autonomy overrides. Unset fields inherit from global config.
+    #[serde(default)]
+    pub autonomy: Option<AgentAutonomyOverride>,
     /// The markdown body (personality/instructions)
     #[serde(skip)]
     pub personality: String,
@@ -84,6 +107,7 @@ impl Default for AgentDefinition {
             temperature: None,
             max_tools_per_turn: default_max_tools(),
             allowed_tools: Vec::new(),
+            autonomy: None,
             personality: String::new(),
         }
     }

@@ -731,10 +731,13 @@ pub async fn run(
     let observer: Arc<dyn Observer> = Arc::from(base_observer);
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = Arc::new(
+        if let Some(agent_autonomy) = agent_def.as_ref().and_then(|d| d.autonomy.as_ref()) {
+            SecurityPolicy::from_agent_config(agent_autonomy, &config.autonomy, &config.workspace_dir)
+        } else {
+            SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir)
+        },
+    );
 
     // ── Memory (isolated per agent definition when applicable) ───
     let mem: Arc<dyn Memory> = if let Some(ref def) = agent_def {

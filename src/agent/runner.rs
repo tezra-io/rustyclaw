@@ -76,10 +76,11 @@ pub async fn run_persistent_agent(
         Arc::from(observability::create_observer(&config.observability));
     let runtime_adapter: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = Arc::new(if let Some(ref agent_autonomy) = definition.autonomy {
+        SecurityPolicy::from_agent_config(agent_autonomy, &config.autonomy, &config.workspace_dir)
+    } else {
+        SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir)
+    });
 
     let composio_key = if config.composio.enabled {
         config.composio.api_key.as_deref()
