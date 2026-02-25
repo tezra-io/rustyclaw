@@ -344,8 +344,11 @@ impl AnthropicProvider {
 
     fn parse_tool_result_message(content: &str) -> Option<NativeMessage> {
         let value = serde_json::from_str::<serde_json::Value>(content).ok()?;
+        // Accept multiple field names for cross-provider compatibility.
         let tool_use_id = value
             .get("tool_call_id")
+            .or_else(|| value.get("tool_use_id"))
+            .or_else(|| value.get("toolUseId"))
             .and_then(serde_json::Value::as_str)?
             .to_string();
         let result = value
@@ -394,14 +397,36 @@ impl AnthropicProvider {
                 }
                 "tool" => {
                     if let Some(tool_result) = Self::parse_tool_result_message(&msg.content) {
+                        // Merge consecutive tool results into one user message.
+                        if let Some(last) = native_messages.last_mut() {
+                            if last.role == "user"
+                                && last.content.iter().all(|c| matches!(c, NativeContentOut::ToolResult { .. }))
+                            {
+                                last.content.extend(tool_result.content);
+                                continue;
+                            }
+                        }
                         native_messages.push(tool_result);
                     } else {
+                        // Fallback: emit a ToolResult with the raw content so Anthropic's
+                        // API gets the required tool_result block instead of plain text.
+                        let fallback_id = format!("unknown-{}", native_messages.len());
+                        let block = NativeContentOut::ToolResult {
+                            tool_use_id: fallback_id,
+                            content: msg.content.clone(),
+                            cache_control: None,
+                        };
+                        if let Some(last) = native_messages.last_mut() {
+                            if last.role == "user"
+                                && last.content.iter().all(|c| matches!(c, NativeContentOut::ToolResult { .. }))
+                            {
+                                last.content.push(block);
+                                continue;
+                            }
+                        }
                         native_messages.push(NativeMessage {
                             role: "user".to_string(),
-                            content: vec![NativeContentOut::Text {
-                                text: msg.content.clone(),
-                                cache_control: None,
-                            }],
+                            content: vec![block],
                         });
                     }
                 }
