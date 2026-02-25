@@ -1786,6 +1786,9 @@ impl Config {
             // Set computed paths that are skipped during serialization
             config.config_path = config_path.clone();
             config.workspace_dir = rustyclaw_dir.join("workspace");
+            // Decrypt credentials so in-memory config has plaintext values
+            let store = crate::security::SecretStore::new(&rustyclaw_dir, config.secrets.encrypt);
+            config.decrypt_secrets(&store)?;
             config.apply_env_overrides();
             Ok(config)
         } else {
@@ -1894,25 +1897,143 @@ impl Config {
         }
     }
 
+    /// Encrypt all credential fields in-place before writing to disk.
+    fn encrypt_secrets(&mut self, store: &crate::security::SecretStore) -> Result<()> {
+        encrypt_opt(store, &mut self.api_key)?;
+
+        // Per-agent delegation keys
+        for agent in self.agents.values_mut() {
+            encrypt_opt(store, &mut agent.api_key)?;
+        }
+
+        // Round-robin rotation keys
+        for key in &mut self.reliability.api_keys {
+            encrypt_str(store, key)?;
+        }
+
+        // Per-route API key overrides
+        for route in &mut self.model_routes {
+            encrypt_opt(store, &mut route.api_key)?;
+        }
+
+        // Composio
+        encrypt_opt(store, &mut self.composio.api_key)?;
+
+        // Browser computer-use sidecar
+        encrypt_opt(store, &mut self.browser.computer_use.api_key)?;
+
+        // HTTP request (Brave Search)
+        encrypt_opt(store, &mut self.web_search.brave_api_key)?;
+
+        // Channel credentials
+        if let Some(ref mut tg) = self.channels_config.telegram {
+            encrypt_str(store, &mut tg.bot_token)?;
+        }
+        if let Some(ref mut dc) = self.channels_config.discord {
+            encrypt_str(store, &mut dc.bot_token)?;
+        }
+        if let Some(ref mut sl) = self.channels_config.slack {
+            encrypt_str(store, &mut sl.bot_token)?;
+            encrypt_opt(store, &mut sl.app_token)?;
+        }
+        if let Some(ref mut wh) = self.channels_config.webhook {
+            encrypt_opt(store, &mut wh.secret)?;
+        }
+        if let Some(ref mut mx) = self.channels_config.matrix {
+            encrypt_str(store, &mut mx.access_token)?;
+        }
+        if let Some(ref mut wa) = self.channels_config.whatsapp {
+            encrypt_str(store, &mut wa.access_token)?;
+            encrypt_opt(store, &mut wa.app_secret)?;
+        }
+        if let Some(ref mut em) = self.channels_config.email {
+            encrypt_str(store, &mut em.password)?;
+        }
+        if let Some(ref mut irc) = self.channels_config.irc {
+            encrypt_opt(store, &mut irc.server_password)?;
+            encrypt_opt(store, &mut irc.nickserv_password)?;
+            encrypt_opt(store, &mut irc.sasl_password)?;
+        }
+        if let Some(ref mut lk) = self.channels_config.lark {
+            encrypt_str(store, &mut lk.app_secret)?;
+            encrypt_opt(store, &mut lk.encrypt_key)?;
+        }
+        if let Some(ref mut dt) = self.channels_config.dingtalk {
+            encrypt_str(store, &mut dt.client_secret)?;
+        }
+
+        Ok(())
+    }
+
+    /// Decrypt all credential fields in-place after loading from disk.
+    fn decrypt_secrets(&mut self, store: &crate::security::SecretStore) -> Result<()> {
+        decrypt_opt(store, &mut self.api_key)?;
+
+        for agent in self.agents.values_mut() {
+            decrypt_opt(store, &mut agent.api_key)?;
+        }
+
+        for key in &mut self.reliability.api_keys {
+            decrypt_str(store, key)?;
+        }
+
+        for route in &mut self.model_routes {
+            decrypt_opt(store, &mut route.api_key)?;
+        }
+
+        decrypt_opt(store, &mut self.composio.api_key)?;
+        decrypt_opt(store, &mut self.browser.computer_use.api_key)?;
+        decrypt_opt(store, &mut self.web_search.brave_api_key)?;
+
+        if let Some(ref mut tg) = self.channels_config.telegram {
+            decrypt_str(store, &mut tg.bot_token)?;
+        }
+        if let Some(ref mut dc) = self.channels_config.discord {
+            decrypt_str(store, &mut dc.bot_token)?;
+        }
+        if let Some(ref mut sl) = self.channels_config.slack {
+            decrypt_str(store, &mut sl.bot_token)?;
+            decrypt_opt(store, &mut sl.app_token)?;
+        }
+        if let Some(ref mut wh) = self.channels_config.webhook {
+            decrypt_opt(store, &mut wh.secret)?;
+        }
+        if let Some(ref mut mx) = self.channels_config.matrix {
+            decrypt_str(store, &mut mx.access_token)?;
+        }
+        if let Some(ref mut wa) = self.channels_config.whatsapp {
+            decrypt_str(store, &mut wa.access_token)?;
+            decrypt_opt(store, &mut wa.app_secret)?;
+        }
+        if let Some(ref mut em) = self.channels_config.email {
+            decrypt_str(store, &mut em.password)?;
+        }
+        if let Some(ref mut irc) = self.channels_config.irc {
+            decrypt_opt(store, &mut irc.server_password)?;
+            decrypt_opt(store, &mut irc.nickserv_password)?;
+            decrypt_opt(store, &mut irc.sasl_password)?;
+        }
+        if let Some(ref mut lk) = self.channels_config.lark {
+            decrypt_str(store, &mut lk.app_secret)?;
+            decrypt_opt(store, &mut lk.encrypt_key)?;
+        }
+        if let Some(ref mut dt) = self.channels_config.dingtalk {
+            decrypt_str(store, &mut dt.client_secret)?;
+        }
+
+        Ok(())
+    }
+
     pub fn save(&self) -> Result<()> {
-        // Encrypt agent API keys before serialization
         let mut config_to_save = self.clone();
         let rustyclaw_dir = self
             .config_path
             .parent()
             .context("Config path must have a parent directory")?;
         let store = crate::security::SecretStore::new(rustyclaw_dir, self.secrets.encrypt);
-        for agent in config_to_save.agents.values_mut() {
-            if let Some(ref plaintext_key) = agent.api_key {
-                if !crate::security::SecretStore::is_encrypted(plaintext_key) {
-                    agent.api_key = Some(
-                        store
-                            .encrypt(plaintext_key)
-                            .context("Failed to encrypt agent API key")?,
-                    );
-                }
-            }
-        }
+        config_to_save
+            .encrypt_secrets(&store)
+            .context("Failed to encrypt credentials")?;
 
         let toml_str =
             toml::to_string_pretty(&config_to_save).context("Failed to serialize config")?;
@@ -1997,6 +2118,48 @@ pub fn default_model_for_provider(provider: &str) -> String {
         // openrouter and anything else
         _ => "anthropic/claude-sonnet-4-20250514".into(),
     }
+}
+
+/// Encrypt an `Option<String>` field if not already encrypted.
+fn encrypt_opt(
+    store: &crate::security::SecretStore,
+    field: &mut Option<String>,
+) -> Result<()> {
+    if let Some(ref value) = *field {
+        if !crate::security::SecretStore::is_encrypted(value) {
+            *field = Some(store.encrypt(value)?);
+        }
+    }
+    Ok(())
+}
+
+/// Decrypt an `Option<String>` field if encrypted.
+fn decrypt_opt(
+    store: &crate::security::SecretStore,
+    field: &mut Option<String>,
+) -> Result<()> {
+    if let Some(ref value) = *field {
+        if crate::security::SecretStore::is_encrypted(value) {
+            *field = Some(store.decrypt(value)?);
+        }
+    }
+    Ok(())
+}
+
+/// Encrypt a `String` field if non-empty and not already encrypted.
+fn encrypt_str(store: &crate::security::SecretStore, field: &mut String) -> Result<()> {
+    if !field.is_empty() && !crate::security::SecretStore::is_encrypted(field) {
+        *field = store.encrypt(field)?;
+    }
+    Ok(())
+}
+
+/// Decrypt a `String` field if encrypted.
+fn decrypt_str(store: &crate::security::SecretStore, field: &mut String) -> Result<()> {
+    if crate::security::SecretStore::is_encrypted(field) {
+        *field = store.decrypt(field)?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -2278,11 +2441,168 @@ tool_dispatcher = "xml"
         config.save().unwrap();
         assert!(config_path.exists());
 
-        let contents = fs::read_to_string(&config_path).unwrap();
-        let loaded: Config = toml::from_str(&contents).unwrap();
+        // Verify on-disk value is encrypted
+        let raw_contents = fs::read_to_string(&config_path).unwrap();
+        let raw: Config = toml::from_str(&raw_contents).unwrap();
+        assert!(
+            crate::security::SecretStore::is_encrypted(raw.api_key.as_deref().unwrap()),
+            "On-disk api_key should be encrypted"
+        );
+
+        // Decrypt and verify roundtrip
+        let mut loaded: Config = toml::from_str(&raw_contents).unwrap();
+        let store = crate::security::SecretStore::new(&dir, loaded.secrets.encrypt);
+        loaded.decrypt_secrets(&store).unwrap();
         assert_eq!(loaded.api_key.as_deref(), Some("sk-roundtrip"));
         assert_eq!(loaded.default_model.as_deref(), Some("test-model"));
         assert!((loaded.default_temperature - 0.9).abs() < f64::EPSILON);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_encrypts_all_credential_fields() {
+        let dir =
+            std::env::temp_dir().join(format!("rustyclaw_encrypt_all_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut config = Config::default();
+        config.workspace_dir = dir.join("workspace");
+        config.config_path = dir.join("config.toml");
+        config.api_key = Some("sk-top-level".into());
+        config.reliability.api_keys = vec!["sk-rotation-1".into(), "sk-rotation-2".into()];
+        config.composio.api_key = Some("comp-key".into());
+        config.web_search.brave_api_key = Some("brave-key".into());
+        config.agents.insert(
+            "helper".into(),
+            DelegateAgentConfig {
+                provider: "anthropic".into(),
+                model: "test".into(),
+                system_prompt: None,
+                api_key: Some("sk-agent-key".into()),
+                temperature: None,
+                max_depth: 3,
+            },
+        );
+        config.channels_config.telegram = Some(TelegramConfig {
+            bot_token: "123:ABC".into(),
+            allowed_users: vec![],
+            mention_only: false,
+        });
+
+        config.save().unwrap();
+
+        // Read raw file — all secrets should be encrypted
+        let raw: Config =
+            toml::from_str(&fs::read_to_string(dir.join("config.toml")).unwrap()).unwrap();
+        let is_enc = crate::security::SecretStore::is_encrypted;
+
+        assert!(is_enc(raw.api_key.as_deref().unwrap()), "top-level api_key");
+        assert!(is_enc(&raw.reliability.api_keys[0]), "rotation key 0");
+        assert!(is_enc(&raw.reliability.api_keys[1]), "rotation key 1");
+        assert!(
+            is_enc(raw.composio.api_key.as_deref().unwrap()),
+            "composio key"
+        );
+        assert!(
+            is_enc(raw.web_search.brave_api_key.as_deref().unwrap()),
+            "brave key"
+        );
+        assert!(
+            is_enc(raw.agents["helper"].api_key.as_deref().unwrap()),
+            "agent key"
+        );
+        assert!(
+            is_enc(&raw.channels_config.telegram.as_ref().unwrap().bot_token),
+            "telegram bot_token"
+        );
+
+        // Decrypt and verify roundtrip
+        let mut loaded = raw;
+        let store = crate::security::SecretStore::new(&dir, loaded.secrets.encrypt);
+        loaded.decrypt_secrets(&store).unwrap();
+
+        assert_eq!(loaded.api_key.as_deref(), Some("sk-top-level"));
+        assert_eq!(loaded.reliability.api_keys[0], "sk-rotation-1");
+        assert_eq!(loaded.reliability.api_keys[1], "sk-rotation-2");
+        assert_eq!(loaded.composio.api_key.as_deref(), Some("comp-key"));
+        assert_eq!(
+            loaded.web_search.brave_api_key.as_deref(),
+            Some("brave-key")
+        );
+        assert_eq!(
+            loaded.agents["helper"].api_key.as_deref(),
+            Some("sk-agent-key")
+        );
+        assert_eq!(
+            loaded
+                .channels_config
+                .telegram
+                .as_ref()
+                .unwrap()
+                .bot_token,
+            "123:ABC"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_does_not_double_encrypt() {
+        let dir = std::env::temp_dir()
+            .join(format!("rustyclaw_no_double_enc_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut config = Config::default();
+        config.workspace_dir = dir.join("workspace");
+        config.config_path = dir.join("config.toml");
+        config.api_key = Some("sk-test".into());
+
+        config.save().unwrap();
+
+        // Load raw encrypted value
+        let raw1: Config =
+            toml::from_str(&fs::read_to_string(dir.join("config.toml")).unwrap()).unwrap();
+        let enc1 = raw1.api_key.clone().unwrap();
+        assert!(crate::security::SecretStore::is_encrypted(&enc1));
+
+        // Save again with the encrypted value still in config (simulates save without decrypt)
+        let mut config2 = raw1;
+        config2.config_path = dir.join("config.toml");
+        config2.workspace_dir = dir.join("workspace");
+        config2.save().unwrap();
+
+        let raw2: Config =
+            toml::from_str(&fs::read_to_string(dir.join("config.toml")).unwrap()).unwrap();
+        // The value should still be encrypted but NOT double-encrypted
+        let store = crate::security::SecretStore::new(&dir, true);
+        let decrypted = store.decrypt(raw2.api_key.as_deref().unwrap()).unwrap();
+        assert_eq!(decrypted, "sk-test", "Must not double-encrypt");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn encryption_disabled_stores_plaintext() {
+        let dir = std::env::temp_dir()
+            .join(format!("rustyclaw_enc_disabled_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut config = Config::default();
+        config.workspace_dir = dir.join("workspace");
+        config.config_path = dir.join("config.toml");
+        config.secrets.encrypt = false;
+        config.api_key = Some("sk-plaintext".into());
+
+        config.save().unwrap();
+
+        let raw: Config =
+            toml::from_str(&fs::read_to_string(dir.join("config.toml")).unwrap()).unwrap();
+        assert_eq!(
+            raw.api_key.as_deref(),
+            Some("sk-plaintext"),
+            "encryption disabled should store plaintext"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
