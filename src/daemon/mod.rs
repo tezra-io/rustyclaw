@@ -8,7 +8,56 @@ use tokio::time::Duration;
 
 const STATUS_FLUSH_SECONDS: u64 = 5;
 
+/// Return the path to the daemon PID file.
+fn pid_file_path(config: &Config) -> PathBuf {
+    config
+        .config_path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+        .join("daemon.pid")
+}
+
+/// Check if another daemon instance is already running. Returns `Err` if a live
+/// process owns the PID file.
+fn check_and_write_pid(config: &Config) -> Result<PathBuf> {
+    let pid_path = pid_file_path(config);
+
+    if pid_path.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = contents.trim().parse::<u32>() {
+                // Signal 0 checks process existence without affecting it.
+                let alive = std::process::Command::new("kill")
+                    .args(["-0", &pid.to_string()])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if alive {
+                    anyhow::bail!(
+                        "Another daemon instance is already running (PID {pid}).\n\
+                         If this is stale, remove {} and try again.",
+                        pid_path.display()
+                    );
+                }
+            }
+        }
+        // Stale PID file — remove it
+        let _ = std::fs::remove_file(&pid_path);
+    }
+
+    std::fs::write(&pid_path, std::process::id().to_string())?;
+    Ok(pid_path)
+}
+
+/// Remove the PID file on shutdown.
+fn remove_pid_file(pid_path: &std::path::Path) {
+    let _ = std::fs::remove_file(pid_path);
+}
+
 pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
+    let pid_path = check_and_write_pid(&config)?;
+
     let initial_backoff = config.reliability.channel_initial_backoff_secs.max(1);
     let max_backoff = config
         .reliability
@@ -180,6 +229,7 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         let _ = handle.await;
     }
 
+    remove_pid_file(&pid_path);
     Ok(())
 }
 
@@ -356,6 +406,62 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains("component exited unexpectedly"));
+    }
+
+    #[test]
+    fn pid_file_path_uses_config_directory() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        assert_eq!(pid_file_path(&config), tmp.path().join("daemon.pid"));
+    }
+
+    #[test]
+    fn check_and_write_pid_creates_file() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let path = check_and_write_pid(&config).unwrap();
+        assert!(path.exists());
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents.trim().parse::<u32>().unwrap(), std::process::id());
+    }
+
+    #[test]
+    fn check_and_write_pid_rejects_live_process() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        // Write our own PID (which is alive) to the PID file
+        let pid_path = pid_file_path(&config);
+        std::fs::write(&pid_path, std::process::id().to_string()).unwrap();
+
+        let result = check_and_write_pid(&config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already running"));
+    }
+
+    #[test]
+    fn check_and_write_pid_cleans_stale_pid() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        // Write a PID that doesn't exist (99999999 is very unlikely to be alive)
+        let pid_path = pid_file_path(&config);
+        std::fs::write(&pid_path, "99999999").unwrap();
+
+        let path = check_and_write_pid(&config).unwrap();
+        assert!(path.exists());
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents.trim().parse::<u32>().unwrap(), std::process::id());
+    }
+
+    #[test]
+    fn remove_pid_file_cleans_up() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let path = check_and_write_pid(&config).unwrap();
+        assert!(path.exists());
+        remove_pid_file(&path);
+        assert!(!path.exists());
     }
 
     #[test]
