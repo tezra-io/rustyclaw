@@ -1,12 +1,32 @@
 use super::traits::{Tool, ToolResult};
+use crate::agent::agent::Agent;
 use crate::agent::bus::AgentBus;
+use crate::agent::dispatcher::NativeToolDispatcher;
+use crate::agent::prompt::{PromptContext, PromptSection, SystemPromptBuilder};
 use crate::config::DelegateAgentConfig;
+use crate::memory::EphemeralMemory;
+use crate::observability::NoopObserver;
 use crate::providers::{self, Provider};
 use async_trait::async_trait;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// A minimal `PromptSection` that returns a fixed personality / system-prompt string.
+/// Used to inject `DelegateAgentConfig::system_prompt` into ephemeral sub-agent prompts
+/// without needing a full `AgentDefinition`.
+struct PersonalitySection(String);
+
+impl PromptSection for PersonalitySection {
+    fn name(&self) -> &str {
+        "personality"
+    }
+
+    fn build(&self, _ctx: &PromptContext<'_>) -> anyhow::Result<String> {
+        Ok(self.0.clone())
+    }
+}
 
 /// Default timeout for sub-agent provider calls.
 const DELEGATE_TIMEOUT_SECS: u64 = 120;
@@ -238,15 +258,46 @@ impl Tool for DelegateTool {
 
         let temperature = agent_config.temperature.unwrap_or(0.7);
 
-        // Wrap the provider call in a timeout to prevent indefinite blocking
+        // Build a minimal system prompt for the ephemeral agent.
+        // Uses an empty builder (no default sections) so the sub-agent's prompt is
+        // exactly the configured system_prompt without workspace/tool boilerplate.
+        let prompt_builder = if let Some(sys) = agent_config.system_prompt.clone() {
+            SystemPromptBuilder::default().add_section(Box::new(PersonalitySection(sys)))
+        } else {
+            SystemPromptBuilder::default()
+        };
+
+        // Build an ephemeral Agent and run a full agent.turn() instead of a single
+        // chat_with_system() call. This gives the sub-agent proper tool access,
+        // multi-turn capability, and system-prompt injection.
+        // Tools list is empty for now — add allowed_tools to DelegateAgentConfig to expand.
+        let mut agent = match Agent::builder()
+            .provider(provider)
+            .tools(vec![])
+            .memory(Arc::new(EphemeralMemory::new()))
+            .observer(Arc::new(NoopObserver))
+            .prompt_builder(prompt_builder)
+            .tool_dispatcher(Box::new(NativeToolDispatcher))
+            .model_name(agent_config.model.clone())
+            .temperature(temperature)
+            .build()
+        {
+            Ok(a) => a,
+            Err(e) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "Failed to build ephemeral agent '{agent_name}': {e}"
+                    )),
+                });
+            }
+        };
+
+        // Run with a timeout to prevent indefinite blocking
         let result = tokio::time::timeout(
             Duration::from_secs(DELEGATE_TIMEOUT_SECS),
-            provider.chat_with_system(
-                agent_config.system_prompt.as_deref(),
-                &full_prompt,
-                &agent_config.model,
-                temperature,
-            ),
+            agent.turn(&full_prompt),
         )
         .await;
 
@@ -283,7 +334,7 @@ impl Tool for DelegateTool {
             Err(e) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!("Agent '{agent_name}' failed: {e}",)),
+                error: Some(format!("Agent '{agent_name}' failed: {e}")),
             }),
         }
     }
