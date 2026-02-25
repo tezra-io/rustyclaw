@@ -135,6 +135,7 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
     {
         let gateway_cfg = config.clone();
         let gateway_host = host.clone();
+        let gateway_bus = Some(bus.clone());
         handles.push(spawn_component_supervisor(
             "gateway",
             initial_backoff,
@@ -142,7 +143,8 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
             move || {
                 let cfg = gateway_cfg.clone();
                 let host = gateway_host.clone();
-                async move { crate::gateway::run_gateway(&host, port, cfg).await }
+                let b = gateway_bus.clone();
+                async move { crate::gateway::run_gateway_with_bus(&host, port, cfg, b).await }
             },
         ));
     }

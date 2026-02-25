@@ -183,11 +183,33 @@ pub struct AppState {
     pub whatsapp: Option<Arc<WhatsAppChannel>>,
     /// `WhatsApp` app secret for webhook signature verification (`X-Hub-Signature-256`)
     pub whatsapp_app_secret: Option<Arc<str>>,
+    /// Optional agent bus for routing messages to named agents.
+    pub bus: Option<Arc<crate::agent::bus::AgentBus>>,
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
 #[allow(clippy::too_many_lines)]
 pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
+    run_gateway_inner(host, port, config, None).await
+}
+
+/// Start the gateway with an optional agent bus for named-agent routing.
+pub async fn run_gateway_with_bus(
+    host: &str,
+    port: u16,
+    config: Config,
+    bus: Option<Arc<crate::agent::bus::AgentBus>>,
+) -> Result<()> {
+    run_gateway_inner(host, port, config, bus).await
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_gateway_inner(
+    host: &str,
+    port: u16,
+    config: Config,
+    bus: Option<Arc<crate::agent::bus::AgentBus>>,
+) -> Result<()> {
     // ── Security: refuse public bind without tunnel or explicit opt-in ──
     if is_public_bind(host) && config.tunnel.provider == "none" && !config.gateway.allow_public_bind
     {
@@ -328,6 +350,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         idempotency_store,
         whatsapp: whatsapp_channel,
         whatsapp_app_secret,
+        bus,
     };
 
     // Build router with middleware
@@ -413,6 +436,10 @@ async fn handle_pair(State(state): State<AppState>, headers: HeaderMap) -> impl 
 #[derive(serde::Deserialize)]
 pub struct WebhookBody {
     pub message: String,
+    /// Optional named agent to route this message to via the AgentBus.
+    /// If omitted, falls back to the default provider.
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 /// POST /webhook — main webhook endpoint
@@ -500,6 +527,24 @@ async fn handle_webhook(
             .mem
             .store(&key, message, MemoryCategory::Conversation)
             .await;
+    }
+
+    // Route to a named agent via the bus if requested, otherwise use the default provider.
+    if let (Some(agent_name), Some(bus)) = (&webhook_body.agent, &state.bus) {
+        match bus
+            .delegate("webhook", agent_name, message, std::time::Duration::from_secs(120))
+            .await
+        {
+            Ok(response) => {
+                let body = serde_json::json!({"response": response, "agent": agent_name});
+                return (StatusCode::OK, Json(body));
+            }
+            Err(e) => {
+                tracing::error!("Webhook agent delegation error: {e}");
+                let err = serde_json::json!({"error": format!("Agent '{agent_name}' request failed")});
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(err));
+            }
+        }
     }
 
     match state
@@ -963,6 +1008,7 @@ mod tests {
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300))),
             whatsapp: None,
             whatsapp_app_secret: None,
+            bus: None,
         };
 
         let mut headers = HeaderMap::new();
@@ -970,6 +1016,7 @@ mod tests {
 
         let body = Ok(Json(WebhookBody {
             message: "hello".into(),
+            agent: None,
         }));
         let first = handle_webhook(State(state.clone()), headers.clone(), body)
             .await
@@ -978,6 +1025,7 @@ mod tests {
 
         let body = Ok(Json(WebhookBody {
             message: "hello".into(),
+            agent: None,
         }));
         let second = handle_webhook(State(state), headers, body)
             .await
@@ -1011,12 +1059,14 @@ mod tests {
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300))),
             whatsapp: None,
             whatsapp_app_secret: None,
+            bus: None,
         };
 
         let headers = HeaderMap::new();
 
         let body1 = Ok(Json(WebhookBody {
             message: "hello one".into(),
+            agent: None,
         }));
         let first = handle_webhook(State(state.clone()), headers.clone(), body1)
             .await
@@ -1025,6 +1075,7 @@ mod tests {
 
         let body2 = Ok(Json(WebhookBody {
             message: "hello two".into(),
+            agent: None,
         }));
         let second = handle_webhook(State(state), headers, body2)
             .await
