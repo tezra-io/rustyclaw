@@ -178,15 +178,8 @@ fn forbidden_path_argument(security: &SecurityPolicy, command: &str) -> Option<S
     None
 }
 
-/// Parse and execute an `agent:name` or `agent:name:message` command via the bus.
-async fn run_agent_job(bus: &AgentBus, command: &str) -> (bool, String) {
-    // Strip the "agent:" prefix; remainder is "name" or "name:message"
-    let rest = &command["agent:".len()..];
-    let (agent_name, message) = match rest.find(':') {
-        Some(idx) => (&rest[..idx], &rest[idx + 1..]),
-        None => (rest, ""),
-    };
-
+/// Execute an agent delegation (AgentRun or AgentMessage) via the bus.
+async fn run_agent_delegation(bus: &AgentBus, agent_name: &str, message: &str) -> (bool, String) {
     if agent_name.is_empty() {
         return (false, "agent command missing agent name".to_string());
     }
@@ -203,6 +196,16 @@ async fn run_agent_job(bus: &AgentBus, command: &str) -> (bool, String) {
         Ok(response) => (true, response),
         Err(e) => (false, format!("agent delegation failed: {e}")),
     }
+}
+
+/// Legacy helper: parse `agent:name` or `agent:name:message` command strings.
+async fn run_agent_job_legacy(bus: &AgentBus, command: &str) -> (bool, String) {
+    let rest = &command["agent:".len()..];
+    let (agent_name, message) = match rest.find(':') {
+        Some(idx) => (&rest[..idx], &rest[idx + 1..]),
+        None => (rest, ""),
+    };
+    run_agent_delegation(bus, agent_name, message).await
 }
 
 async fn run_job_command(
@@ -232,42 +235,52 @@ async fn run_job_command(
         );
     }
 
-    // Delegate to agent via bus if command starts with "agent:"
-    // (skip shell-specific security checks — agent commands don't run shell)
-    if job.command.starts_with("agent:") {
-        return match bus {
-            Some(bus) => run_agent_job(bus, &job.command).await,
-            None => (
-                false,
-                "agent command requires agent bus (not available)".to_string(),
-            ),
-        };
-    }
+    // Route by structured CronAction
+    match &job.action {
+        crate::cron::CronAction::AgentRun { agent } => {
+            match bus {
+                Some(bus) => run_agent_delegation(bus, agent, "").await,
+                None => (false, "agent command requires agent bus (not available)".to_string()),
+            }
+        }
+        crate::cron::CronAction::AgentMessage { agent, message } => {
+            match bus {
+                Some(bus) => run_agent_delegation(bus, agent, message).await,
+                None => (false, "agent command requires agent bus (not available)".to_string()),
+            }
+        }
+        crate::cron::CronAction::Shell { command } => {
+            // Legacy fallback: commands starting with "agent:" are routed via bus
+            if command.starts_with("agent:") {
+                return match bus {
+                    Some(bus) => run_agent_job_legacy(bus, command).await,
+                    None => (false, "agent command requires agent bus (not available)".to_string()),
+                };
+            }
 
-    if !security.is_command_allowed(&job.command) {
-        return (
-            false,
-            format!(
-                "blocked by security policy: command not allowed: {}",
-                job.command
-            ),
-        );
-    }
+            if !security.is_command_allowed(command) {
+                return (
+                    false,
+                    format!("blocked by security policy: command not allowed: {command}"),
+                );
+            }
 
-    if let Some(path) = forbidden_path_argument(security, &job.command) {
-        return (
-            false,
-            format!("blocked by security policy: forbidden path argument: {path}"),
-        );
-    }
+            if let Some(path) = forbidden_path_argument(security, command) {
+                return (
+                    false,
+                    format!("blocked by security policy: forbidden path argument: {path}"),
+                );
+            }
 
-    run_job_command_with_timeout(
-        config,
-        security,
-        job,
-        Duration::from_secs(SHELL_JOB_TIMEOUT_SECS),
-    )
-    .await
+            run_job_command_with_timeout(
+                config,
+                security,
+                job,
+                Duration::from_secs(SHELL_JOB_TIMEOUT_SECS),
+            )
+            .await
+        }
+    }
 }
 
 async fn run_job_command_with_timeout(
@@ -327,10 +340,12 @@ mod tests {
     }
 
     fn test_job(command: &str) -> CronJob {
+        let action = crate::cron::CronAction::from_legacy(command, None, None);
         CronJob {
             id: "test-job".into(),
             expression: "* * * * *".into(),
             command: command.into(),
+            action,
             next_run: Utc::now(),
             last_run: None,
             last_status: None,
@@ -488,7 +503,7 @@ mod tests {
     #[tokio::test]
     async fn agent_job_empty_name_fails() {
         let bus = AgentBus::new();
-        let (success, output) = run_agent_job(&bus, "agent:").await;
+        let (success, output) = run_agent_delegation(&bus, "", "").await;
         assert!(!success);
         assert!(output.contains("missing agent name"));
     }
@@ -496,8 +511,8 @@ mod tests {
     #[tokio::test]
     async fn agent_job_parses_name_only() {
         let bus = AgentBus::new();
-        // No agent registered, so it should fail with "not registered"
-        let (success, output) = run_agent_job(&bus, "agent:mybot").await;
+        // Legacy string parsing: "agent:mybot" → agent_name="mybot", message=""
+        let (success, output) = run_agent_job_legacy(&bus, "agent:mybot").await;
         assert!(!success);
         assert!(output.contains("'mybot' is not registered"));
     }
@@ -505,7 +520,7 @@ mod tests {
     #[tokio::test]
     async fn agent_job_parses_name_and_message() {
         let bus = AgentBus::new();
-        let (success, output) = run_agent_job(&bus, "agent:helper:do something").await;
+        let (success, output) = run_agent_job_legacy(&bus, "agent:helper:do something").await;
         assert!(!success);
         assert!(output.contains("'helper' is not registered"));
     }
@@ -527,7 +542,7 @@ mod tests {
             }
         });
 
-        let (success, output) = run_agent_job(&bus_clone, "agent:testbot:do-work").await;
+        let (success, output) = run_agent_delegation(&bus_clone, "testbot", "do-work").await;
         assert!(success);
         assert_eq!(output, "work-done");
     }
@@ -546,8 +561,82 @@ mod tests {
             }
         });
 
-        let (success, output) = run_agent_job(&bus, "agent:bot2").await;
+        let (success, output) = run_agent_delegation(&bus, "bot2", "").await;
         assert!(success);
         assert_eq!(output, "ack");
+    }
+
+    // ── CronAction-based tests ──
+
+    #[tokio::test]
+    async fn agent_run_action_routes_to_bus() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let bus = Arc::new(AgentBus::new());
+        let mut rx = bus.register("scheduled-bot", 16).await;
+        let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+
+        tokio::spawn(async move {
+            if let Some(mut msg) = rx.recv().await {
+                assert_eq!(msg.from, "cron");
+                assert_eq!(msg.payload, "");
+                if let Some(tx) = msg.response_tx.take() {
+                    let _ = tx.send("scheduled-ok".to_string());
+                }
+            }
+        });
+
+        let job = CronJob {
+            id: "sched-1".into(),
+            expression: "* * * * *".into(),
+            command: "scheduled-bot".into(),
+            action: crate::cron::CronAction::AgentRun { agent: "scheduled-bot".into() },
+            next_run: Utc::now(),
+            last_run: None,
+            last_status: None,
+            paused: false,
+            one_shot: false,
+        };
+
+        let (success, output) = run_job_command(&config, &security, &job, Some(&bus)).await;
+        assert!(success);
+        assert_eq!(output, "scheduled-ok");
+    }
+
+    #[tokio::test]
+    async fn agent_message_action_routes_with_payload() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let bus = Arc::new(AgentBus::new());
+        let mut rx = bus.register("msg-bot", 16).await;
+        let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+
+        tokio::spawn(async move {
+            if let Some(mut msg) = rx.recv().await {
+                assert_eq!(msg.payload, "check emails");
+                if let Some(tx) = msg.response_tx.take() {
+                    let _ = tx.send("emails checked".to_string());
+                }
+            }
+        });
+
+        let job = CronJob {
+            id: "msg-1".into(),
+            expression: "* * * * *".into(),
+            command: "check emails".into(),
+            action: crate::cron::CronAction::AgentMessage {
+                agent: "msg-bot".into(),
+                message: "check emails".into(),
+            },
+            next_run: Utc::now(),
+            last_run: None,
+            last_status: None,
+            paused: false,
+            one_shot: false,
+        };
+
+        let (success, output) = run_job_command(&config, &security, &job, Some(&bus)).await;
+        assert!(success);
+        assert_eq!(output, "emails checked");
     }
 }

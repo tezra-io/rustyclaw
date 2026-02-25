@@ -8,11 +8,84 @@ use uuid::Uuid;
 
 pub mod scheduler;
 
+/// What a cron job should do when triggered.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CronAction {
+    /// Execute a shell command.
+    Shell { command: String },
+    /// Trigger a persistent agent's autonomous run (payload = personality prompt).
+    AgentRun { agent: String },
+    /// Send a specific message to a persistent agent.
+    AgentMessage { agent: String, message: String },
+}
+
+impl CronAction {
+    /// Derive a `CronAction` from legacy DB fields for backward compatibility.
+    /// New jobs should use `action_type` + `agent_name` columns directly.
+    pub fn from_legacy(command: &str, action_type: Option<&str>, agent_name: Option<&str>) -> Self {
+        match action_type {
+            Some("agent_run") => CronAction::AgentRun {
+                agent: agent_name.unwrap_or("").to_string(),
+            },
+            Some("agent_message") => CronAction::AgentMessage {
+                agent: agent_name.unwrap_or("").to_string(),
+                message: command.to_string(),
+            },
+            _ => {
+                // Legacy fallback: parse "agent:name:msg" prefix convention
+                if let Some(rest) = command.strip_prefix("agent:") {
+                    match rest.find(':') {
+                        Some(idx) => CronAction::AgentMessage {
+                            agent: rest[..idx].to_string(),
+                            message: rest[idx + 1..].to_string(),
+                        },
+                        None => CronAction::AgentRun {
+                            agent: rest.to_string(),
+                        },
+                    }
+                } else {
+                    CronAction::Shell {
+                        command: command.to_string(),
+                    }
+                }
+            }
+        }
+    }
+
+    /// The DB `action_type` column value.
+    pub fn action_type(&self) -> &'static str {
+        match self {
+            CronAction::Shell { .. } => "shell",
+            CronAction::AgentRun { .. } => "agent_run",
+            CronAction::AgentMessage { .. } => "agent_message",
+        }
+    }
+
+    /// The DB `agent_name` column value (None for shell actions).
+    pub fn agent_name(&self) -> Option<&str> {
+        match self {
+            CronAction::Shell { .. } => None,
+            CronAction::AgentRun { agent } | CronAction::AgentMessage { agent, .. } => Some(agent),
+        }
+    }
+
+    /// The DB `command` column value.
+    pub fn command_str(&self) -> &str {
+        match self {
+            CronAction::Shell { command } => command,
+            CronAction::AgentRun { agent } => agent,
+            CronAction::AgentMessage { message, .. } => message,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CronJob {
     pub id: String,
     pub expression: String,
     pub command: String,
+    pub action: CronAction,
     pub next_run: DateTime<Utc>,
     pub last_run: Option<DateTime<Utc>>,
     pub last_status: Option<String>,
@@ -95,21 +168,46 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
 }
 
 pub fn add_job(config: &Config, expression: &str, command: &str) -> Result<CronJob> {
+    let action = CronAction::from_legacy(command, None, None);
+    add_job_with_action(config, expression, command, action, false)
+}
+
+/// Create a cron job for a scheduled agent run.
+pub fn add_agent_run_job(config: &Config, expression: &str, agent_name: &str) -> Result<CronJob> {
+    let action = CronAction::AgentRun {
+        agent: agent_name.to_string(),
+    };
+    add_job_with_action(config, expression, agent_name, action, false)
+}
+
+fn add_job_with_action(
+    config: &Config,
+    expression: &str,
+    command: &str,
+    action: CronAction,
+    one_shot: bool,
+) -> Result<CronJob> {
     check_max_tasks(config)?;
     let now = Utc::now();
     let next_run = next_run_for(expression, now)?;
     let id = Uuid::new_v4().to_string();
 
+    let action_type = action.action_type();
+    let agent_name_val = action.agent_name().map(ToString::to_string);
+
     with_connection(config, |conn| {
         conn.execute(
-            "INSERT INTO cron_jobs (id, expression, command, created_at, next_run, paused, one_shot)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)",
+            "INSERT INTO cron_jobs (id, expression, command, created_at, next_run, paused, one_shot, action_type, agent_name)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8)",
             params![
                 id,
                 expression,
                 command,
                 now.to_rfc3339(),
-                next_run.to_rfc3339()
+                next_run.to_rfc3339(),
+                one_shot,
+                action_type,
+                agent_name_val,
             ],
         )
         .context("Failed to insert cron job")?;
@@ -120,11 +218,12 @@ pub fn add_job(config: &Config, expression: &str, command: &str) -> Result<CronJ
         id,
         expression: expression.to_string(),
         command: command.to_string(),
+        action,
         next_run,
         last_run: None,
         last_status: None,
         paused: false,
-        one_shot: false,
+        one_shot,
     })
 }
 
@@ -155,12 +254,15 @@ fn add_one_shot_job_with_expression(
     }
 
     let id = Uuid::new_v4().to_string();
+    let action = CronAction::from_legacy(command, None, None);
+    let action_type = action.action_type();
+    let agent_name_val = action.agent_name().map(ToString::to_string);
 
     with_connection(config, |conn| {
         conn.execute(
-            "INSERT INTO cron_jobs (id, expression, command, created_at, next_run, paused, one_shot)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, 1)",
-            params![id, expression, command, now.to_rfc3339(), run_at.to_rfc3339()],
+            "INSERT INTO cron_jobs (id, expression, command, created_at, next_run, paused, one_shot, action_type, agent_name)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, 1, ?6, ?7)",
+            params![id, expression, command, now.to_rfc3339(), run_at.to_rfc3339(), action_type, agent_name_val],
         )
         .context("Failed to insert one-shot task")?;
         Ok(())
@@ -170,6 +272,7 @@ fn add_one_shot_job_with_expression(
         id,
         expression,
         command: command.to_string(),
+        action,
         next_run: run_at,
         last_run: None,
         last_status: None,
@@ -181,7 +284,7 @@ fn add_one_shot_job_with_expression(
 pub fn get_job(config: &Config, id: &str) -> Result<Option<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot
+            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name
              FROM cron_jobs WHERE id = ?1",
         )?;
 
@@ -277,7 +380,7 @@ fn parse_duration(input: &str) -> Result<chrono::Duration> {
 pub fn list_jobs(config: &Config) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot
+            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name
              FROM cron_jobs ORDER BY next_run ASC",
         )?;
 
@@ -307,7 +410,7 @@ pub fn remove_job(config: &Config, id: &str) -> Result<()> {
 pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot
+            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name
              FROM cron_jobs WHERE next_run <= ?1 AND paused = 0 ORDER BY next_run ASC",
         )?;
 
@@ -414,11 +517,16 @@ fn parse_job_row(row: &rusqlite::Row<'_>) -> Result<CronJob> {
     let last_status: Option<String> = row.get(5)?;
     let paused: bool = row.get(6)?;
     let one_shot: bool = row.get(7)?;
+    let action_type: Option<String> = row.get(8).unwrap_or(None);
+    let agent_name: Option<String> = row.get(9).unwrap_or(None);
+
+    let action = CronAction::from_legacy(&command, action_type.as_deref(), agent_name.as_deref());
 
     Ok(CronJob {
         id,
         expression,
         command,
+        action,
         next_run: parse_rfc3339(&next_run_raw)?,
         last_run: match last_run_raw {
             Some(raw) => Some(parse_rfc3339(&raw)?),
@@ -484,6 +592,8 @@ fn with_connection<T>(config: &Config, f: impl FnOnce(&Connection) -> Result<T>)
     for column in ["paused", "one_shot"] {
         add_column_if_missing(&conn, column, "INTEGER NOT NULL DEFAULT 0")?;
     }
+    add_column_if_missing(&conn, "action_type", "TEXT DEFAULT 'shell'")?;
+    add_column_if_missing(&conn, "agent_name", "TEXT")?;
 
     // idx_cron_jobs_next_run_paused must be created *after* add_column_if_missing
     // ensures the `paused` column exists in old-schema databases.
@@ -535,6 +645,47 @@ fn add_column_if_missing(conn: &Connection, name: &str, sql_type: &str) -> Resul
         }
         Err(e) => Err(e).with_context(|| format!("Failed to add column cron_jobs.{name}")),
     }
+}
+
+/// Register cron jobs for persistent agents that have a `schedule` field.
+/// Skips agents whose schedule is already registered (checks by agent_name column).
+pub fn register_scheduled_agents(
+    config: &Config,
+    agents: &[crate::agent::definition::AgentDefinition],
+) -> Result<()> {
+    for agent in agents {
+        let Some(ref expr) = agent.schedule else {
+            continue;
+        };
+
+        // Check if a job already exists for this agent
+        let already_registered = with_connection(config, |conn| {
+            let mut stmt =
+                conn.prepare("SELECT COUNT(*) FROM cron_jobs WHERE agent_name = ?1 AND action_type = 'agent_run'")?;
+            let count: i64 = stmt.query_row(params![agent.name], |row| row.get(0))?;
+            Ok(count > 0)
+        })?;
+
+        if already_registered {
+            tracing::debug!(agent = %agent.name, "Schedule already registered");
+            continue;
+        }
+
+        match add_agent_run_job(config, expr, &agent.name) {
+            Ok(job) => {
+                tracing::info!(
+                    agent = %agent.name,
+                    expr = %expr,
+                    next = %job.next_run.to_rfc3339(),
+                    "Registered scheduled agent run"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(agent = %agent.name, "Failed to register schedule: {e}");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -734,5 +885,210 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Maximum number of scheduled tasks"));
+    }
+
+    // ── CronAction tests ──
+
+    #[test]
+    fn cron_action_from_legacy_shell() {
+        let action = CronAction::from_legacy("echo hello", None, None);
+        assert_eq!(
+            action,
+            CronAction::Shell {
+                command: "echo hello".into()
+            }
+        );
+    }
+
+    #[test]
+    fn cron_action_from_legacy_agent_prefix() {
+        let action = CronAction::from_legacy("agent:mybot", None, None);
+        assert_eq!(
+            action,
+            CronAction::AgentRun {
+                agent: "mybot".into()
+            }
+        );
+    }
+
+    #[test]
+    fn cron_action_from_legacy_agent_message_prefix() {
+        let action = CronAction::from_legacy("agent:mybot:do work", None, None);
+        assert_eq!(
+            action,
+            CronAction::AgentMessage {
+                agent: "mybot".into(),
+                message: "do work".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn cron_action_from_typed_columns() {
+        let action = CronAction::from_legacy("mybot", Some("agent_run"), Some("mybot"));
+        assert_eq!(
+            action,
+            CronAction::AgentRun {
+                agent: "mybot".into()
+            }
+        );
+
+        let action = CronAction::from_legacy("check email", Some("agent_message"), Some("mailer"));
+        assert_eq!(
+            action,
+            CronAction::AgentMessage {
+                agent: "mailer".into(),
+                message: "check email".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn cron_action_serde_roundtrip() {
+        let actions = vec![
+            CronAction::Shell {
+                command: "echo test".into(),
+            },
+            CronAction::AgentRun {
+                agent: "bot".into(),
+            },
+            CronAction::AgentMessage {
+                agent: "bot".into(),
+                message: "hi".into(),
+            },
+        ];
+        for action in actions {
+            let json = serde_json::to_string(&action).unwrap();
+            let deserialized: CronAction = serde_json::from_str(&json).unwrap();
+            assert_eq!(action, deserialized);
+        }
+    }
+
+    #[test]
+    fn add_agent_run_job_stores_action_type() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let job = add_agent_run_job(&config, "*/5 * * * *", "my-agent").unwrap();
+        assert_eq!(
+            job.action,
+            CronAction::AgentRun {
+                agent: "my-agent".into()
+            }
+        );
+
+        // Reload from DB and verify
+        let loaded = get_job(&config, &job.id).unwrap().unwrap();
+        assert_eq!(
+            loaded.action,
+            CronAction::AgentRun {
+                agent: "my-agent".into()
+            }
+        );
+    }
+
+    #[test]
+    fn schema_migration_adds_action_columns() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let db_path = config.workspace_dir.join("cron").join("jobs.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+
+        // Create a DB with OLD schema (no action_type, agent_name)
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE cron_jobs (
+                    id TEXT PRIMARY KEY,
+                    expression TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    next_run TEXT NOT NULL,
+                    last_run TEXT,
+                    last_status TEXT,
+                    last_output TEXT
+                );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO cron_jobs (id, expression, command, created_at, next_run)
+                 VALUES ('agent-job', '* * * * *', 'agent:mybot:hello', '2025-01-01T00:00:00Z', '2030-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+
+        // Open via our code, which runs migration
+        let jobs = list_jobs(&config).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].id, "agent-job");
+        // Legacy agent:name:msg should be parsed via from_legacy fallback
+        assert_eq!(
+            jobs[0].action,
+            CronAction::AgentMessage {
+                agent: "mybot".into(),
+                message: "hello".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn register_scheduled_agents_creates_jobs() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let agents = vec![crate::agent::definition::AgentDefinition {
+            name: "daily-bot".into(),
+            persistent: true,
+            schedule: Some("0 9 * * *".into()),
+            ..crate::agent::definition::AgentDefinition::default()
+        }];
+
+        register_scheduled_agents(&config, &agents).unwrap();
+
+        let jobs = list_jobs(&config).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].action,
+            CronAction::AgentRun {
+                agent: "daily-bot".into()
+            }
+        );
+    }
+
+    #[test]
+    fn register_scheduled_agents_is_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let agents = vec![crate::agent::definition::AgentDefinition {
+            name: "idem-bot".into(),
+            persistent: true,
+            schedule: Some("0 9 * * *".into()),
+            ..crate::agent::definition::AgentDefinition::default()
+        }];
+
+        register_scheduled_agents(&config, &agents).unwrap();
+        register_scheduled_agents(&config, &agents).unwrap();
+
+        let jobs = list_jobs(&config).unwrap();
+        assert_eq!(jobs.len(), 1);
+    }
+
+    #[test]
+    fn register_scheduled_agents_skips_no_schedule() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let agents = vec![crate::agent::definition::AgentDefinition {
+            name: "no-schedule".into(),
+            persistent: true,
+            schedule: None,
+            ..crate::agent::definition::AgentDefinition::default()
+        }];
+
+        register_scheduled_agents(&config, &agents).unwrap();
+        assert!(list_jobs(&config).unwrap().is_empty());
     }
 }

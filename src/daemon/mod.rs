@@ -132,6 +132,14 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         }));
     }
 
+    // ── Register scheduled agent runs ──
+    if let Err(e) = crate::cron::register_scheduled_agents(
+        &config,
+        &registry.list().into_iter().filter(|d| d.persistent && d.schedule.is_some()).collect::<Vec<_>>(),
+    ) {
+        tracing::warn!("Failed to register scheduled agent runs: {e}");
+    }
+
     {
         let gateway_cfg = config.clone();
         let gateway_host = host.clone();
