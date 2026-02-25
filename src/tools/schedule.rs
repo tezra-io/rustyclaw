@@ -27,7 +27,9 @@ impl Tool for ScheduleTool {
     }
 
     fn description(&self) -> &str {
-        "Manage scheduled tasks. Actions: create/add/once/list/get/cancel/remove/pause/resume"
+        "Manage scheduled tasks. Actions: create/add/once/list/get/cancel/remove/pause/resume. \
+         Note: scheduled task output is stored in the database but NOT automatically delivered \
+         back to chat channels. Users can check results via 'schedule get <id>'."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

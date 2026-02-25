@@ -351,6 +351,8 @@ mod tests {
             last_status: None,
             paused: false,
             one_shot: false,
+            reply_channel: None,
+            reply_target: None,
         }
     }
 
@@ -596,6 +598,8 @@ mod tests {
             last_status: None,
             paused: false,
             one_shot: false,
+            reply_channel: None,
+            reply_target: None,
         };
 
         let (success, output) = run_job_command(&config, &security, &job, Some(&bus)).await;
@@ -633,6 +637,8 @@ mod tests {
             last_status: None,
             paused: false,
             one_shot: false,
+            reply_channel: None,
+            reply_target: None,
         };
 
         let (success, output) = run_job_command(&config, &security, &job, Some(&bus)).await;

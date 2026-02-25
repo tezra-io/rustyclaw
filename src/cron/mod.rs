@@ -91,6 +91,10 @@ pub struct CronJob {
     pub last_status: Option<String>,
     pub paused: bool,
     pub one_shot: bool,
+    /// Channel to deliver output to (e.g. "discord", "telegram"). None = log only.
+    pub reply_channel: Option<String>,
+    /// Target within the channel (e.g. channel_id or user_id).
+    pub reply_target: Option<String>,
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -224,6 +228,8 @@ fn add_job_with_action(
         last_status: None,
         paused: false,
         one_shot,
+        reply_channel: None,
+        reply_target: None,
     })
 }
 
@@ -278,13 +284,15 @@ fn add_one_shot_job_with_expression(
         last_status: None,
         paused: false,
         one_shot: true,
+        reply_channel: None,
+        reply_target: None,
     })
 }
 
 pub fn get_job(config: &Config, id: &str) -> Result<Option<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name
+            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name, reply_channel, reply_target
              FROM cron_jobs WHERE id = ?1",
         )?;
 
@@ -380,7 +388,7 @@ fn parse_duration(input: &str) -> Result<chrono::Duration> {
 pub fn list_jobs(config: &Config) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name
+            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name, reply_channel, reply_target
              FROM cron_jobs ORDER BY next_run ASC",
         )?;
 
@@ -410,7 +418,7 @@ pub fn remove_job(config: &Config, id: &str) -> Result<()> {
 pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name
+            "SELECT id, expression, command, next_run, last_run, last_status, paused, one_shot, action_type, agent_name, reply_channel, reply_target
              FROM cron_jobs WHERE next_run <= ?1 AND paused = 0 ORDER BY next_run ASC",
         )?;
 
@@ -519,6 +527,8 @@ fn parse_job_row(row: &rusqlite::Row<'_>) -> Result<CronJob> {
     let one_shot: bool = row.get(7)?;
     let action_type: Option<String> = row.get(8).unwrap_or(None);
     let agent_name: Option<String> = row.get(9).unwrap_or(None);
+    let reply_channel: Option<String> = row.get(10).unwrap_or(None);
+    let reply_target: Option<String> = row.get(11).unwrap_or(None);
 
     let action = CronAction::from_legacy(&command, action_type.as_deref(), agent_name.as_deref());
 
@@ -535,6 +545,8 @@ fn parse_job_row(row: &rusqlite::Row<'_>) -> Result<CronJob> {
         last_status,
         paused,
         one_shot,
+        reply_channel,
+        reply_target,
     })
 }
 
@@ -594,6 +606,8 @@ fn with_connection<T>(config: &Config, f: impl FnOnce(&Connection) -> Result<T>)
     }
     add_column_if_missing(&conn, "action_type", "TEXT DEFAULT 'shell'")?;
     add_column_if_missing(&conn, "agent_name", "TEXT")?;
+    add_column_if_missing(&conn, "reply_channel", "TEXT")?;
+    add_column_if_missing(&conn, "reply_target", "TEXT")?;
 
     // idx_cron_jobs_next_run_paused must be created *after* add_column_if_missing
     // ensures the `paused` column exists in old-schema databases.
