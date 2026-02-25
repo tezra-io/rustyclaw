@@ -1,4 +1,5 @@
 use super::traits::{Tool, ToolResult};
+use crate::agent::bus::AgentBus;
 use crate::config::DelegateAgentConfig;
 use crate::providers::{self, Provider};
 use async_trait::async_trait;
@@ -14,23 +15,31 @@ const DELEGATE_TIMEOUT_SECS: u64 = 120;
 /// provider/model configuration. Enables multi-agent workflows where
 /// a primary agent can hand off specialized work (research, coding,
 /// summarization) to purpose-built sub-agents.
+///
+/// When an `AgentBus` is provided, delegation for registered persistent
+/// agents is routed through the bus (full tools, memory, multi-turn).
+/// Unregistered agents fall back to the single-shot provider path.
 pub struct DelegateTool {
     agents: Arc<HashMap<String, DelegateAgentConfig>>,
     /// Global API key fallback (from config.api_key)
     fallback_api_key: Option<String>,
     /// Depth at which this tool instance lives in the delegation chain.
     depth: u32,
+    /// Bus for routing to persistent agents. None in non-daemon paths.
+    bus: Option<Arc<AgentBus>>,
 }
 
 impl DelegateTool {
     pub fn new(
         agents: HashMap<String, DelegateAgentConfig>,
         fallback_api_key: Option<String>,
+        bus: Option<Arc<AgentBus>>,
     ) -> Self {
         Self {
             agents: Arc::new(agents),
             fallback_api_key,
             depth: 0,
+            bus,
         }
     }
 
@@ -41,11 +50,13 @@ impl DelegateTool {
         agents: HashMap<String, DelegateAgentConfig>,
         fallback_api_key: Option<String>,
         depth: u32,
+        bus: Option<Arc<AgentBus>>,
     ) -> Self {
         Self {
             agents: Arc::new(agents),
             fallback_api_key,
             depth,
+            bus,
         }
     }
 }
@@ -128,6 +139,39 @@ impl Tool for DelegateTool {
             .and_then(|v| v.as_str())
             .map(str::trim)
             .unwrap_or("");
+
+        // Route to persistent agent via bus if registered there.
+        // This bypasses the single-shot provider path and gives the target
+        // agent full tool access, memory, and multi-turn capability.
+        if let Some(bus) = &self.bus {
+            if bus.is_registered(agent_name).await {
+                let full_prompt = if context.is_empty() {
+                    prompt.to_string()
+                } else {
+                    format!("[Context]\n{context}\n\n[Task]\n{prompt}")
+                };
+                let timeout = Duration::from_secs(DELEGATE_TIMEOUT_SECS);
+                return match bus.delegate("primary", agent_name, &full_prompt, timeout).await {
+                    Ok(response) => {
+                        let rendered = if response.trim().is_empty() {
+                            "[Empty response]".to_string()
+                        } else {
+                            response
+                        };
+                        Ok(ToolResult {
+                            success: true,
+                            output: rendered,
+                            error: None,
+                        })
+                    }
+                    Err(e) => Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Bus delegation to '{agent_name}' failed: {e}")),
+                    }),
+                };
+            }
+        }
 
         // Look up agent config
         let agent_config = match self.agents.get(agent_name) {
@@ -278,7 +322,7 @@ mod tests {
 
     #[test]
     fn name_and_schema() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         assert_eq!(tool.name(), "delegate");
         let schema = tool.parameters_schema();
         assert!(schema["properties"]["agent"].is_object());
@@ -294,13 +338,13 @@ mod tests {
 
     #[test]
     fn description_not_empty() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         assert!(!tool.description().is_empty());
     }
 
     #[test]
     fn schema_lists_agent_names() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         let schema = tool.parameters_schema();
         let desc = schema["properties"]["agent"]["description"]
             .as_str()
@@ -310,21 +354,21 @@ mod tests {
 
     #[tokio::test]
     async fn missing_agent_param() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         let result = tool.execute(json!({"prompt": "test"})).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn missing_prompt_param() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         let result = tool.execute(json!({"agent": "researcher"})).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn unknown_agent_returns_error() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         let result = tool
             .execute(json!({"agent": "nonexistent", "prompt": "test"}))
             .await
@@ -335,7 +379,7 @@ mod tests {
 
     #[tokio::test]
     async fn depth_limit_enforced() {
-        let tool = DelegateTool::with_depth(sample_agents(), None, 3);
+        let tool = DelegateTool::with_depth(sample_agents(), None, 3, None);
         let result = tool
             .execute(json!({"agent": "researcher", "prompt": "test"}))
             .await
@@ -347,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn depth_limit_per_agent() {
         // coder has max_depth=2, so depth=2 should be blocked
-        let tool = DelegateTool::with_depth(sample_agents(), None, 2);
+        let tool = DelegateTool::with_depth(sample_agents(), None, 2, None);
         let result = tool
             .execute(json!({"agent": "coder", "prompt": "test"}))
             .await
@@ -358,7 +402,7 @@ mod tests {
 
     #[test]
     fn empty_agents_schema() {
-        let tool = DelegateTool::new(HashMap::new(), None);
+        let tool = DelegateTool::new(HashMap::new(), None, None);
         let schema = tool.parameters_schema();
         let desc = schema["properties"]["agent"]["description"]
             .as_str()
@@ -380,7 +424,7 @@ mod tests {
                 max_depth: 3,
             },
         );
-        let tool = DelegateTool::new(agents, None);
+        let tool = DelegateTool::new(agents, None, None);
         let result = tool
             .execute(json!({"agent": "broken", "prompt": "test"}))
             .await
@@ -391,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn blank_agent_rejected() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         let result = tool
             .execute(json!({"agent": "  ", "prompt": "test"}))
             .await
@@ -402,7 +446,7 @@ mod tests {
 
     #[tokio::test]
     async fn blank_prompt_rejected() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         let result = tool
             .execute(json!({"agent": "researcher", "prompt": "  \t  "}))
             .await
@@ -413,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn whitespace_agent_name_trimmed_and_found() {
-        let tool = DelegateTool::new(sample_agents(), None);
+        let tool = DelegateTool::new(sample_agents(), None, None);
         // " researcher " with surrounding whitespace — after trim becomes "researcher"
         let result = tool
             .execute(json!({"agent": " researcher ", "prompt": "test"}))

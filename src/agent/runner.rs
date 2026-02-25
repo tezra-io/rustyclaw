@@ -107,7 +107,15 @@ pub async fn run_persistent_agent(
     );
 
     // Filter tools by allowed_tools
-    let tools = filter_tools(all_tools, &definition.allowed_tools);
+    let mut tools = filter_tools(all_tools, &definition.allowed_tools);
+
+    // Upgrade DelegateTool with bus access so persistent agents can delegate to each other
+    tools::inject_bus_into_delegate_tool(
+        &mut tools,
+        &config.agents,
+        config.api_key.as_deref(),
+        Arc::clone(&bus),
+    );
 
     let provider_name = config.effective_provider();
     let effective_model = config.effective_model();

@@ -191,7 +191,8 @@ pub fn all_tools_with_runtime(
         }
     }
 
-    // Add delegation tool when agents are configured
+    // Add delegation tool when agents are configured.
+    // No bus here — call inject_bus_into_delegate_tool() separately when bus is available.
     if !agents.is_empty() {
         let delegate_agents: HashMap<String, DelegateAgentConfig> = agents
             .iter()
@@ -200,6 +201,7 @@ pub fn all_tools_with_runtime(
         tools.push(Box::new(DelegateTool::new(
             delegate_agents,
             fallback_api_key.map(String::from),
+            None,
         )));
     }
 
@@ -214,6 +216,35 @@ pub fn add_agent_management(
     bus: Arc<crate::agent::bus::AgentBus>,
 ) {
     tools.push(Box::new(AgentManageTool::new(registry, bus)));
+}
+
+/// Upgrade the `DelegateTool` in an existing tools registry with `AgentBus` access.
+///
+/// Replaces the bus-less `DelegateTool` created by `all_tools_with_runtime` with one
+/// that routes to registered persistent agents via the bus. Call this from paths where
+/// the `AgentBus` is available (e.g. `run_persistent_agent`). Other paths (interactive
+/// loop, channel handlers) leave the registry unchanged and fall back to single-shot
+/// provider delegation.
+#[allow(clippy::implicit_hasher)]
+pub fn inject_bus_into_delegate_tool(
+    tools: &mut Vec<Box<dyn Tool>>,
+    agents: &HashMap<String, DelegateAgentConfig>,
+    fallback_api_key: Option<&str>,
+    bus: Arc<crate::agent::bus::AgentBus>,
+) {
+    if agents.is_empty() {
+        return;
+    }
+    tools.retain(|t| t.name() != "delegate");
+    let delegate_agents = agents
+        .iter()
+        .map(|(name, cfg)| (name.clone(), cfg.clone()))
+        .collect();
+    tools.push(Box::new(DelegateTool::new(
+        delegate_agents,
+        fallback_api_key.map(String::from),
+        Some(bus),
+    )));
 }
 
 #[cfg(test)]
