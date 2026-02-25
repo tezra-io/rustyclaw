@@ -67,6 +67,21 @@ pub fn handle_command(cmd: crate::PeripheralCommands, config: &Config) -> Result
             }
         }
         crate::PeripheralCommands::Add { board, path } => {
+            let known_names: Vec<&str> = crate::hardware::registry::known_boards()
+                .iter()
+                .map(|b| b.name)
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let is_software = ["rpi-gpio", "raspberry-pi"].contains(&board.as_str());
+            if !is_software && !known_names.contains(&board.as_str()) {
+                eprintln!(
+                    "Warning: Unknown board '{}'. Known boards: {}, rpi-gpio",
+                    board,
+                    known_names.join(", ")
+                );
+                eprintln!("Proceeding anyway — the board will be saved to config.");
+            }
             let transport = if path == "native" { "native" } else { "serial" };
             let path_opt = if path == "native" {
                 None

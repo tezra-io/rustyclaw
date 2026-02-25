@@ -139,6 +139,12 @@ fn run_discover() -> Result<()> {
 
 #[cfg(feature = "hardware")]
 fn run_introspect(path: &str) -> Result<()> {
+    if !std::path::Path::new(path).exists() {
+        anyhow::bail!(
+            "Device path '{}' does not exist. Connect the device and check with: ls /dev/tty* or ls /dev/cu.*",
+            path
+        );
+    }
     let result = introspect::introspect_device(path)?;
 
     println!("Device at {}:", result.path);

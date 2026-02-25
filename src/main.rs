@@ -422,6 +422,9 @@ async fn main() -> Result<()> {
             agent,
         } => {
             let temp = temperature.unwrap_or(config.default_temperature);
+            if !(0.0..=2.0).contains(&temp) {
+                bail!("Temperature {temp} is out of range. Valid range is 0.0\u{2013}2.0.");
+            }
             agent::run(config, message, provider, model, temp, peripheral, agent).await
         }
 
