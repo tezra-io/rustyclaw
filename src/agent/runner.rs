@@ -254,7 +254,7 @@ impl PromptSection for PersonalitySection {
 }
 
 /// Load skills that match the agent's skill list.
-fn load_agent_skills(
+pub(crate) fn load_agent_skills(
     skill_names: &[String],
     workspace_dir: &std::path::Path,
 ) -> Vec<crate::skills::Skill> {
@@ -270,7 +270,7 @@ fn load_agent_skills(
 
 /// Filter tools to only those in the allowed list.
 /// Empty `allowed_tools` = all tools permitted.
-fn filter_tools(
+pub(crate) fn filter_tools(
     all_tools: Vec<Box<dyn tools::Tool>>,
     allowed_tools: &[String],
 ) -> Vec<Box<dyn tools::Tool>> {

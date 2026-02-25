@@ -710,7 +710,22 @@ pub async fn run(
     model_override: Option<String>,
     temperature: f64,
     peripheral_overrides: Vec<String>,
+    agent_name: Option<String>,
 ) -> Result<()> {
+    // ── Load named agent definition (if requested) ──────────────
+    let agent_def = if let Some(ref name) = agent_name {
+        let registry = super::registry::AgentRegistry::from_config(&config);
+        match registry.get(name) {
+            Some(def) => {
+                tracing::info!(agent = %name, "Loaded named agent definition");
+                Some(def)
+            }
+            None => anyhow::bail!("Agent '{}' not found in {}", name, super::definition::agents_dir_from_config(&config).display()),
+        }
+    } else {
+        None
+    };
+
     // ── Wire up agnostic subsystems ──────────────────────────────
     let base_observer = observability::create_observer(&config.observability);
     let observer: Arc<dyn Observer> = Arc::from(base_observer);
@@ -721,12 +736,49 @@ pub async fn run(
         &config.workspace_dir,
     ));
 
-    // ── Memory (the brain) ────────────────────────────────────────
-    let mem: Arc<dyn Memory> = Arc::from(memory::create_memory(
-        &config.memory,
-        &config.workspace_dir,
-        config.api_key.as_deref(),
-    )?);
+    // ── Memory (isolated per agent definition when applicable) ───
+    let mem: Arc<dyn Memory> = if let Some(ref def) = agent_def {
+        let agents_dir = super::definition::agents_dir_from_config(&config);
+        match def.memory {
+            crate::agent::definition::MemoryIsolation::Isolated => {
+                Arc::from(memory::create_agent_memory(
+                    &config.memory,
+                    &agents_dir,
+                    &def.name,
+                    &def.memory_backend,
+                    config.api_key.as_deref(),
+                )?)
+            }
+            crate::agent::definition::MemoryIsolation::SharedRead => {
+                let workspace_mem = Arc::from(memory::create_memory(
+                    &config.memory,
+                    &config.workspace_dir,
+                    config.api_key.as_deref(),
+                )?);
+                let agent_mem = Arc::from(memory::create_agent_memory(
+                    &config.memory,
+                    &agents_dir,
+                    &def.name,
+                    &def.memory_backend,
+                    config.api_key.as_deref(),
+                )?);
+                Arc::from(memory::CompositeMemory::new(workspace_mem, agent_mem))
+            }
+            crate::agent::definition::MemoryIsolation::Shared => {
+                Arc::from(memory::create_memory(
+                    &config.memory,
+                    &config.workspace_dir,
+                    config.api_key.as_deref(),
+                )?)
+            }
+        }
+    } else {
+        Arc::from(memory::create_memory(
+            &config.memory,
+            &config.workspace_dir,
+            config.api_key.as_deref(),
+        )?)
+    };
     tracing::info!(backend = mem.name(), "Memory initialized");
 
     // ── Peripherals (merge peripheral tools into registry) ─
@@ -767,17 +819,29 @@ pub async fn run(
         tools_registry.extend(peripheral_tools);
     }
 
-    // ── Resolve provider ─────────────────────────────────────────
+    // ── Filter tools for named agent ─────────────────────────────
+    if let Some(ref def) = agent_def {
+        tools_registry = super::runner::filter_tools(tools_registry, &def.allowed_tools);
+    }
+
+    // ── Resolve provider (agent definition overrides take priority) ──
     let effective_model = config.effective_model();
     let provider_name = provider_override
         .as_deref()
         .or(config.default_provider.as_deref())
         .unwrap_or_else(|| config.effective_provider());
 
-    let model_name = model_override
-        .as_deref()
+    let model_name = agent_def
+        .as_ref()
+        .and_then(|d| d.model.as_deref())
+        .or(model_override.as_deref())
         .or(config.default_model.as_deref())
         .unwrap_or(&effective_model);
+
+    let temperature = agent_def
+        .as_ref()
+        .and_then(|d| d.temperature)
+        .unwrap_or(temperature);
 
     let provider: Box<dyn Provider> = providers::create_routed_provider(
         provider_name,
@@ -813,7 +877,15 @@ pub async fn run(
         .collect();
 
     // ── Build system prompt from workspace MD files (OpenClaw framework) ──
-    let skills = crate::skills::load_skills(&config.workspace_dir);
+    let skills = if let Some(ref def) = agent_def {
+        if def.skills.is_empty() {
+            crate::skills::load_skills(&config.workspace_dir)
+        } else {
+            super::runner::load_agent_skills(&def.skills, &config.workspace_dir)
+        }
+    } else {
+        crate::skills::load_skills(&config.workspace_dir)
+    };
     let mut tool_descs: Vec<(&str, &str)> = vec![
         (
             "shell",
@@ -917,6 +989,20 @@ pub async fn run(
     // Append structured tool-use instructions with schemas
     system_prompt.push_str(&build_tool_instructions(&tools_registry));
 
+    // Inject agent personality into system prompt
+    if let Some(ref def) = agent_def {
+        if !def.personality.is_empty() {
+            system_prompt.push_str("\n\n## Agent Personality\n\n");
+            system_prompt.push_str(&def.personality);
+        }
+    }
+
+    // ── Apply agent max_tools_per_turn ────────────────────────────
+    let max_tool_iters = agent_def
+        .as_ref()
+        .filter(|d| d.max_tools_per_turn > 0)
+        .map_or(config.agent.max_tool_iterations, |d| d.max_tools_per_turn);
+
     // ── Execute ──────────────────────────────────────────────────
     let start = Instant::now();
 
@@ -960,7 +1046,7 @@ pub async fn run(
             model_name,
             temperature,
             false,
-            config.agent.max_tool_iterations,
+            max_tool_iters,
         )
         .await?;
         println!("{response}");
@@ -1029,7 +1115,7 @@ pub async fn run(
                 model_name,
                 temperature,
                 false,
-                config.agent.max_tool_iterations,
+                max_tool_iters,
             )
             .await
             {

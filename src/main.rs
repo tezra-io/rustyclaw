@@ -143,6 +143,10 @@ enum Commands {
         /// Attach a peripheral (board:path, e.g. nucleo-f401re:/dev/ttyACM0)
         #[arg(long)]
         peripheral: Vec<String>,
+
+        /// Run as a named agent (loads definition from ~/.rustyclaw/agents/<NAME>.md)
+        #[arg(short, long)]
+        agent: Option<String>,
     },
 
     /// Start the gateway server (webhooks, websockets)
@@ -406,9 +410,10 @@ async fn main() -> Result<()> {
             model,
             temperature,
             peripheral,
+            agent,
         } => {
             let temp = temperature.unwrap_or(config.default_temperature);
-            agent::run(config, message, provider, model, temp, peripheral).await
+            agent::run(config, message, provider, model, temp, peripheral, agent).await
         }
 
         Commands::Gateway { port, host } => {
