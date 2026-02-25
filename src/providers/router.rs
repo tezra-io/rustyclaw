@@ -315,12 +315,12 @@ mod tests {
         );
 
         let result = router
-            .simple_chat("hello", "anthropic/claude-sonnet-4-20250514", 0.5)
+            .simple_chat("hello", "anthropic/claude-sonnet-4-6", 0.5)
             .await
             .unwrap();
         assert_eq!(result, "primary-response");
         assert_eq!(mocks[0].call_count(), 1);
-        assert_eq!(mocks[0].last_model(), "anthropic/claude-sonnet-4-20250514");
+        assert_eq!(mocks[0].last_model(), "anthropic/claude-sonnet-4-6");
     }
 
     #[test]

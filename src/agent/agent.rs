@@ -181,7 +181,7 @@ impl AgentBuilder {
             config: self.config.unwrap_or_default(),
             model_name: self
                 .model_name
-                .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into()),
+                .unwrap_or_else(|| "anthropic/claude-sonnet-4-6".into()),
             temperature: self.temperature.unwrap_or(0.7),
             workspace_dir: self
                 .workspace_dir

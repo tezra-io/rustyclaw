@@ -361,7 +361,7 @@ mod tests {
             "coder".to_string(),
             DelegateAgentConfig {
                 provider: "openrouter".to_string(),
-                model: "anthropic/claude-sonnet-4-20250514".to_string(),
+                model: "anthropic/claude-sonnet-4-6".to_string(),
                 system_prompt: None,
                 api_key: Some("sk-test".to_string()),
                 temperature: None,

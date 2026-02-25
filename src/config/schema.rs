@@ -334,44 +334,37 @@ fn get_default_pricing() -> std::collections::HashMap<String, ModelPricing> {
 
     // Anthropic models
     prices.insert(
-        "anthropic/claude-sonnet-4-20250514".into(),
+        "anthropic/claude-sonnet-4-6".into(),
         ModelPricing {
             input: 3.0,
             output: 15.0,
         },
     );
     prices.insert(
-        "anthropic/claude-opus-4-20250514".into(),
+        "anthropic/claude-opus-4-6".into(),
         ModelPricing {
-            input: 15.0,
-            output: 75.0,
+            input: 5.0,
+            output: 25.0,
         },
     );
     prices.insert(
-        "anthropic/claude-3.5-sonnet".into(),
+        "anthropic/claude-haiku-4-5".into(),
         ModelPricing {
-            input: 3.0,
-            output: 15.0,
-        },
-    );
-    prices.insert(
-        "anthropic/claude-3-haiku".into(),
-        ModelPricing {
-            input: 0.25,
-            output: 1.25,
+            input: 0.80,
+            output: 4.0,
         },
     );
 
     // OpenAI models
     prices.insert(
-        "openai/gpt-4o".into(),
+        "openai/gpt-4.1-mini".into(),
         ModelPricing {
-            input: 5.0,
-            output: 15.0,
+            input: 0.40,
+            output: 1.60,
         },
     );
     prices.insert(
-        "openai/gpt-4o-mini".into(),
+        "openai/gpt-4.1-nano".into(),
         ModelPricing {
             input: 0.15,
             output: 0.60,
@@ -1172,7 +1165,7 @@ pub struct ReliabilityConfig {
     #[serde(default)]
     pub api_keys: Vec<String>,
     /// Per-model fallback chains. When a model fails, try these alternatives in order.
-    /// Example: `{ "claude-opus-4-20250514" = ["claude-sonnet-4-20250514", "gpt-4o"] }`
+    /// Example: `{ "claude-opus-4-6" = ["claude-sonnet-4-6", "gpt-4.1-mini"] }`
     #[serde(default)]
     pub model_fallbacks: std::collections::HashMap<String, Vec<String>>,
     /// Initial backoff for channel/daemon restarts.
@@ -2131,8 +2124,8 @@ impl Config {
 /// Returns a sensible default model for a given provider name.
 pub fn default_model_for_provider(provider: &str) -> String {
     match provider {
-        "anthropic" => "claude-sonnet-4-20250514".into(),
-        "openai" => "gpt-4o".into(),
+        "anthropic" => "claude-sonnet-4-6".into(),
+        "openai" => "gpt-4.1-mini".into(),
         "ollama" => "llama3.2".into(),
         "groq" => "llama-3.3-70b-versatile".into(),
         "deepseek" => "deepseek-chat".into(),
@@ -2140,7 +2133,7 @@ pub fn default_model_for_provider(provider: &str) -> String {
         "glm" | "zhipu" | "zai" | "z.ai" => "glm-5".into(),
         "minimax" => "MiniMax-M2.5".into(),
         // openrouter and anything else
-        _ => "anthropic/claude-sonnet-4-20250514".into(),
+        _ => "anthropic/claude-sonnet-4-6".into(),
     }
 }
 

@@ -537,15 +537,15 @@ const MINIMAX_ONBOARD_MODELS: [(&str, &str); 5] = [
 
 fn default_model_for_provider(provider: &str) -> String {
     match canonical_provider_name(provider) {
-        "anthropic" => "claude-sonnet-4-20250514".into(),
-        "openai" => "gpt-5.2".into(),
+        "anthropic" => "claude-sonnet-4-6".into(),
+        "openai" => "gpt-4.1-mini".into(),
         "glm" | "zhipu" | "zai" | "z.ai" => "glm-5".into(),
         "minimax" => "MiniMax-M2.5".into(),
         "ollama" => "llama3.2".into(),
         "groq" => "llama-3.3-70b-versatile".into(),
         "deepseek" => "deepseek-chat".into(),
         "gemini" => "gemini-2.5-pro".into(),
-        _ => "anthropic/claude-sonnet-4.5".into(),
+        _ => "anthropic/claude-sonnet-4-6".into(),
     }
 }
 
@@ -553,8 +553,8 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
     match canonical_provider_name(provider_name) {
         "openrouter" => vec![
             (
-                "anthropic/claude-sonnet-4.5".to_string(),
-                "Claude Sonnet 4.5 (balanced, recommended)".to_string(),
+                "anthropic/claude-sonnet-4-6".to_string(),
+                "Claude Sonnet 4.6 (balanced, recommended)".to_string(),
             ),
             (
                 "openai/gpt-5.2".to_string(),
@@ -583,16 +583,16 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
         ],
         "anthropic" => vec![
             (
-                "claude-sonnet-4-20250514".to_string(),
-                "Claude Sonnet 4 (balanced, recommended)".to_string(),
+                "claude-sonnet-4-6".to_string(),
+                "Claude Sonnet 4.6 (balanced, recommended)".to_string(),
             ),
             (
-                "claude-opus-4-1-20250805".to_string(),
-                "Claude Opus 4.1 (best quality)".to_string(),
+                "claude-opus-4-6".to_string(),
+                "Claude Opus 4.6 (best quality)".to_string(),
             ),
             (
-                "claude-3-5-haiku-20241022".to_string(),
-                "Claude 3.5 Haiku (fastest, cheapest)".to_string(),
+                "claude-haiku-4-5-20251001".to_string(),
+                "Claude Haiku 4.5 (fastest, cheapest)".to_string(),
             ),
         ],
         "openai" => vec![
@@ -1567,15 +1567,15 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String)> {
     let models: Vec<(&str, &str)> = match provider_name {
         "openrouter" => vec![
             (
-                "anthropic/claude-sonnet-4",
-                "Claude Sonnet 4 (balanced, recommended)",
+                "anthropic/claude-sonnet-4-6",
+                "Claude Sonnet 4.6 (balanced, recommended)",
             ),
             (
                 "anthropic/claude-3.5-sonnet",
                 "Claude 3.5 Sonnet (fast, affordable)",
             ),
-            ("openai/gpt-4o", "GPT-4o (OpenAI flagship)"),
-            ("openai/gpt-4o-mini", "GPT-4o Mini (fast, cheap)"),
+            ("openai/gpt-4.1-mini", "GPT-4.1 Mini (OpenAI, fast)"),
+            ("openai/gpt-4.1-nano", "GPT-4.1 Nano (cheapest)"),
             (
                 "google/gemini-2.0-flash-001",
                 "Gemini 2.0 Flash (Google, fast)",
@@ -1588,23 +1588,23 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String)> {
         ],
         "anthropic" => vec![
             (
-                "claude-sonnet-4-20250514",
-                "Claude Sonnet 4 (balanced, recommended)",
+                "claude-sonnet-4-6",
+                "Claude Sonnet 4.6 (balanced, recommended)",
             ),
-            ("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet (fast)"),
+            ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (fast)"),
             (
                 "claude-3-5-haiku-20241022",
                 "Claude 3.5 Haiku (fastest, cheapest)",
             ),
         ],
         "openai" => vec![
-            ("gpt-4o", "GPT-4o (flagship)"),
-            ("gpt-4o-mini", "GPT-4o Mini (fast, cheap)"),
-            ("o1-mini", "o1-mini (reasoning)"),
+            ("gpt-4.1-mini", "GPT-4.1 Mini (fast, recommended)"),
+            ("gpt-4.1-nano", "GPT-4.1 Nano (cheapest)"),
+            ("o3-mini", "o3-mini (reasoning)"),
         ],
         "venice" => vec![
             ("llama-3.3-70b", "Llama 3.3 70B (default, fast)"),
-            ("claude-opus-45", "Claude Opus 4.5 via Venice (strongest)"),
+            ("claude-opus-4-6", "Claude Opus 4.6 via Venice (strongest)"),
             ("llama-3.1-405b", "Llama 3.1 405B (largest open source)"),
         ],
         "groq" => vec![
@@ -4333,10 +4333,10 @@ mod tests {
 
     #[test]
     fn default_model_for_provider_uses_latest_defaults() {
-        assert_eq!(default_model_for_provider("openai"), "gpt-5.2");
+        assert_eq!(default_model_for_provider("openai"), "gpt-4.1-mini");
         assert_eq!(
             default_model_for_provider("anthropic"),
-            "claude-sonnet-4-20250514"
+            "claude-sonnet-4-6"
         );
         assert_eq!(default_model_for_provider("gemini"), "gemini-2.5-pro");
         assert_eq!(default_model_for_provider("google"), "gemini-2.5-pro");

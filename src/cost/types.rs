@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Token usage information from a single API call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsage {
-    /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
+    /// Model identifier (e.g., "anthropic/claude-sonnet-4-6")
     pub model: String,
     /// Input/prompt tokens
     pub input_tokens: u64,
