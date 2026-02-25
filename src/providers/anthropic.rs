@@ -184,7 +184,9 @@ impl AnthropicProvider {
         credential: &str,
     ) -> reqwest::RequestBuilder {
         if Self::is_setup_token(credential) {
-            request.header("Authorization", format!("Bearer {credential}"))
+            request
+                .header("Authorization", format!("Bearer {credential}"))
+                .header("anthropic-beta", "oauth-2025-04-20")
         } else {
             request.header("x-api-key", credential)
         }
