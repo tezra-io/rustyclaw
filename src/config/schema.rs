@@ -1749,15 +1749,28 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Load config using the default home directory resolution:
+    /// `RUSTYCLAW_HOME` env → `~/.rustyclaw/`.
     pub fn load_or_init() -> Result<Self> {
-        let home = UserDirs::new()
-            .map(|u| u.home_dir().to_path_buf())
-            .context("Could not find home directory")?;
-        let rustyclaw_dir = home.join(".rustyclaw");
+        let rustyclaw_dir = resolve_home_dir()?;
         let config_path = rustyclaw_dir.join("config.toml");
+        Self::load_or_init_from(rustyclaw_dir, config_path)
+    }
 
+    /// Load config from an explicit config file path.
+    /// The parent directory of `config_path` is used as the rustyclaw home.
+    pub fn load_with_path(config_path: PathBuf) -> Result<Self> {
+        let config_path = fs::canonicalize(&config_path).unwrap_or(config_path);
+        let rustyclaw_dir = config_path
+            .parent()
+            .context("Config path must have a parent directory")?
+            .to_path_buf();
+        Self::load_or_init_from(rustyclaw_dir, config_path)
+    }
+
+    fn load_or_init_from(rustyclaw_dir: PathBuf, config_path: PathBuf) -> Result<Self> {
         if !rustyclaw_dir.exists() {
-            fs::create_dir_all(&rustyclaw_dir).context("Failed to create .rustyclaw directory")?;
+            fs::create_dir_all(&rustyclaw_dir).context("Failed to create rustyclaw directory")?;
             fs::create_dir_all(rustyclaw_dir.join("workspace"))
                 .context("Failed to create workspace directory")?;
         }
@@ -2118,6 +2131,20 @@ pub fn default_model_for_provider(provider: &str) -> String {
         // openrouter and anything else
         _ => "anthropic/claude-sonnet-4-20250514".into(),
     }
+}
+
+/// Resolve the RustyClaw home directory.
+/// Priority: `RUSTYCLAW_HOME` env var → `~/.rustyclaw/`.
+fn resolve_home_dir() -> Result<PathBuf> {
+    if let Ok(env_home) = std::env::var("RUSTYCLAW_HOME") {
+        if !env_home.is_empty() {
+            return Ok(PathBuf::from(env_home));
+        }
+    }
+    let home = UserDirs::new()
+        .map(|u| u.home_dir().to_path_buf())
+        .context("Could not find home directory")?;
+    Ok(home.join(".rustyclaw"))
 }
 
 /// Encrypt an `Option<String>` field if not already encrypted.
@@ -2605,6 +2632,57 @@ tool_dispatcher = "xml"
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_with_path_uses_explicit_config() {
+        let dir = std::env::temp_dir()
+            .join(format!("rustyclaw_load_path_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        // Write a minimal config
+        let config_path = dir.join("custom.toml");
+        let mut config = Config::default();
+        config.config_path = config_path.clone();
+        config.workspace_dir = dir.join("workspace");
+        config.default_model = Some("custom-model".into());
+        config.save().unwrap();
+
+        // Load via explicit path
+        let loaded = Config::load_with_path(config_path).unwrap();
+        assert_eq!(loaded.default_model.as_deref(), Some("custom-model"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_home_dir_defaults_to_home() {
+        // Ensure RUSTYCLAW_HOME is not set for this test
+        let had_env = std::env::var("RUSTYCLAW_HOME").ok();
+        std::env::remove_var("RUSTYCLAW_HOME");
+
+        let dir = resolve_home_dir().unwrap();
+        assert!(
+            dir.to_string_lossy().ends_with(".rustyclaw"),
+            "Should default to ~/.rustyclaw, got {:?}",
+            dir
+        );
+
+        // Restore env if it was set
+        if let Some(val) = had_env {
+            std::env::set_var("RUSTYCLAW_HOME", val);
+        }
+    }
+
+    #[test]
+    fn resolve_home_dir_respects_env() {
+        let custom = std::env::temp_dir().join("rustyclaw_home_test");
+        std::env::set_var("RUSTYCLAW_HOME", custom.to_str().unwrap());
+
+        let dir = resolve_home_dir().unwrap();
+        assert_eq!(dir, custom);
+
+        std::env::remove_var("RUSTYCLAW_HOME");
     }
 
     #[test]

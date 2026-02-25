@@ -68,6 +68,7 @@ mod tunnel;
 mod util;
 
 use config::Config;
+use std::path::PathBuf;
 
 // Re-export so binary's hardware/peripherals modules can use crate::HardwareCommands etc.
 pub use rustyclaw::{AgentSubCommands, HardwareCommands, PeripheralCommands};
@@ -79,6 +80,10 @@ pub use rustyclaw::{AgentSubCommands, HardwareCommands, PeripheralCommands};
 #[command(version = "0.1.0")]
 #[command(about = "The fastest, smallest AI assistant.", long_about = None)]
 struct Cli {
+    /// Path to config file (overrides RUSTYCLAW_HOME and default ~/.rustyclaw/config.toml)
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -398,7 +403,11 @@ async fn main() -> Result<()> {
     }
 
     // All other commands need config loaded first
-    let mut config = Config::load_or_init()?;
+    let mut config = if let Some(ref config_path) = cli.config {
+        Config::load_with_path(config_path.clone())?
+    } else {
+        Config::load_or_init()?
+    };
     config.apply_env_overrides();
 
     match cli.command {
