@@ -72,6 +72,24 @@ pub fn run_wizard() -> Result<Config> {
     print_step(1, 9, "Workspace Setup");
     let (workspace_dir, config_path) = setup_workspace()?;
 
+    // Warn if an existing config will be overwritten by this wizard run
+    if config_path.exists() {
+        if let Some(parent) = config_path.parent() {
+            let backup_path = parent.join("config.toml.bak");
+            println!(
+                "  {} Existing config detected — a backup will be saved to {}",
+                style("ℹ").cyan(),
+                style(backup_path.display()).dim()
+            );
+        }
+        println!(
+            "  {} {}",
+            style("ℹ").cyan(),
+            style("Completing the wizard will replace your current settings.").dim()
+        );
+        println!();
+    }
+
     print_step(2, 9, "AI Provider & API Key");
     let (provider, api_key, model) = setup_provider(&workspace_dir)?;
 
@@ -308,6 +326,59 @@ pub fn run_quick_setup(
     let config_path = rustyclaw_dir.join("config.toml");
 
     fs::create_dir_all(&workspace_dir).context("Failed to create workspace directory")?;
+
+    // ── Guard: warn before silently overwriting an existing config ──────────
+    if config_path.exists() {
+        let backup_path = rustyclaw_dir.join("config.toml.bak");
+        println!(
+            "  {} Existing config detected: {}",
+            style("⚠").yellow().bold(),
+            style(config_path.display()).yellow()
+        );
+        println!(
+            "  {} A backup will be saved to: {}",
+            style("ℹ").cyan(),
+            style(backup_path.display()).dim()
+        );
+        println!(
+            "  {} Continuing will replace ALL current settings with new defaults.",
+            style("⚠").yellow().bold()
+        );
+        println!();
+
+        let overwrite = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            Confirm::new()
+                .with_prompt("  Config already exists — overwrite with new defaults?")
+                .default(false)
+                .interact()?
+        } else {
+            // Non-TTY (piped/script): safe default is to refuse.
+            println!(
+                "  {} Non-interactive mode: refusing to overwrite existing config without confirmation.",
+                style("✗").red().bold()
+            );
+            println!(
+                "  {} Run interactively to confirm, or delete the config manually first.",
+                style("→").dim()
+            );
+            false
+        };
+
+        if !overwrite {
+            println!();
+            println!(
+                "  {} Aborted — existing config unchanged.",
+                style("✓").green().bold()
+            );
+            println!(
+                "  {} Use --interactive for the full wizard, or delete {} to start fresh.",
+                style("→").dim(),
+                style(config_path.display()).yellow()
+            );
+            println!();
+            return Config::load_or_init();
+        }
+    }
 
     let provider_name = provider.unwrap_or("openrouter").to_string();
     let model = default_model_for_provider(&provider_name);

@@ -1974,9 +1974,10 @@ impl Config {
 
         sync_directory(parent_dir)?;
 
-        if had_existing_config {
-            let _ = fs::remove_file(&backup_path);
-        }
+        // Intentionally keep the .bak file so users can recover from accidental
+        // overwrites. The backup always reflects the config state before the last
+        // save(), giving users a one-step rollback path:
+        //   cp ~/.rustyclaw/config.toml.bak ~/.rustyclaw/config.toml
 
         Ok(())
     }
@@ -2311,8 +2312,22 @@ tool_dispatcher = "xml"
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
             .collect();
+
+        // Temp files must always be cleaned up.
         assert!(!names.iter().any(|name| name.contains(".tmp-")));
-        assert!(!names.iter().any(|name| name.ends_with(".bak")));
+
+        // The .bak file is intentionally kept so users can recover from
+        // accidental overwrites.  It should exist and contain the previous config.
+        assert!(
+            names.iter().any(|name| name.ends_with(".bak")),
+            "config.toml.bak should be kept for user recovery"
+        );
+        let bak_path = dir.join("config.toml.bak");
+        let bak_contents = fs::read_to_string(&bak_path).unwrap();
+        assert!(
+            bak_contents.contains("model-a"),
+            ".bak should contain the previous config version"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
