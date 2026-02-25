@@ -1782,7 +1782,7 @@ impl Config {
                 use std::os::unix::fs::PermissionsExt;
                 if let Ok(meta) = fs::metadata(&config_path) {
                     if meta.permissions().mode() & 0o004 != 0 {
-                        tracing::warn!(
+                        tracing::debug!(
                             "Config file {:?} is world-readable (mode {:o}). Consider: chmod 600 {:?}",
                             config_path,
                             meta.permissions().mode() & 0o777,

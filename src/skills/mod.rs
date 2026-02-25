@@ -221,7 +221,7 @@ fn ensure_open_skills_repo() -> Option<PathBuf> {
         if pull_open_skills_repo(&repo_dir) {
             let _ = mark_open_skills_synced(&repo_dir);
         } else {
-            tracing::warn!(
+            tracing::debug!(
                 "open-skills update failed; using local copy from {}",
                 repo_dir.display()
             );
@@ -280,11 +280,11 @@ fn pull_open_skills_repo(repo_dir: &Path) -> bool {
         Ok(result) if result.status.success() => true,
         Ok(result) => {
             let stderr = String::from_utf8_lossy(&result.stderr);
-            tracing::warn!("failed to pull open-skills updates: {stderr}");
+            tracing::debug!("failed to pull open-skills updates: {stderr}");
             false
         }
         Err(err) => {
-            tracing::warn!("failed to run git pull for open-skills: {err}");
+            tracing::debug!("failed to run git pull for open-skills: {err}");
             false
         }
     }
