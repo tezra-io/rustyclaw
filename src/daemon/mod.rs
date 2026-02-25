@@ -41,6 +41,14 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
 
     let agent_count = persistent_agents.len();
 
+    // Populate delegation ACLs from agent definitions
+    for def in &persistent_agents {
+        if !def.delegates_to.is_empty() {
+            bus.set_delegation_acl(&def.name, def.delegates_to.clone())
+                .await;
+        }
+    }
+
     for definition in persistent_agents {
         let agent_name = definition.name.clone();
         let agent_bus = bus.clone();

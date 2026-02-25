@@ -31,18 +31,36 @@ pub enum MessageKind {
 
 /// Inter-agent message bus using tokio mpsc channels.
 ///
-/// Design: the bus is intentionally "dumb" — it routes messages to registered
-/// agents by name but does NOT enforce delegation rules. Callers should verify
-/// permissions before sending.
+/// Routes messages to registered agents by name with optional delegation ACL.
+/// When an ACL entry exists for a target agent, only agents listed in its
+/// `delegates_to` set (plus "cron") may send `Delegate` messages to it.
 pub struct AgentBus {
     senders: Arc<RwLock<HashMap<String, mpsc::Sender<AgentMessage>>>>,
+    /// Optional delegation ACL: maps agent name → set of agents allowed to
+    /// send Delegate messages to it. Populated from AgentDefinition.delegates_to.
+    /// If an agent has no entry here, delegation is unrestricted (open).
+    delegation_acl: Arc<RwLock<HashMap<String, std::collections::HashSet<String>>>>,
 }
 
 impl AgentBus {
     pub fn new() -> Self {
         Self {
             senders: Arc::new(RwLock::new(HashMap::new())),
+            delegation_acl: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Set delegation ACL for an agent: only the listed agents (plus "cron")
+    /// may send `Delegate` messages to `agent_name`. An empty `allowed` vec
+    /// means no agent may delegate to it. Call with no entry to leave open.
+    pub async fn set_delegation_acl(&self, agent_name: &str, allowed: Vec<String>) {
+        let mut allowed_set: std::collections::HashSet<String> = allowed.into_iter().collect();
+        // "cron" is always permitted for scheduled tasks
+        allowed_set.insert("cron".to_string());
+        self.delegation_acl
+            .write()
+            .await
+            .insert(agent_name.to_string(), allowed_set);
     }
 
     /// Register an agent and get its message receiver
@@ -58,8 +76,25 @@ impl AgentBus {
     }
 
     /// Send a message to a specific agent.
-    /// Returns error if the target agent is not registered.
+    /// Returns error if the target agent is not registered or if delegation
+    /// ACL check fails for `Delegate` messages.
     pub async fn send(&self, msg: AgentMessage) -> Result<()> {
+        // Enforce delegation ACL for Delegate messages
+        if msg.kind == MessageKind::Delegate {
+            let acl = self.delegation_acl.read().await;
+            if let Some(allowed) = acl.get(&msg.to) {
+                if !allowed.contains(&msg.from) {
+                    return Err(anyhow::anyhow!(
+                        "Agent '{}' is not authorized to delegate to '{}'. \
+                         Allowed: {:?}",
+                        msg.from,
+                        msg.to,
+                        allowed
+                    ));
+                }
+            }
+        }
+
         let senders = self.senders.read().await;
         let sender = senders
             .get(&msg.to)
@@ -280,6 +315,116 @@ mod tests {
             let msg = rx.recv().await.unwrap();
             assert_eq!(msg.payload, format!("msg-{i}"));
         }
+    }
+
+    #[tokio::test]
+    async fn delegation_acl_blocks_unauthorized() {
+        let bus = AgentBus::new();
+        let _rx = bus.register("worker", 10).await;
+        // Only "manager" may delegate to "worker"
+        bus.set_delegation_acl("worker", vec!["manager".to_string()])
+            .await;
+
+        let result = bus
+            .send(AgentMessage {
+                id: Uuid::new_v4(),
+                from: "rogue".into(),
+                to: "worker".into(),
+                kind: MessageKind::Delegate,
+                payload: "hack".into(),
+                response_tx: None,
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not authorized"));
+    }
+
+    #[tokio::test]
+    async fn delegation_acl_allows_authorized() {
+        let bus = AgentBus::new();
+        let mut rx = bus.register("worker", 10).await;
+        bus.set_delegation_acl("worker", vec!["manager".to_string()])
+            .await;
+
+        bus.send(AgentMessage {
+            id: Uuid::new_v4(),
+            from: "manager".into(),
+            to: "worker".into(),
+            kind: MessageKind::Delegate,
+            payload: "task".into(),
+            response_tx: None,
+        })
+        .await
+        .unwrap();
+
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.payload, "task");
+    }
+
+    #[tokio::test]
+    async fn delegation_acl_always_allows_cron() {
+        let bus = AgentBus::new();
+        let mut rx = bus.register("worker", 10).await;
+        bus.set_delegation_acl("worker", vec!["manager".to_string()])
+            .await;
+
+        bus.send(AgentMessage {
+            id: Uuid::new_v4(),
+            from: "cron".into(),
+            to: "worker".into(),
+            kind: MessageKind::Delegate,
+            payload: "scheduled".into(),
+            response_tx: None,
+        })
+        .await
+        .unwrap();
+
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.payload, "scheduled");
+    }
+
+    #[tokio::test]
+    async fn non_delegate_messages_bypass_acl() {
+        let bus = AgentBus::new();
+        let mut rx = bus.register("worker", 10).await;
+        bus.set_delegation_acl("worker", vec!["manager".to_string()])
+            .await;
+
+        // Notify messages should not be blocked by delegation ACL
+        bus.send(AgentMessage {
+            id: Uuid::new_v4(),
+            from: "rogue".into(),
+            to: "worker".into(),
+            kind: MessageKind::Notify,
+            payload: "ping".into(),
+            response_tx: None,
+        })
+        .await
+        .unwrap();
+
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.payload, "ping");
+    }
+
+    #[tokio::test]
+    async fn no_acl_entry_means_open() {
+        let bus = AgentBus::new();
+        let mut rx = bus.register("open-agent", 10).await;
+        // No ACL set for "open-agent" — should allow any delegator
+
+        bus.send(AgentMessage {
+            id: Uuid::new_v4(),
+            from: "anyone".into(),
+            to: "open-agent".into(),
+            kind: MessageKind::Delegate,
+            payload: "task".into(),
+            response_tx: None,
+        })
+        .await
+        .unwrap();
+
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.payload, "task");
     }
 
     #[tokio::test]
