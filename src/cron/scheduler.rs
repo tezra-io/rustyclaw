@@ -46,7 +46,7 @@ pub async fn run(config: Config, bus: Option<Arc<AgentBus>>) -> Result<()> {
         };
 
         if !jobs.is_empty() {
-            process_due_jobs(&config, &security, jobs, bus.as_deref()).await;
+            process_due_jobs(&config, &security, jobs, bus.clone()).await;
         }
     }
 }
@@ -56,19 +56,20 @@ async fn process_due_jobs(
     config: &Config,
     security: &Arc<SecurityPolicy>,
     jobs: Vec<CronJob>,
-    bus: Option<&AgentBus>,
+    bus: Option<Arc<AgentBus>>,
 ) {
     let max_concurrent = config.scheduler.max_concurrent.max(1);
 
-    // Collect bus reference as an Option<Arc<AgentBus>> so it can be moved into futures.
-    // AgentBus is not Clone, so we skip bus-delegated jobs from concurrent execution for now.
+    // Clone the Arc<AgentBus> into each future so all jobs (including agent: jobs)
+    // run concurrently with full bus access.
     let mut in_flight = stream::iter(jobs.into_iter().map(|job| {
         let config = config.clone();
         let security = Arc::clone(security);
+        let bus = bus.clone();
         async move {
             let job_id = job.id.clone();
             let (success, output) =
-                execute_job_with_retry(&config, &security, &job, None).await;
+                execute_job_with_retry(&config, &security, &job, bus.as_deref()).await;
             if let Err(e) = reschedule_after_run(&config, &job, success, &output) {
                 tracing::warn!("Failed to persist run result for {job_id}: {e}");
             }
@@ -84,9 +85,6 @@ async fn process_due_jobs(
             crate::health::mark_component_error("scheduler", format!("job {job_id} failed"));
         }
     }
-
-    // Run bus-delegated jobs sequentially (bus is not Clone/Send across futures easily)
-    let _ = bus; // bus support for concurrent path is a follow-up
 }
 
 async fn execute_job_with_retry(
