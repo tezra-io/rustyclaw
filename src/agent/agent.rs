@@ -34,6 +34,7 @@ pub struct Agent {
     auto_save: bool,
     history: Vec<ConversationMessage>,
     turn_count: u64,
+    session_store: Option<super::session::SessionStore>,
 }
 
 pub struct AgentBuilder {
@@ -51,6 +52,7 @@ pub struct AgentBuilder {
     identity_config: Option<crate::config::IdentityConfig>,
     skills: Option<Vec<crate::skills::Skill>>,
     auto_save: Option<bool>,
+    session_store: Option<super::session::SessionStore>,
 }
 
 impl AgentBuilder {
@@ -70,6 +72,7 @@ impl AgentBuilder {
             identity_config: None,
             skills: None,
             auto_save: None,
+            session_store: None,
         }
     }
 
@@ -143,13 +146,18 @@ impl AgentBuilder {
         self
     }
 
+    pub fn session_store(mut self, store: super::session::SessionStore) -> Self {
+        self.session_store = Some(store);
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let tools = self
             .tools
             .ok_or_else(|| anyhow::anyhow!("tools are required"))?;
         let tool_specs = tools.iter().map(|tool| tool.spec()).collect();
 
-        Ok(Agent {
+        let mut agent = Agent {
             provider: self
                 .provider
                 .ok_or_else(|| anyhow::anyhow!("provider is required"))?,
@@ -183,7 +191,27 @@ impl AgentBuilder {
             auto_save: self.auto_save.unwrap_or(false),
             history: Vec::new(),
             turn_count: 0,
-        })
+            session_store: self.session_store,
+        };
+
+        // Load persisted session history if a session store is configured
+        if let Some(ref store) = agent.session_store {
+            match store.load() {
+                Ok(history) if !history.is_empty() => {
+                    tracing::info!(
+                        "Restored {} messages from session",
+                        history.len()
+                    );
+                    agent.history = history;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!("Failed to load session history: {e}");
+                }
+            }
+        }
+
+        Ok(agent)
     }
 }
 
@@ -198,6 +226,20 @@ impl Agent {
 
     pub fn clear_history(&mut self) {
         self.history.clear();
+        if let Some(ref store) = self.session_store {
+            if let Err(e) = store.clear() {
+                tracing::warn!("Failed to clear session file: {e}");
+            }
+        }
+    }
+
+    /// Persist current history to the session store (if configured).
+    fn persist_session(&self) {
+        if let Some(ref store) = self.session_store {
+            if let Err(e) = store.save_all(&self.history) {
+                tracing::warn!("Failed to persist session: {e}");
+            }
+        }
     }
 
     pub fn from_config(config: &Config) -> Result<Self> {
@@ -445,6 +487,7 @@ impl Agent {
                         final_text.clone(),
                     )));
                 self.trim_history();
+                self.persist_session();
 
                 if self.auto_save {
                     let asst_key = format!("conv_{}_{}_asst", self.turn_count, turn_ts);
@@ -477,6 +520,7 @@ impl Agent {
             let formatted = self.tool_dispatcher.format_results(&results);
             self.history.push(formatted);
             self.trim_history();
+            self.persist_session();
         }
 
         anyhow::bail!(

@@ -11,6 +11,7 @@ pub mod personalization;
 pub mod prompt;
 pub mod registry;
 pub mod runner;
+pub mod session;
 
 #[allow(unused_imports)]
 pub use agent::{Agent, AgentBuilder};

@@ -157,6 +157,11 @@ pub async fn run_persistent_agent(
 
     let agent_skills = load_agent_skills(&definition.skills, &config.workspace_dir);
 
+    // Session store for persistent agents — resumes history across restarts
+    let agent_data_dir = agents_dir.join(&agent_name);
+    std::fs::create_dir_all(&agent_data_dir)?;
+    let session_store = super::session::SessionStore::new(&agent_data_dir);
+
     let mut agent = Agent::builder()
         .provider(provider)
         .tools(tools)
@@ -171,6 +176,7 @@ pub async fn run_persistent_agent(
         .workspace_dir(config.workspace_dir.clone())
         .identity_config(config.identity.clone())
         .skills(agent_skills)
+        .session_store(session_store)
         .build()?;
 
     // ── Register on bus ──
@@ -199,8 +205,8 @@ pub async fn run_persistent_agent(
                             );
                         }
 
-                        // Clear history between delegations for clean context
-                        agent.clear_history();
+                        // History is persisted to session store after each turn
+                        // (no more clear_history — agents now resume context)
                     }
                     MessageKind::Shutdown => {
                         tracing::info!(agent = %agent_name, "Shutdown requested via bus");
