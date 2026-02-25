@@ -6,9 +6,10 @@ use crate::tools::ToolSpec;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
 
 pub struct AnthropicProvider {
-    credential: Option<String>,
+    credential: RwLock<Option<String>>,
     base_url: String,
     client: Client,
 }
@@ -161,10 +162,12 @@ impl AnthropicProvider {
             .unwrap_or("https://api.anthropic.com")
             .to_string();
         Self {
-            credential: api_key
-                .map(str::trim)
-                .filter(|k| !k.is_empty())
-                .map(ToString::to_string),
+            credential: RwLock::new(
+                api_key
+                    .map(str::trim)
+                    .filter(|k| !k.is_empty())
+                    .map(ToString::to_string),
+            ),
             base_url,
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -176,6 +179,19 @@ impl AnthropicProvider {
 
     fn is_setup_token(token: &str) -> bool {
         token.starts_with("sk-ant-oat01-")
+    }
+
+    /// Get the current credential, returning an error if not set.
+    fn get_credential(&self) -> anyhow::Result<String> {
+        self.credential
+            .read()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Anthropic credentials not set. Set ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN (setup-token)."
+                )
+            })
     }
 
     fn apply_auth(
@@ -190,6 +206,62 @@ impl AnthropicProvider {
         } else {
             request.header("x-api-key", credential)
         }
+    }
+
+    /// Try to read a fresh OAT token from Claude Code's macOS keychain entry.
+    /// Returns `Some(token)` if found and valid, `None` otherwise.
+    #[cfg(target_os = "macos")]
+    fn try_refresh_from_keychain() -> Option<String> {
+        let output = std::process::Command::new("security")
+            .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let json_str = String::from_utf8(output.stdout).ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(json_str.trim()).ok()?;
+        let token = parsed
+            .get("claudeAiOauth")?
+            .get("accessToken")?
+            .as_str()?;
+
+        if Self::is_setup_token(token) {
+            tracing::info!("Refreshed OAT token from Claude Code keychain");
+            Some(token.to_string())
+        } else {
+            None
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn try_refresh_from_keychain() -> Option<String> {
+        None
+    }
+
+    /// Attempt to refresh the stored credential on 401. Returns true if refreshed.
+    fn try_refresh_credential(&self) -> bool {
+        let current = self.credential.read().unwrap().clone();
+        // Only attempt refresh for OAT tokens
+        if !current.as_deref().is_some_and(Self::is_setup_token) {
+            return false;
+        }
+
+        if let Some(fresh_token) = Self::try_refresh_from_keychain() {
+            if current.as_deref() != Some(&fresh_token) {
+                *self.credential.write().unwrap() = Some(fresh_token);
+                return true;
+            }
+        }
+
+        tracing::warn!(
+            "OAuth token expired and could not be refreshed. \
+             On macOS, install Claude Code and authenticate. \
+             Otherwise, set a fresh token via `rustyclaw onboard`."
+        );
+        false
     }
 
     // ── Prompt caching helpers ──────────────────────────────────
@@ -420,13 +492,9 @@ impl Provider for AnthropicProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
-        let credential = self.credential.as_ref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "Anthropic credentials not set. Set ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN (setup-token)."
-            )
-        })?;
+        let credential = self.get_credential()?;
 
-        let request = ChatRequest {
+        let body = ChatRequest {
             model: model.to_string(),
             max_tokens: 4096,
             system: system_prompt.map(ToString::to_string),
@@ -437,16 +505,34 @@ impl Provider for AnthropicProvider {
             temperature,
         };
 
-        let mut request = self
+        let request = self
             .client
             .post(format!("{}/v1/messages", self.base_url))
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&request);
+            .json(&body);
 
-        request = self.apply_auth(request, credential);
+        let response = self.apply_auth(request, &credential).send().await?;
 
-        let response = request.send().await?;
+        // On 401 with OAT token, try keychain refresh and retry once
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED
+            && Self::is_setup_token(&credential)
+            && self.try_refresh_credential()
+        {
+            let fresh = self.get_credential()?;
+            let retry = self
+                .client
+                .post(format!("{}/v1/messages", self.base_url))
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .json(&body);
+            let response = self.apply_auth(retry, &fresh).send().await?;
+            if !response.status().is_success() {
+                return Err(super::api_error("Anthropic", response).await);
+            }
+            let chat_response: ChatResponse = response.json().await?;
+            return Self::parse_text_response(chat_response);
+        }
 
         if !response.status().is_success() {
             return Err(super::api_error("Anthropic", response).await);
@@ -462,11 +548,7 @@ impl Provider for AnthropicProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<ProviderChatResponse> {
-        let credential = self.credential.as_ref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "Anthropic credentials not set. Set ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN (setup-token)."
-            )
-        })?;
+        let credential = self.get_credential()?;
 
         let (system_prompt, mut messages) = Self::convert_messages(request.messages);
 
@@ -491,7 +573,28 @@ impl Provider for AnthropicProvider {
             .header("content-type", "application/json")
             .json(&native_request);
 
-        let response = self.apply_auth(req, credential).send().await?;
+        let response = self.apply_auth(req, &credential).send().await?;
+
+        // On 401 with OAT token, try keychain refresh and retry once
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED
+            && Self::is_setup_token(&credential)
+            && self.try_refresh_credential()
+        {
+            let fresh = self.get_credential()?;
+            let retry = self
+                .client
+                .post(format!("{}/v1/messages", self.base_url))
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .json(&native_request);
+            let response = self.apply_auth(retry, &fresh).send().await?;
+            if !response.status().is_success() {
+                return Err(super::api_error("Anthropic", response).await);
+            }
+            let native_response: NativeChatResponse = response.json().await?;
+            return Ok(Self::parse_native_response(native_response));
+        }
+
         if !response.status().is_success() {
             return Err(super::api_error("Anthropic", response).await);
         }
@@ -512,29 +615,29 @@ mod tests {
     #[test]
     fn creates_with_key() {
         let p = AnthropicProvider::new(Some("sk-ant-test123"));
-        assert!(p.credential.is_some());
-        assert_eq!(p.credential.as_deref(), Some("sk-ant-test123"));
+        assert!(p.credential.read().unwrap().is_some());
+        assert_eq!(p.credential.read().unwrap().as_deref(), Some("sk-ant-test123"));
         assert_eq!(p.base_url, "https://api.anthropic.com");
     }
 
     #[test]
     fn creates_without_key() {
         let p = AnthropicProvider::new(None);
-        assert!(p.credential.is_none());
+        assert!(p.credential.read().unwrap().is_none());
         assert_eq!(p.base_url, "https://api.anthropic.com");
     }
 
     #[test]
     fn creates_with_empty_key() {
         let p = AnthropicProvider::new(Some(""));
-        assert!(p.credential.is_none());
+        assert!(p.credential.read().unwrap().is_none());
     }
 
     #[test]
     fn creates_with_whitespace_key() {
         let p = AnthropicProvider::new(Some("  sk-ant-test123  "));
-        assert!(p.credential.is_some());
-        assert_eq!(p.credential.as_deref(), Some("sk-ant-test123"));
+        assert!(p.credential.read().unwrap().is_some());
+        assert_eq!(p.credential.read().unwrap().as_deref(), Some("sk-ant-test123"));
     }
 
     #[test]
@@ -542,7 +645,7 @@ mod tests {
         let p =
             AnthropicProvider::with_base_url(Some("sk-ant-test"), Some("https://api.example.com"));
         assert_eq!(p.base_url, "https://api.example.com");
-        assert_eq!(p.credential.as_deref(), Some("sk-ant-test"));
+        assert_eq!(p.credential.read().unwrap().as_deref(), Some("sk-ant-test"));
     }
 
     #[test]
@@ -900,5 +1003,35 @@ mod tests {
             headers.get("anthropic-beta").is_none(),
             "Regular API keys should not include oauth beta header"
         );
+    }
+
+    #[test]
+    fn try_refresh_credential_skips_regular_api_keys() {
+        let provider = AnthropicProvider::new(Some("sk-ant-api03-regularkey"));
+        // Should not attempt refresh for non-OAT tokens
+        assert!(!provider.try_refresh_credential());
+        // Credential should remain unchanged
+        assert_eq!(
+            provider.credential.read().unwrap().as_deref(),
+            Some("sk-ant-api03-regularkey")
+        );
+    }
+
+    #[test]
+    fn try_refresh_credential_skips_when_no_credential() {
+        let provider = AnthropicProvider::new(None);
+        assert!(!provider.try_refresh_credential());
+    }
+
+    #[test]
+    fn get_credential_returns_stored_value() {
+        let provider = AnthropicProvider::new(Some("sk-ant-oat01-test"));
+        assert_eq!(provider.get_credential().unwrap(), "sk-ant-oat01-test");
+    }
+
+    #[test]
+    fn get_credential_errors_when_none() {
+        let provider = AnthropicProvider::new(None);
+        assert!(provider.get_credential().is_err());
     }
 }
