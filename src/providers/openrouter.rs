@@ -249,7 +249,8 @@ impl Provider for OpenRouterProvider {
                 .get("https://openrouter.ai/api/v1/auth/key")
                 .header("Authorization", format!("Bearer {api_key}"))
                 .send()
-                .await?
+                .await
+                .map_err(|e| super::connection_error("OpenRouter", e))?
                 .error_for_status()?;
         }
         Ok(())
@@ -296,7 +297,8 @@ impl Provider for OpenRouterProvider {
             .header("X-Title", "RustyClaw")
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error("OpenRouter", e))?;
 
         if !response.status().is_success() {
             return Err(super::api_error("OpenRouter", response).await);
@@ -346,7 +348,8 @@ impl Provider for OpenRouterProvider {
             .header("X-Title", "RustyClaw")
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error("OpenRouter", e))?;
 
         if !response.status().is_success() {
             return Err(super::api_error("OpenRouter", response).await);
@@ -394,7 +397,8 @@ impl Provider for OpenRouterProvider {
             .header("X-Title", "RustyClaw")
             .json(&native_request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error("OpenRouter", e))?;
 
         if !response.status().is_success() {
             return Err(super::api_error("OpenRouter", response).await);

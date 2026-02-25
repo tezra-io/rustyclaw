@@ -274,7 +274,8 @@ impl Provider for OpenAiProvider {
             .header("Authorization", format!("Bearer {api_key}"))
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error("OpenAI", e))?;
 
         if !response.status().is_success() {
             return Err(super::api_error("OpenAI", response).await);
@@ -315,7 +316,8 @@ impl Provider for OpenAiProvider {
             .header("Authorization", format!("Bearer {api_key}"))
             .json(&native_request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error("OpenAI", e))?;
 
         if !response.status().is_success() {
             return Err(super::api_error("OpenAI", response).await);

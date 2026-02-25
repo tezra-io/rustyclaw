@@ -293,7 +293,8 @@ impl OpenAiCompatibleProvider {
         let response = self
             .apply_auth_header(self.client.post(&url).json(&request), api_key)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error(&self.name, e))?;
 
         if !response.status().is_success() {
             let error = response.text().await?;
@@ -349,7 +350,8 @@ impl Provider for OpenAiCompatibleProvider {
         let response = self
             .apply_auth_header(self.client.post(&url).json(&request), api_key)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error(&self.name, e))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -428,7 +430,8 @@ impl Provider for OpenAiCompatibleProvider {
         let response = self
             .apply_auth_header(self.client.post(&url).json(&request), api_key)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error(&self.name, e))?;
 
         if !response.status().is_success() {
             let status = response.status();

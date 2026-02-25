@@ -85,7 +85,8 @@ impl Provider for OllamaProvider {
 
         let url = format!("{}/api/chat", self.base_url);
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self.client.post(&url).json(&request).send().await
+            .map_err(|e| super::connection_error("Ollama", e))?;
 
         if !response.status().is_success() {
             let err = super::api_error("Ollama", response).await;

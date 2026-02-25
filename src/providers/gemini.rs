@@ -298,7 +298,8 @@ impl Provider for GeminiProvider {
         let response = self
             .build_generate_content_request(auth, &url, &request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| super::connection_error("Gemini", e))?;
 
         if !response.status().is_success() {
             let status = response.status();

@@ -16,6 +16,7 @@ pub use traits::{
 
 use compatible::{AuthStyle, OpenAiCompatibleProvider};
 use reliable::ReliableProvider;
+use std::error::Error as _;
 
 const MAX_API_ERROR_CHARS: usize = 200;
 
@@ -87,12 +88,44 @@ pub fn sanitize_api_error(input: &str) -> String {
 /// Build a sanitized provider error from a failed HTTP response.
 pub async fn api_error(provider: &str, response: reqwest::Response) -> anyhow::Error {
     let status = response.status();
+    let hint = match status.as_u16() {
+        401 => " (check your API key)",
+        403 => " (forbidden — your key may lack required permissions)",
+        429 => " (rate limited — try again shortly)",
+        500..=599 => " (provider server error — retry may help)",
+        _ => "",
+    };
     let body = response
         .text()
         .await
         .unwrap_or_else(|_| "<failed to read provider error body>".to_string());
     let sanitized = sanitize_api_error(&body);
-    anyhow::anyhow!("{provider} API error ({status}): {sanitized}")
+    anyhow::anyhow!("{provider} API error ({status}){hint}: {sanitized}")
+}
+
+/// Classify a `reqwest::Error` into a user-friendly provider connection error.
+pub fn connection_error(provider: &str, err: reqwest::Error) -> anyhow::Error {
+    if err.is_timeout() {
+        return anyhow::anyhow!(
+            "{provider} request timed out. Check your network connection or try again."
+        );
+    }
+    if err.is_connect() {
+        let source_msg = err
+            .source()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if source_msg.contains("dns") || source_msg.contains("resolve") || source_msg.contains("Name or service not known") {
+            return anyhow::anyhow!(
+                "{provider} DNS resolution failed. Check your internet connection and provider URL."
+            );
+        }
+        return anyhow::anyhow!(
+            "{provider} connection failed: {source_msg}. Check your network or firewall settings."
+        );
+    }
+    // Fall through — return the original error with provider context
+    anyhow::anyhow!("{provider} request failed: {err}")
 }
 
 /// Resolve API key for a provider from config and environment variables.

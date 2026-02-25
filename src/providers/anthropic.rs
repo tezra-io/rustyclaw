@@ -515,7 +515,8 @@ impl Provider for AnthropicProvider {
             .header("content-type", "application/json")
             .json(&body);
 
-        let response = self.apply_auth(request, &credential).send().await?;
+        let response = self.apply_auth(request, &credential).send().await
+            .map_err(|e| super::connection_error("Anthropic", e))?;
 
         // On 401 with OAT token, try keychain refresh and retry once
         if response.status() == reqwest::StatusCode::UNAUTHORIZED
@@ -529,7 +530,8 @@ impl Provider for AnthropicProvider {
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
                 .json(&body);
-            let response = self.apply_auth(retry, &fresh).send().await?;
+            let response = self.apply_auth(retry, &fresh).send().await
+                .map_err(|e| super::connection_error("Anthropic", e))?;
             if !response.status().is_success() {
                 return Err(super::api_error("Anthropic", response).await);
             }
@@ -590,7 +592,8 @@ impl Provider for AnthropicProvider {
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
                 .json(&native_request);
-            let response = self.apply_auth(retry, &fresh).send().await?;
+            let response = self.apply_auth(retry, &fresh).send().await
+                .map_err(|e| super::connection_error("Anthropic", e))?;
             if !response.status().is_success() {
                 return Err(super::api_error("Anthropic", response).await);
             }
