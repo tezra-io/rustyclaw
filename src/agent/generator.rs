@@ -27,9 +27,13 @@ pub async fn generate_definition(description: &str, config: &Config) -> Result<A
         .as_deref()
         .unwrap_or(&effective_model);
 
+    // Sanitize user description to prevent prompt injection:
+    // truncate to reasonable length and wrap in clear delimiters
+    let sanitized_desc = description.chars().take(500).collect::<String>();
+
     let prompt = format!(
-        "Generate an agent definition for this request:\n\n\
-         \"{description}\"\n\n\
+        "Generate an agent definition for the user request below.\n\n\
+         <user_request>\n{sanitized_desc}\n</user_request>\n\n\
          Available skills:\n{skills_list}\n\n\
          Respond with ONLY a markdown file containing YAML frontmatter (---) \
          and a personality section. Schema:\n\

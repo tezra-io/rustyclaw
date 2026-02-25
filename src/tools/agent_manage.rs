@@ -188,18 +188,13 @@ impl Tool for AgentManageTool {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("'task' required for delegate"))?;
 
-                if !self.bus.is_registered(name).await {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: format!("Agent '{name}' is not running. Start it first."),
-                        error: None,
-                    });
-                }
-
+                // Delegate directly — the bus returns a clear error if the agent
+                // is not registered, avoiding a TOCTOU race with a separate
+                // is_registered pre-check.
                 match self
                     .bus
                     .delegate(
-                        "main",
+                        "agent_manage",
                         name,
                         task,
                         Duration::from_secs(DELEGATION_TIMEOUT_SECS),
@@ -445,7 +440,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!result.success);
-        assert!(result.output.contains("not running"));
+        assert!(result.output.contains("Delegation failed"));
     }
 
     #[tokio::test]

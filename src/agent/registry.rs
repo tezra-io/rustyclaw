@@ -50,7 +50,7 @@ impl AgentRegistry {
         if path.exists() {
             anyhow::bail!("Agent '{}' already exists", definition.name);
         }
-        std::fs::write(&path, definition.to_markdown())?;
+        std::fs::write(&path, definition.to_markdown()?)?;
 
         // Create agent data directory for persistent agents
         if definition.persistent {
@@ -67,7 +67,7 @@ impl AgentRegistry {
         if !path.exists() {
             anyhow::bail!("Agent '{}' not found", definition.name);
         }
-        std::fs::write(&path, definition.to_markdown())?;
+        std::fs::write(&path, definition.to_markdown()?)?;
         Ok(())
     }
 

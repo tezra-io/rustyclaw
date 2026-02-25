@@ -141,9 +141,10 @@ impl AgentDefinition {
     }
 
     /// Serialize back to markdown + YAML frontmatter
-    pub fn to_markdown(&self) -> String {
-        let yaml = serde_yaml::to_string(self).unwrap_or_default();
-        format!("---\n{yaml}---\n\n{}", self.personality)
+    pub fn to_markdown(&self) -> Result<String> {
+        let yaml = serde_yaml::to_string(self)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize agent definition to YAML: {e}"))?;
+        Ok(format!("---\n{yaml}---\n\n{}", self.personality))
     }
 
     /// Validate the definition (check skill names exist, cron expression parses, etc.)
@@ -258,7 +259,7 @@ You manage my Twitter account. Post engaging content.
     fn roundtrip_to_markdown() {
         let md = "---\nname: test\npersistent: false\n---\nHello world";
         let def = AgentDefinition::parse(md).unwrap();
-        let out = def.to_markdown();
+        let out = def.to_markdown().unwrap();
         let def2 = AgentDefinition::parse(&out).unwrap();
         assert_eq!(def.name, def2.name);
         assert_eq!(def.persistent, def2.persistent);

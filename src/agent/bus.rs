@@ -63,10 +63,16 @@ impl AgentBus {
             .insert(agent_name.to_string(), allowed_set);
     }
 
-    /// Register an agent and get its message receiver
+    /// Register an agent and get its message receiver.
+    /// Logs a warning if replacing an existing registration (possible lifecycle bug).
     pub async fn register(&self, name: &str, buffer: usize) -> mpsc::Receiver<AgentMessage> {
         let (tx, rx) = mpsc::channel(buffer);
-        self.senders.write().await.insert(name.to_string(), tx);
+        if self.senders.write().await.insert(name.to_string(), tx).is_some() {
+            tracing::warn!(
+                "AgentBus: replaced existing registration for '{}' — previous receiver dropped",
+                name
+            );
+        }
         rx
     }
 

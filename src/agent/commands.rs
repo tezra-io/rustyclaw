@@ -60,7 +60,7 @@ pub async fn handle_command(command: crate::AgentSubCommands, config: &Config) -
                 println!();
                 println!("Generated agent definition:");
                 println!("{}", console::style("─".repeat(40)).dim());
-                println!("{}", definition.to_markdown());
+                println!("{}", definition.to_markdown()?);
                 println!("{}", console::style("─".repeat(40)).dim());
 
                 registry.create(&definition)?;
@@ -257,5 +257,270 @@ pub async fn handle_command(command: crate::AgentSubCommands, config: &Config) -
             );
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Build a Config pointing at a temp workspace so the registry resolves correctly.
+    fn test_config(tmp: &TempDir) -> Config {
+        let workspace = tmp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        // agents dir is a sibling of workspace
+        let agents = tmp.path().join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        Config {
+            workspace_dir: workspace,
+            ..Config::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn list_empty() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        handle_command(crate::AgentSubCommands::List, &config)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_and_list() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        handle_command(
+            crate::AgentSubCommands::Create {
+                name: Some("test-bot".into()),
+                persistent: false,
+                skills: None,
+                memory: None,
+                schedule: None,
+                allowed_tools: None,
+                from_description: None,
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        let registry = AgentRegistry::from_config(&config);
+        assert!(registry.exists("test-bot"));
+    }
+
+    #[tokio::test]
+    async fn create_requires_name() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let result = handle_command(
+            crate::AgentSubCommands::Create {
+                name: None,
+                persistent: false,
+                skills: None,
+                memory: None,
+                schedule: None,
+                allowed_tools: None,
+                from_description: None,
+            },
+            &config,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn remove_existing() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        handle_command(
+            crate::AgentSubCommands::Create {
+                name: Some("removable".into()),
+                persistent: false,
+                skills: None,
+                memory: None,
+                schedule: None,
+                allowed_tools: None,
+                from_description: None,
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        handle_command(
+            crate::AgentSubCommands::Remove {
+                name: "removable".into(),
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        let registry = AgentRegistry::from_config(&config);
+        assert!(!registry.exists("removable"));
+    }
+
+    #[tokio::test]
+    async fn remove_nonexistent_fails() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let result = handle_command(
+            crate::AgentSubCommands::Remove {
+                name: "ghost".into(),
+            },
+            &config,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn status_existing() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        handle_command(
+            crate::AgentSubCommands::Create {
+                name: Some("statusable".into()),
+                persistent: true,
+                skills: None,
+                memory: None,
+                schedule: None,
+                allowed_tools: None,
+                from_description: None,
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        handle_command(
+            crate::AgentSubCommands::Status {
+                name: "statusable".into(),
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn status_nonexistent_fails() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let result = handle_command(
+            crate::AgentSubCommands::Status {
+                name: "nope".into(),
+            },
+            &config,
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn skill_add_and_remove() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        handle_command(
+            crate::AgentSubCommands::Create {
+                name: Some("skilled".into()),
+                persistent: false,
+                skills: None,
+                memory: None,
+                schedule: None,
+                allowed_tools: None,
+                from_description: None,
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        handle_command(
+            crate::AgentSubCommands::SkillAdd {
+                agent: "skilled".into(),
+                skill: "twitter".into(),
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        let registry = AgentRegistry::from_config(&config);
+        let def = registry.get("skilled").unwrap();
+        assert!(def.skills.contains(&"twitter".to_string()));
+
+        handle_command(
+            crate::AgentSubCommands::SkillRemove {
+                agent: "skilled".into(),
+                skill: "twitter".into(),
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        let def = registry.get("skilled").unwrap();
+        assert!(!def.skills.contains(&"twitter".to_string()));
+    }
+
+    #[tokio::test]
+    async fn skill_add_duplicate_is_noop() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        handle_command(
+            crate::AgentSubCommands::Create {
+                name: Some("dup-skill".into()),
+                persistent: false,
+                skills: Some(vec!["web".into()]),
+                memory: None,
+                schedule: None,
+                allowed_tools: None,
+                from_description: None,
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        // Adding the same skill again should succeed (noop)
+        handle_command(
+            crate::AgentSubCommands::SkillAdd {
+                agent: "dup-skill".into(),
+                skill: "web".into(),
+            },
+            &config,
+        )
+        .await
+        .unwrap();
+
+        let registry = AgentRegistry::from_config(&config);
+        let def = registry.get("dup-skill").unwrap();
+        assert_eq!(def.skills.iter().filter(|s| *s == "web").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn edit_nonexistent_fails() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let result = handle_command(
+            crate::AgentSubCommands::Edit {
+                name: "nope".into(),
+            },
+            &config,
+        )
+        .await;
+        assert!(result.is_err());
     }
 }
