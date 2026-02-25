@@ -1803,6 +1803,7 @@ impl Config {
             let store = crate::security::SecretStore::new(&rustyclaw_dir, config.secrets.encrypt);
             config.decrypt_secrets(&store)?;
             config.apply_env_overrides();
+            reject_temp_workspace(&config.workspace_dir)?;
             Ok(config)
         } else {
             let mut config = Config::default();
@@ -2108,6 +2109,16 @@ impl Config {
 
         sync_directory(parent_dir)?;
 
+        // Enforce restrictive permissions — config may contain API keys.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(
+                &self.config_path,
+                fs::Permissions::from_mode(0o600),
+            );
+        }
+
         // Intentionally keep the .bak file so users can recover from accidental
         // overwrites. The backup always reflects the config state before the last
         // save(), giving users a one-step rollback path:
@@ -2200,6 +2211,28 @@ fn sync_directory(path: &Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn sync_directory(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+/// Reject workspace directories inside system temp paths.
+/// Temp directories are world-readable and periodically cleaned, making them
+/// unsuitable for storing agent data, memory, and credentials.
+fn reject_temp_workspace(workspace_dir: &Path) -> Result<()> {
+    let path_str = workspace_dir.to_string_lossy();
+    let is_temp = path_str.starts_with("/tmp/")
+        || path_str.starts_with("/var/tmp/")
+        || path_str.starts_with("/private/tmp/")
+        || std::env::var("TMPDIR")
+            .ok()
+            .map_or(false, |t| path_str.starts_with(&t));
+    if is_temp {
+        anyhow::bail!(
+            "Workspace directory '{}' is inside a temporary directory. \
+             This is unsafe — temp dirs are world-readable and may be cleaned. \
+             Use a directory under your home folder instead.",
+            workspace_dir.display()
+        );
+    }
     Ok(())
 }
 
