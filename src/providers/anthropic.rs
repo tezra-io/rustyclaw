@@ -853,4 +853,52 @@ mod tests {
         let json = serde_json::to_string(&spec).unwrap();
         assert!(!json.contains("cache_control"));
     }
+
+    // ── OAuth / apply_auth tests ────────────────────────────────
+
+    #[test]
+    fn apply_auth_oat_token_uses_bearer_and_beta_header() {
+        let provider = AnthropicProvider::new(Some("sk-ant-oat01-abc123"));
+        let client = reqwest::Client::new();
+        let request = client.post("https://api.anthropic.com/v1/messages");
+        let request = provider.apply_auth(request, "sk-ant-oat01-abc123");
+        let built = request.build().unwrap();
+        let headers = built.headers();
+
+        assert_eq!(
+            headers.get("Authorization").unwrap(),
+            "Bearer sk-ant-oat01-abc123"
+        );
+        assert_eq!(
+            headers.get("anthropic-beta").unwrap(),
+            "oauth-2025-04-20"
+        );
+        assert!(
+            headers.get("x-api-key").is_none(),
+            "OAT tokens should not use x-api-key"
+        );
+    }
+
+    #[test]
+    fn apply_auth_regular_key_uses_x_api_key_no_beta() {
+        let provider = AnthropicProvider::new(Some("sk-ant-api03-regularkey"));
+        let client = reqwest::Client::new();
+        let request = client.post("https://api.anthropic.com/v1/messages");
+        let request = provider.apply_auth(request, "sk-ant-api03-regularkey");
+        let built = request.build().unwrap();
+        let headers = built.headers();
+
+        assert_eq!(
+            headers.get("x-api-key").unwrap(),
+            "sk-ant-api03-regularkey"
+        );
+        assert!(
+            headers.get("Authorization").is_none(),
+            "Regular API keys should not use Bearer auth"
+        );
+        assert!(
+            headers.get("anthropic-beta").is_none(),
+            "Regular API keys should not include oauth beta header"
+        );
+    }
 }
