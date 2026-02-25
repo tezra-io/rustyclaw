@@ -442,6 +442,19 @@ impl AnthropicProvider {
             }
         }
 
+        // Enforce Anthropic's strict role alternation: merge consecutive
+        // messages with the same role into a single message.
+        let mut merged: Vec<NativeMessage> = Vec::with_capacity(native_messages.len());
+        for msg in native_messages {
+            if let Some(last) = merged.last_mut() {
+                if last.role == msg.role {
+                    last.content.extend(msg.content);
+                    continue;
+                }
+            }
+            merged.push(msg);
+        }
+
         let system_prompt = system_text.map(|text| {
             if Self::should_cache_system(&text) {
                 SystemPrompt::Blocks(vec![SystemBlock {
@@ -454,7 +467,7 @@ impl AnthropicProvider {
             }
         });
 
-        (system_prompt, native_messages)
+        (system_prompt, merged)
     }
 
     fn parse_text_response(response: ChatResponse) -> anyhow::Result<String> {

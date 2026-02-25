@@ -17,6 +17,8 @@ struct ChatRequest {
     model: String,
     messages: Vec<Message>,
     temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +47,8 @@ struct NativeChatRequest {
     model: String,
     messages: Vec<NativeMessage>,
     temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<NativeToolSpec>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,6 +270,7 @@ impl Provider for OpenAiProvider {
             model: model.to_string(),
             messages,
             temperature,
+            max_tokens: Some(4096),
         };
 
         let response = self
@@ -306,6 +311,7 @@ impl Provider for OpenAiProvider {
             model: model.to_string(),
             messages: Self::convert_messages(request.messages),
             temperature,
+            max_tokens: Some(4096),
             tool_choice: tools.as_ref().map(|_| "auto".to_string()),
             tools,
         };
@@ -392,6 +398,7 @@ mod tests {
                 },
             ],
             temperature: 0.7,
+            max_tokens: Some(4096),
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"role\":\"system\""));
@@ -408,6 +415,7 @@ mod tests {
                 content: "hello".to_string(),
             }],
             temperature: 0.0,
+            max_tokens: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(!json.contains("system"));

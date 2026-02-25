@@ -166,8 +166,13 @@ impl ToolDispatcher for NativeToolDispatcher {
             .iter()
             .map(|tc| ParsedToolCall {
                 name: tc.name.clone(),
-                arguments: serde_json::from_str(&tc.arguments)
-                    .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
+                arguments: serde_json::from_str(&tc.arguments).unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "Malformed tool call JSON for '{}': {e}",
+                        tc.name
+                    );
+                    Value::Object(serde_json::Map::new())
+                }),
                 tool_call_id: Some(tc.id.clone()),
             })
             .collect();
