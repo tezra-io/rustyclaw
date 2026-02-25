@@ -3621,10 +3621,15 @@ fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Result<()> 
         ("MEMORY.md", memory.to_string()),
     ];
 
-    // Create subdirectories
+    // Create subdirectories inside workspace
     let subdirs = ["sessions", "memory", "state", "cron", "skills"];
     for dir in &subdirs {
         fs::create_dir_all(workspace_dir.join(dir))?;
+    }
+
+    // Create agents directory as sibling of workspace (~/.rustyclaw/agents/)
+    if let Some(parent) = workspace_dir.parent() {
+        fs::create_dir_all(parent.join("agents"))?;
     }
 
     let mut created = 0;
@@ -3904,6 +3909,20 @@ fn print_summary(config: &Config) {
     println!();
     println!(
         "  {} {}",
+        style("💡").cyan(),
+        style("Tip:").white().bold()
+    );
+    println!(
+        "       Create specialized agents anytime:"
+    );
+    println!(
+        "       {}",
+        style("rustyclaw agents create --from-description \"manages my twitter\"").yellow()
+    );
+
+    println!();
+    println!(
+        "  {} {}",
         style("⚡").cyan(),
         style("Happy hacking! 🦀").white().bold()
     );
@@ -3959,6 +3978,19 @@ mod tests {
         for dir in &["sessions", "memory", "state", "cron", "skills"] {
             assert!(tmp.path().join(dir).is_dir(), "missing subdirectory: {dir}");
         }
+    }
+
+    #[test]
+    fn scaffold_creates_agents_dir_as_sibling() {
+        let tmp = TempDir::new().unwrap();
+        // Simulate real layout: workspace is a subdirectory
+        let workspace = tmp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let ctx = ProjectContext::default();
+        scaffold_workspace(&workspace, &ctx).unwrap();
+
+        let agents_dir = tmp.path().join("agents");
+        assert!(agents_dir.is_dir(), "agents/ should be created as sibling of workspace/");
     }
 
     // ── scaffold_workspace: personalization ─────────────────────
