@@ -80,6 +80,7 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
     // ── Agent infrastructure ──
     let registry = crate::agent::registry::AgentRegistry::from_config(&config);
     let bus = std::sync::Arc::new(crate::agent::bus::AgentBus::new());
+    let capability_registry = std::sync::Arc::new(crate::agent::CapabilityRegistry::new());
 
     // ── Start persistent agents ──
     let persistent_agents: Vec<_> = registry
@@ -90,13 +91,25 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
 
     let agent_count = persistent_agents.len();
 
-    // Populate delegation ACLs from agent definitions
+    // Populate delegation ACLs and capability registry from agent definitions
     for def in &persistent_agents {
         if !def.delegates_to.is_empty() {
             bus.set_delegation_acl(&def.name, def.delegates_to.clone())
                 .await;
         }
+        if !def.capabilities.is_empty() {
+            capability_registry
+                .register(&def.name, def.capabilities.clone())
+                .await;
+        }
     }
+
+    // Build coordinator for capability-based routing (available for future use)
+    let _coordinator = std::sync::Arc::new(crate::agent::AgentCoordinator::new(
+        bus.clone(),
+        capability_registry.clone(),
+        crate::agent::DelegationPolicy::default(),
+    ));
 
     for definition in persistent_agents {
         let agent_name = definition.name.clone();

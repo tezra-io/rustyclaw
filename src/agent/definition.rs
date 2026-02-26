@@ -67,6 +67,10 @@ pub struct AgentDefinition {
     /// Which tools this agent can use. Empty = all tools.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Capabilities this agent advertises for capability-based routing.
+    /// Examples: ["web_search", "code_review", "summarization"]
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     /// Per-agent security/autonomy overrides. Unset fields inherit from global config.
     #[serde(default)]
     pub autonomy: Option<AgentAutonomyOverride>,
@@ -107,6 +111,7 @@ impl Default for AgentDefinition {
             temperature: None,
             max_tools_per_turn: default_max_tools(),
             allowed_tools: Vec::new(),
+            capabilities: Vec::new(),
             autonomy: None,
             personality: String::new(),
         }
@@ -340,8 +345,32 @@ You manage my Twitter account. Post engaging content.
         assert_eq!(def.memory, MemoryIsolation::Isolated);
         assert_eq!(def.max_tools_per_turn, 10);
         assert!(def.allowed_tools.is_empty());
+        assert!(def.capabilities.is_empty());
         assert!(def.delegates_to.is_empty());
         assert!(def.channels.is_empty());
+    }
+
+    #[test]
+    fn parse_capabilities_field() {
+        let md = "---\nname: test\ncapabilities:\n  - web_search\n  - summarization\n---\n";
+        let def = AgentDefinition::parse(md).unwrap();
+        assert_eq!(def.capabilities, vec!["web_search", "summarization"]);
+    }
+
+    #[test]
+    fn capabilities_defaults_to_empty() {
+        let md = "---\nname: test\n---\n";
+        let def = AgentDefinition::parse(md).unwrap();
+        assert!(def.capabilities.is_empty());
+    }
+
+    #[test]
+    fn roundtrip_capabilities() {
+        let md = "---\nname: test\ncapabilities:\n  - code_review\n---\n";
+        let def = AgentDefinition::parse(md).unwrap();
+        let out = def.to_markdown().unwrap();
+        let def2 = AgentDefinition::parse(&out).unwrap();
+        assert_eq!(def2.capabilities, vec!["code_review"]);
     }
 
     #[test]
@@ -376,6 +405,9 @@ temperature: 0.5
 max_tools_per_turn: 5
 allowed_tools:
   - shell
+capabilities:
+  - web_search
+  - summarization
 ---
 
 A fully configured agent.
@@ -393,6 +425,7 @@ A fully configured agent.
         assert!((def.temperature.unwrap() - 0.5).abs() < f64::EPSILON);
         assert_eq!(def.max_tools_per_turn, 5);
         assert_eq!(def.allowed_tools, vec!["shell"]);
+        assert_eq!(def.capabilities, vec!["web_search", "summarization"]);
         assert!(def.personality.contains("fully configured"));
     }
 

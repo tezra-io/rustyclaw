@@ -1,7 +1,9 @@
 #[allow(clippy::module_inception)]
 pub mod agent;
 pub mod bus;
+pub mod capability_registry;
 pub mod commands;
+pub mod coordinator;
 pub mod definition;
 pub mod dispatcher;
 pub mod generator;
@@ -18,6 +20,10 @@ pub use agent::{Agent, AgentBuilder};
 #[allow(unused_imports)]
 pub use loop_::{run, process_message};
 pub use runner::run_persistent_agent;
+#[allow(unused_imports)]
+pub use capability_registry::CapabilityRegistry;
+#[allow(unused_imports)]
+pub use coordinator::{AgentCoordinator, DelegationPolicy};
 
 #[cfg(test)]
 mod tests {
