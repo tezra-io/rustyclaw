@@ -1,0 +1,64 @@
+name: Elixir CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "elixir/**"
+      - ".github/workflows/elixir-ci.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "elixir/**"
+      - ".github/workflows/elixir-ci.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.17"
+
+      - name: Restore deps cache
+        uses: actions/cache@v4
+        with:
+          path: elixir/zeroclaw_orchestrator/deps
+          key: deps-${{ runner.os }}-${{ hashFiles('elixir/zeroclaw_orchestrator/mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: elixir/zeroclaw_orchestrator/_build
+          key: build-${{ runner.os }}-${{ hashFiles('elixir/zeroclaw_orchestrator/mix.lock') }}
+          restore-keys: build-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: elixir/zeroclaw_orchestrator
+        run: mix deps.get
+
+      - name: Compile (warnings as errors)
+        working-directory: elixir/zeroclaw_orchestrator
+        run: mix compile --warnings-as-errors
+
+      - name: Check formatting
+        working-directory: elixir/zeroclaw_orchestrator
+        run: mix format --check-formatted
+
+      - name: Credo (strict)
+        working-directory: elixir/zeroclaw_orchestrator
+        run: mix credo --strict
+
+      - name: Run tests
+        working-directory: elixir/zeroclaw_orchestrator
+        run: mix test
