@@ -20,10 +20,10 @@ defmodule ZeroclawOrchestrator.Application do
        max_seconds: 5},
 
       # Capability routing and delegation ACL
-      ZeroclawOrchestrator.AgentCoordinator
+      ZeroclawOrchestrator.AgentCoordinator,
 
-      # Future children (TEZ-146+):
-      # - RustBridge (HTTP/Port connection to Rust core)
+      # HTTP bridge to Rust/ZeroClaw core
+      ZeroclawOrchestrator.RustBridge
     ]
 
     opts = [strategy: :one_for_one, name: ZeroclawOrchestrator.Supervisor]
