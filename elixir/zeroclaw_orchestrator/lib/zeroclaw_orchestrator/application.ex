@@ -17,10 +17,12 @@ defmodule ZeroclawOrchestrator.Application do
        name: ZeroclawOrchestrator.AgentSupervisor,
        strategy: :one_for_one,
        max_restarts: 3,
-       max_seconds: 5}
+       max_seconds: 5},
 
-      # Future children (TEZ-145+):
-      # - AgentCoordinator (capability routing, delegation ACL)
+      # Capability routing and delegation ACL
+      ZeroclawOrchestrator.AgentCoordinator
+
+      # Future children (TEZ-146+):
       # - RustBridge (HTTP/Port connection to Rust core)
     ]
 
