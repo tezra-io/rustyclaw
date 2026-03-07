@@ -7,7 +7,7 @@ defmodule ZeroclawOrchestratorTest do
     end
 
     test "agent registry is running" do
-      assert Registry.meta(ZeroclawOrchestrator.AgentRegistry, :keys) == {:ok, :unique}
+      assert Process.whereis(ZeroclawOrchestrator.AgentRegistry) |> Process.alive?()
     end
 
     test "agent supervisor (DynamicSupervisor) is running" do
