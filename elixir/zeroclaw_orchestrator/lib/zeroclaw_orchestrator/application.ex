@@ -9,9 +9,12 @@ defmodule ZeroclawOrchestrator.Application do
       # Agent name -> pid mapping (:unique mode)
       {Registry, keys: :unique, name: ZeroclawOrchestrator.AgentRegistry},
 
-      # Dynamic agent lifecycle management
+      # Dynamic agent lifecycle management — max 3 restarts per 5 seconds
       {DynamicSupervisor,
-       name: ZeroclawOrchestrator.AgentSupervisor, strategy: :one_for_one}
+       name: ZeroclawOrchestrator.AgentSupervisor,
+       strategy: :one_for_one,
+       max_restarts: 3,
+       max_seconds: 5}
 
       # Future children (TEZ-143+):
       # - AgentCoordinator (capability routing, delegation ACL)
