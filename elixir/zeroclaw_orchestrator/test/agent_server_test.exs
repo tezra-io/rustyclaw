@@ -37,7 +37,9 @@ defmodule ZeroclawOrchestrator.AgentServerTest do
 
     test "duplicate name returns error" do
       {:ok, _} = AgentSupervisor.spawn_agent(make_definition("dup-agent"))
-      assert {:error, {:already_started, _}} = AgentSupervisor.spawn_agent(make_definition("dup-agent"))
+
+      assert {:error, {:already_started, _}} =
+               AgentSupervisor.spawn_agent(make_definition("dup-agent"))
     end
 
     test "stop_agent terminates the process" do

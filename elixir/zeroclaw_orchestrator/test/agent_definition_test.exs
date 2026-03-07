@@ -140,7 +140,11 @@ defmodule ZeroclawOrchestrator.AgentDefinitionTest do
     end
 
     test "no warnings for valid snake_case capabilities" do
-      {:ok, def} = AgentDefinition.parse("---\nname: test\ncapabilities:\n  - file_read\n  - web_search\n---\n")
+      {:ok, def} =
+        AgentDefinition.parse(
+          "---\nname: test\ncapabilities:\n  - file_read\n  - web_search\n---\n"
+        )
+
       assert {:ok, warnings} = AgentDefinition.validate(def)
       cap_warnings = Enum.filter(warnings, &(&1 =~ "snake_case" or &1 =~ "Capability"))
       assert cap_warnings == []

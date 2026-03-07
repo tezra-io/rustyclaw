@@ -53,21 +53,21 @@ defmodule ZeroclawOrchestrator.AgentDefinition do
   @valid_memory_isolations ~w(isolated shared-read shared)
   @valid_memory_backends ~w(markdown sqlite lucid none)
 
-  @nimble_schema NimbleOptions.new!([
-    name: [type: :string, required: true],
-    persistent: [type: :boolean, default: false],
-    skills: [type: {:list, :string}, default: []],
-    memory: [type: :string, default: "isolated"],
-    memory_backend: [type: :string, default: "markdown"],
-    schedule: [type: {:or, [:string, nil]}, default: nil],
-    channels: [type: {:list, :string}, default: []],
-    delegates_to: [type: {:list, :string}, default: []],
-    model: [type: {:or, [:string, nil]}, default: nil],
-    temperature: [type: {:or, [:float, :integer, nil]}, default: nil],
-    max_tools_per_turn: [type: :pos_integer, default: 10],
-    allowed_tools: [type: {:list, :string}, default: []],
-    capabilities: [type: {:list, :string}, default: []]
-  ])
+  @nimble_schema NimbleOptions.new!(
+                   name: [type: :string, required: true],
+                   persistent: [type: :boolean, default: false],
+                   skills: [type: {:list, :string}, default: []],
+                   memory: [type: :string, default: "isolated"],
+                   memory_backend: [type: :string, default: "markdown"],
+                   schedule: [type: {:or, [:string, nil]}, default: nil],
+                   channels: [type: {:list, :string}, default: []],
+                   delegates_to: [type: {:list, :string}, default: []],
+                   model: [type: {:or, [:string, nil]}, default: nil],
+                   temperature: [type: {:or, [:float, :integer, nil]}, default: nil],
+                   max_tools_per_turn: [type: :pos_integer, default: 10],
+                   allowed_tools: [type: {:list, :string}, default: []],
+                   capabilities: [type: {:list, :string}, default: []]
+                 )
 
   @doc """
   Parse an agent definition from a markdown string with YAML frontmatter.
@@ -77,9 +77,8 @@ defmodule ZeroclawOrchestrator.AgentDefinition do
   def parse(content) do
     with {:ok, yaml_str, body} <- extract_frontmatter(content),
          {:ok, yaml_map} <- parse_yaml(yaml_str),
-         {:ok, opts} <- validate_schema(yaml_map),
-         {:ok, definition} <- build_definition(opts, body) do
-      {:ok, definition}
+         {:ok, opts} <- validate_schema(yaml_map) do
+      build_definition(opts, body)
     end
   end
 
@@ -129,7 +128,10 @@ defmodule ZeroclawOrchestrator.AgentDefinition do
         case :binary.match(after_first, "---") do
           {pos, 3} ->
             yaml_str = String.trim(binary_part(after_first, 0, pos))
-            body = String.trim(binary_part(after_first, pos + 3, byte_size(after_first) - pos - 3))
+
+            body =
+              String.trim(binary_part(after_first, pos + 3, byte_size(after_first) - pos - 3))
+
             {:ok, yaml_str, body}
 
           :nomatch ->
@@ -198,7 +200,9 @@ defmodule ZeroclawOrchestrator.AgentDefinition do
   defp parse_memory_isolation("shared"), do: {:ok, :shared}
 
   defp parse_memory_isolation(other),
-    do: {:error, "Invalid memory isolation: '#{other}', expected one of: #{Enum.join(@valid_memory_isolations, ", ")}"}
+    do:
+      {:error,
+       "Invalid memory isolation: '#{other}', expected one of: #{Enum.join(@valid_memory_isolations, ", ")}"}
 
   # --- Validation helpers ---
 
@@ -229,7 +233,10 @@ defmodule ZeroclawOrchestrator.AgentDefinition do
   defp capability_warning(""), do: "Capability string cannot be empty"
 
   defp capability_warning(cap) do
-    if snake_case?(cap), do: nil, else: "Capability '#{cap}' is not snake_case (use lowercase letters, digits, and underscores)"
+    if snake_case?(cap),
+      do: nil,
+      else:
+        "Capability '#{cap}' is not snake_case (use lowercase letters, digits, and underscores)"
   end
 
   defp snake_case?(s) do
@@ -237,5 +244,7 @@ defmodule ZeroclawOrchestrator.AgentDefinition do
   end
 
   defp warn_memory_backend(backend) when backend in @valid_memory_backends, do: []
-  defp warn_memory_backend(backend), do: ["Unknown memory_backend '#{backend}', will use markdown"]
+
+  defp warn_memory_backend(backend),
+    do: ["Unknown memory_backend '#{backend}', will use markdown"]
 end

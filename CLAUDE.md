@@ -82,17 +82,20 @@ ZeroClaw is currently a **single-agent** system. We are extending it with an **E
 | `HookHandler` | `src/hooks/traits.rs` | Lifecycle event hooks |
 | `Sandbox` | `src/security/traits.rs` | OS-level process isolation |
 
-### Elixir Orchestration (planned, not yet scaffolded)
+### Elixir Orchestration (`elixir/zeroclaw_orchestrator/`)
 
-See `docs/ELIXIR_ORCHESTRATION_DESIGN.md` for the full plan. Implementation order:
+| Path | Purpose |
+|------|---------|
+| `lib/zeroclaw_orchestrator.ex` | Top-level API (spawn, delegate, list, stop, sessions) |
+| `lib/zeroclaw_orchestrator/application.ex` | OTP Application, supervision tree |
+| `lib/zeroclaw_orchestrator/agent_definition.ex` | YAML frontmatter + markdown parser, NimbleOptions validation |
+| `lib/zeroclaw_orchestrator/agent_server.ex` | GenServer per agent (health, tasks, messaging) |
+| `lib/zeroclaw_orchestrator/agent_supervisor.ex` | DynamicSupervisor wrapper (spawn/stop/list) |
+| `lib/zeroclaw_orchestrator/agent_coordinator.ex` | Capability routing, delegation ACL, strategies |
+| `lib/zeroclaw_orchestrator/sub_agent_session.ex` | ETS-backed session lifecycle (pending/active/completed/failed) |
+| `lib/zeroclaw_orchestrator/rust_bridge.ex` | HTTP bridge to Rust core with retry/backoff |
 
-1. TEZ-141: Mix project scaffold, supervision tree, deps, CI
-2. TEZ-142: AgentDefinition parser + AgentRegistry
-3. TEZ-143: AgentServer (GenServer) + AgentSupervisor
-4. TEZ-144: SubAgentSession persistence (ETS)
-5. TEZ-145: AgentCoordinator (capability routing + delegation ACL)
-6. TEZ-146: RustBridge (HTTP first, Port later)
-7. TEZ-147: Integration tests + remove dead Rust code
+See `docs/ELIXIR_ORCHESTRATION_DESIGN.md` for the full architecture.
 
 ## 4) Build and Test
 

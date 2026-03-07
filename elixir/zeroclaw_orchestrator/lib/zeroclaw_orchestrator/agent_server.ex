@@ -82,7 +82,8 @@ defmodule ZeroclawOrchestrator.AgentServer do
 
   @impl true
   def handle_call({:run_task, task}, _from, %{health: :unhealthy} = state) do
-    {:reply, {:error, :unhealthy}, append_history(state, :task_rejected, %{task: task, reason: :unhealthy})}
+    {:reply, {:error, :unhealthy},
+     append_history(state, :task_rejected, %{task: task, reason: :unhealthy})}
   end
 
   def handle_call({:run_task, task}, _from, state) do

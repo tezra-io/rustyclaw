@@ -151,7 +151,9 @@ defmodule ZeroclawOrchestrator.SubAgentSession do
   end
 
   defp maybe_filter(sessions, _field, nil), do: sessions
-  defp maybe_filter(sessions, field, value), do: Enum.filter(sessions, &(Map.get(&1, field) == value))
+
+  defp maybe_filter(sessions, field, value),
+    do: Enum.filter(sessions, &(Map.get(&1, field) == value))
 
   defp generate_id do
     Base.hex_encode32(:crypto.strong_rand_bytes(10), case: :lower, padding: false)
