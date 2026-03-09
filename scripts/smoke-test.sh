@@ -52,6 +52,16 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 # ── 2. Detect provider keys ──────────────────────────────────────
+# Source .env if present (project-local keys)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+    info "Loaded .env from $PROJECT_DIR"
+fi
+
 PROVIDER_NAMES=()
 PROVIDER_KEYS=()
 PROVIDER_MODELS=()
