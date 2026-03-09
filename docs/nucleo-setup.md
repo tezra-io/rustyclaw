@@ -1,12 +1,12 @@
-# ZeroClaw on Nucleo-F401RE — Step-by-Step Guide
+# RustyClaw on Nucleo-F401RE — Step-by-Step Guide
 
-Run ZeroClaw on your Mac or Linux host. Connect a Nucleo-F401RE via USB. Control GPIO (LED, pins) via Telegram or CLI.
+Run RustyClaw on your Mac or Linux host. Connect a Nucleo-F401RE via USB. Control GPIO (LED, pins) via Telegram or CLI.
 
 ---
 
 ## Get Board Info via Telegram (No Firmware Needed)
 
-ZeroClaw can read chip info from the Nucleo over USB **without flashing any firmware**. Message your Telegram bot:
+RustyClaw can read chip info from the Nucleo over USB **without flashing any firmware**. Message your Telegram bot:
 
 - *"What board info do I have?"*
 - *"Board info"*
@@ -29,21 +29,21 @@ baud = 115200
 
 ```bash
 cargo build --features hardware,probe
-zeroclaw hardware info
-zeroclaw hardware discover
+rustyclaw hardware info
+rustyclaw hardware discover
 ```
 
 ---
 
 ## What's Included (No Code Changes Needed)
 
-ZeroClaw includes everything for Nucleo-F401RE:
+RustyClaw includes everything for Nucleo-F401RE:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Firmware | `firmware/zeroclaw-nucleo/` | Embassy Rust — USART2 (115200), gpio_read, gpio_write |
+| Firmware | `firmware/rustyclaw-nucleo/` | Embassy Rust — USART2 (115200), gpio_read, gpio_write |
 | Serial peripheral | `src/peripherals/serial.rs` | JSON-over-serial protocol (same as Arduino/ESP32) |
-| Flash command | `zeroclaw peripheral flash-nucleo` | Builds firmware, flashes via probe-rs |
+| Flash command | `rustyclaw peripheral flash-nucleo` | Builds firmware, flashes via probe-rs |
 
 Protocol: newline-delimited JSON. Request: `{"id":"1","cmd":"gpio_write","args":{"pin":13,"value":1}}`. Response: `{"id":"1","ok":true,"result":"done"}`.
 
@@ -64,22 +64,22 @@ Protocol: newline-delimited JSON. Request: `{"id":"1","cmd":"gpio_write","args":
 1. Connect Nucleo to your Mac/Linux via USB.
 2. The board appears as a USB device (ST-Link). No separate driver needed on modern systems.
 
-### 1.2 Flash via ZeroClaw
+### 1.2 Flash via RustyClaw
 
-From the zeroclaw repo root:
+From the rustyclaw repo root:
 
 ```bash
-zeroclaw peripheral flash-nucleo
+rustyclaw peripheral flash-nucleo
 ```
 
-This builds `firmware/zeroclaw-nucleo` and runs `probe-rs run --chip STM32F401RETx`. The firmware runs immediately after flashing.
+This builds `firmware/rustyclaw-nucleo` and runs `probe-rs run --chip STM32F401RETx`. The firmware runs immediately after flashing.
 
 ### 1.3 Manual Flash (Alternative)
 
 ```bash
-cd firmware/zeroclaw-nucleo
+cd firmware/rustyclaw-nucleo
 cargo build --release --target thumbv7em-none-eabihf
-probe-rs run --chip STM32F401RETx target/thumbv7em-none-eabihf/release/zeroclaw-nucleo
+probe-rs run --chip STM32F401RETx target/thumbv7em-none-eabihf/release/rustyclaw-nucleo
 ```
 
 ---
@@ -93,9 +93,9 @@ USART2 (PA2/PA3) is bridged to the ST-Link's virtual COM port, so the host sees 
 
 ---
 
-## Phase 3: Configure ZeroClaw
+## Phase 3: Configure RustyClaw
 
-Add to `~/.zeroclaw/config.toml`:
+Add to `~/.rustyclaw/config.toml`:
 
 ```toml
 [peripherals]
@@ -113,13 +113,13 @@ baud = 115200
 ## Phase 4: Run and Test
 
 ```bash
-zeroclaw daemon --host 127.0.0.1 --port 42617
+rustyclaw daemon --host 127.0.0.1 --port 42617
 ```
 
 Or use the agent directly:
 
 ```bash
-zeroclaw agent --message "Turn on the LED on pin 13"
+rustyclaw agent --message "Turn on the LED on pin 13"
 ```
 
 Pin 13 = PA5 = User LED (LD2) on Nucleo-F401RE.
@@ -132,9 +132,9 @@ Pin 13 = PA5 = User LED (LD2) on Nucleo-F401RE.
 |------|---------|
 | 1 | Connect Nucleo via USB |
 | 2 | `cargo install probe-rs-tools --locked` |
-| 3 | `zeroclaw peripheral flash-nucleo` |
+| 3 | `rustyclaw peripheral flash-nucleo` |
 | 4 | Add Nucleo to config.toml (path = your serial port) |
-| 5 | `zeroclaw daemon` or `zeroclaw agent -m "Turn on LED"` |
+| 5 | `rustyclaw daemon` or `rustyclaw agent -m "Turn on LED"` |
 
 ---
 
@@ -144,4 +144,4 @@ Pin 13 = PA5 = User LED (LD2) on Nucleo-F401RE.
 - **probe-rs not found** — `cargo install probe-rs-tools --locked` (the `probe-rs` crate is a library; the CLI is in `probe-rs-tools`)
 - **No probe detected** — Ensure Nucleo is connected. Try another USB cable/port.
 - **Serial port not found** — On Linux, add user to `dialout`: `sudo usermod -a -G dialout $USER`, then log out/in.
-- **GPIO commands ignored** — Check `path` in config matches your serial port. Run `zeroclaw peripheral list` to verify.
+- **GPIO commands ignored** — Check `path` in config matches your serial port. Run `rustyclaw peripheral list` to verify.

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="zeroclaw.png" alt="ZeroClaw" width="200" />
+  <img src="rustyclaw.png" alt="RustyClaw" width="200" />
 </p>
 
-<h1 align="center">ZeroClaw 🦀</h1>
+<h1 align="center">RustyClaw 🦀</h1>
 
 <p align="center">
   <strong>Zero overhead. Zero compromise. 100% Rust. 100% Agnostic.</strong><br>
@@ -51,7 +51,7 @@ Built by students and members of the Harvard, MIT, and Sundai.Club communities.
 </p>
 
 <p align="center">
-  ZeroClaw is the <strong>runtime operating system</strong> for agentic workflows — infrastructure that abstracts models, tools, memory, and execution so agents can be built once and run anywhere.
+  RustyClaw is the <strong>runtime operating system</strong> for agentic workflows — infrastructure that abstracts models, tools, memory, and execution so agents can be built once and run anywhere.
 </p>
 
 <p align="center"><code>Trait-driven architecture · secure-by-default runtime · provider/channel/tool swappable · pluggable everything</code></p>
@@ -62,8 +62,8 @@ Use this board for important notices (breaking changes, security advisories, mai
 
 | Date (UTC) | Level       | Notice                                                                                                                                                                                                                                                                                                                                                 | Action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ---------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-02-19 | _Critical_  | We are **not affiliated** with `openagen/zeroclaw`, `zeroclaw.org` or `zeroclaw.net`. The `zeroclaw.org` and `zeroclaw.net` domains currently points to the `openagen/zeroclaw` fork, and that domain/repository are impersonating our official website/project.                                                                                       | Do not trust information, binaries, fundraising, or announcements from those sources. Use only [this repository](https://github.com/zeroclaw-labs/zeroclaw) and our verified social accounts.                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 2026-02-21 | _Important_ | Our official website is now live: [zeroclawlabs.ai](https://zeroclawlabs.ai). Thanks for your patience while we prepared the launch. We are still seeing impersonation attempts, so do **not** join any investment or fundraising activity claiming the ZeroClaw name unless it is published through our official channels.                            | Use [this repository](https://github.com/zeroclaw-labs/zeroclaw) as the single source of truth. Follow [X (@zeroclawlabs)](https://x.com/zeroclawlabs?s=21), [Telegram (@zeroclawlabs)](https://t.me/zeroclawlabs), [Facebook (Group)](https://www.facebook.com/groups/zeroclaw), [Reddit (r/zeroclawlabs)](https://www.reddit.com/r/zeroclawlabs/), and [Xiaohongshu](https://www.xiaohongshu.com/user/profile/67cbfc43000000000d008307?xsec_token=AB73VnYnGNx5y36EtnnZfGmAmS-6Wzv8WMuGpfwfkg6Yc%3D&xsec_source=pc_search) for official updates. |
+| 2026-02-19 | _Critical_  | We are **not affiliated** with `openagen/rustyclaw`, `rustyclaw.org` or `rustyclaw.net`. The `rustyclaw.org` and `rustyclaw.net` domains currently points to the `openagen/rustyclaw` fork, and that domain/repository are impersonating our official website/project.                                                                                       | Do not trust information, binaries, fundraising, or announcements from those sources. Use only [this repository](https://github.com/tezra-io/rustyclaw) and our verified social accounts.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 2026-02-21 | _Important_ | Our official website is now live: [zeroclawlabs.ai](https://zeroclawlabs.ai). Thanks for your patience while we prepared the launch. We are still seeing impersonation attempts, so do **not** join any investment or fundraising activity claiming the RustyClaw name unless it is published through our official channels.                            | Use [this repository](https://github.com/tezra-io/rustyclaw) as the single source of truth. Follow [X (@zeroclawlabs)](https://x.com/zeroclawlabs?s=21), [Telegram (@zeroclawlabs)](https://t.me/zeroclawlabs), [Facebook (Group)](https://www.facebook.com/groups/zeroclaw), [Reddit (r/zeroclawlabs)](https://www.reddit.com/r/zeroclawlabs/), and [Xiaohongshu](https://www.xiaohongshu.com/user/profile/67cbfc43000000000d008307?xsec_token=AB73VnYnGNx5y36EtnnZfGmAmS-6Wzv8WMuGpfwfkg6Yc%3D&xsec_source=pc_search) for official updates. |
 | 2026-02-19 | _Important_ | Anthropic updated the Authentication and Credential Use terms on 2026-02-19. Claude Code OAuth tokens (Free, Pro, Max) are intended exclusively for Claude Code and Claude.ai; using OAuth tokens from Claude Free/Pro/Max in any other product, tool, or service (including Agent SDK) is not permitted and may violate the Consumer Terms of Service. | Please temporarily avoid Claude Code OAuth integrations to prevent potential loss. Original clause: [Authentication and Credential Use](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ### ✨ Features
@@ -73,18 +73,18 @@ Use this board for important notices (breaking changes, security advisories, mai
 - ⚡ **Fast Cold Starts:** Single-binary Rust runtime keeps command and daemon startup near-instant for daily operations.
 - 🌍 **Portable Architecture:** One binary-first workflow across ARM, x86, and RISC-V with swappable providers/channels/tools.
 
-### Why teams pick ZeroClaw
+### Why teams pick RustyClaw
 
 - **Lean by default:** small Rust binary, fast startup, low memory footprint.
 - **Secure by design:** pairing, strict sandboxing, explicit allowlists, workspace scoping.
 - **Fully swappable:** core systems are traits (providers, channels, tools, memory, tunnels).
 - **No lock-in:** OpenAI-compatible provider support + pluggable custom endpoints.
 
-## Benchmark Snapshot (ZeroClaw vs OpenClaw, Reproducible)
+## Benchmark Snapshot (RustyClaw vs OpenClaw, Reproducible)
 
 Local machine quick benchmark (macOS arm64, Feb 2026) normalized for 0.8GHz edge hardware.
 
-|                           | OpenClaw      | NanoBot        | PicoClaw        | ZeroClaw 🦀          |
+|                           | OpenClaw      | NanoBot        | PicoClaw        | RustyClaw 🦀          |
 | ------------------------- | ------------- | -------------- | --------------- | -------------------- |
 | **Language**              | TypeScript    | Python         | Go              | **Rust**             |
 | **RAM**                   | > 1GB         | > 100MB        | < 10MB          | **< 5MB**            |
@@ -92,10 +92,10 @@ Local machine quick benchmark (macOS arm64, Feb 2026) normalized for 0.8GHz edge
 | **Binary Size**           | ~28MB (dist)  | N/A (Scripts)  | ~8MB            | **~8.8 MB**          |
 | **Cost**                  | Mac Mini $599 | Linux SBC ~$50 | Linux Board $10 | **Any hardware $10** |
 
-> Notes: ZeroClaw results are measured on release builds using `/usr/bin/time -l`. OpenClaw requires Node.js runtime (typically ~390MB additional memory overhead), while NanoBot requires Python runtime. PicoClaw and ZeroClaw are static binaries. The RAM figures above are runtime memory; build-time compilation requirements are higher.
+> Notes: RustyClaw results are measured on release builds using `/usr/bin/time -l`. OpenClaw requires Node.js runtime (typically ~390MB additional memory overhead), while NanoBot requires Python runtime. PicoClaw and RustyClaw are static binaries. The RAM figures above are runtime memory; build-time compilation requirements are higher.
 
 <p align="center">
-  <img src="zero-claw.jpeg" alt="ZeroClaw vs OpenClaw Comparison" width="800" />
+  <img src="zero-claw.jpeg" alt="RustyClaw vs OpenClaw Comparison" width="800" />
 </p>
 
 ### Reproducible local measurement
@@ -104,17 +104,17 @@ Benchmark claims can drift as code and toolchains evolve, so always measure your
 
 ```bash
 cargo build --release
-ls -lh target/release/zeroclaw
+ls -lh target/release/rustyclaw
 
-/usr/bin/time -l target/release/zeroclaw --help
-/usr/bin/time -l target/release/zeroclaw status
+/usr/bin/time -l target/release/rustyclaw --help
+/usr/bin/time -l target/release/rustyclaw status
 ```
 
 Example sample (macOS arm64, measured on February 18, 2026):
 
 - Release binary size: `8.8MB`
-- `zeroclaw --help`: about `0.02s` real time, ~`3.9MB` peak memory footprint
-- `zeroclaw status`: about `0.01s` real time, ~`4.1MB` peak memory footprint
+- `rustyclaw --help`: about `0.02s` real time, ~`3.9MB` peak memory footprint
+- `rustyclaw status`: about `0.01s` real time, ~`4.1MB` peak memory footprint
 
 ## Prerequisites
 
@@ -177,10 +177,10 @@ Example sample (macOS arm64, measured on February 18, 2026):
 
 #### One-Line Installer
 
-Or skip the steps above and install everything (system deps, Rust, ZeroClaw) in a single command:
+Or skip the steps above and install everything (system deps, Rust, RustyClaw) in a single command:
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/main/scripts/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/tezra-io/rustyclaw/main/scripts/install.sh | bash
 ```
 
 #### Compilation resource requirements
@@ -217,15 +217,15 @@ To require binary-only install with no source fallback:
 ### Homebrew (macOS/Linuxbrew)
 
 ```bash
-brew install zeroclaw
+brew install rustyclaw
 ```
 
 ### One-click bootstrap
 
 ```bash
 # Recommended: clone then run local bootstrap script
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/tezra-io/rustyclaw.git
+cd rustyclaw
 ./bootstrap.sh
 
 # Optional: bootstrap dependencies + Rust on fresh machines
@@ -244,7 +244,7 @@ cd zeroclaw
 ./bootstrap.sh --docker
 
 # Optional: force Podman as container CLI
-ZEROCLAW_CONTAINER_CLI=podman ./bootstrap.sh --docker
+RUSTYCLAW_CONTAINER_CLI=podman ./bootstrap.sh --docker
 
 # Optional: in --docker mode, skip local image build and use local tag or pull fallback image
 ./bootstrap.sh --docker --skip-build
@@ -253,7 +253,7 @@ ZEROCLAW_CONTAINER_CLI=podman ./bootstrap.sh --docker
 Remote one-liner (review first in security-sensitive environments):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/main/scripts/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tezra-io/rustyclaw/main/scripts/bootstrap.sh | bash
 ```
 
 Details: [`docs/one-click-bootstrap.md`](docs/one-click-bootstrap.md) (toolchain mode may request `sudo` for system packages).
@@ -267,19 +267,19 @@ Release assets are published for:
 - Windows: `x86_64`
 
 Download the latest assets from:
-<https://github.com/zeroclaw-labs/zeroclaw/releases/latest>
+<https://github.com/tezra-io/rustyclaw/releases/latest>
 
 Example (ARM64 Linux):
 
 ```bash
-curl -fsSLO https://github.com/zeroclaw-labs/zeroclaw/releases/latest/download/zeroclaw-aarch64-unknown-linux-gnu.tar.gz
-tar xzf zeroclaw-aarch64-unknown-linux-gnu.tar.gz
-install -m 0755 zeroclaw "$HOME/.cargo/bin/zeroclaw"
+curl -fsSLO https://github.com/tezra-io/rustyclaw/releases/latest/download/rustyclaw-aarch64-unknown-linux-gnu.tar.gz
+tar xzf rustyclaw-aarch64-unknown-linux-gnu.tar.gz
+install -m 0755 rustyclaw "$HOME/.cargo/bin/rustyclaw"
 ```
 
 ```bash
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/tezra-io/rustyclaw.git
+cd rustyclaw
 cargo build --release --locked
 cargo install --path . --force --locked
 
@@ -287,110 +287,110 @@ cargo install --path . --force --locked
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # Quick setup (no prompts, optional model specification)
-zeroclaw onboard --api-key sk-... --provider openrouter [--model "openrouter/auto"]
+rustyclaw onboard --api-key sk-... --provider openrouter [--model "openrouter/auto"]
 
 # Or interactive wizard
-zeroclaw onboard --interactive
+rustyclaw onboard --interactive
 
 # If config.toml already exists and you intentionally want to overwrite it
-zeroclaw onboard --force
+rustyclaw onboard --force
 
 # Or quickly repair channels/allowlists only
-zeroclaw onboard --channels-only
+rustyclaw onboard --channels-only
 
 # Chat
-zeroclaw agent -m "Hello, ZeroClaw!"
+rustyclaw agent -m "Hello, RustyClaw!"
 
 # Interactive mode
-zeroclaw agent
+rustyclaw agent
 
 # Start the gateway (webhook server)
-zeroclaw gateway                # default: 127.0.0.1:42617
-zeroclaw gateway --port 0       # random port (security hardened)
+rustyclaw gateway                # default: 127.0.0.1:42617
+rustyclaw gateway --port 0       # random port (security hardened)
 
 # Start full autonomous runtime
-zeroclaw daemon
+rustyclaw daemon
 
 # Check status
-zeroclaw status
-zeroclaw auth status
+rustyclaw status
+rustyclaw auth status
 
 # Generate shell completions (stdout only, safe to source directly)
-source <(zeroclaw completions bash)
-zeroclaw completions zsh > ~/.zfunc/_zeroclaw
+source <(rustyclaw completions bash)
+rustyclaw completions zsh > ~/.zfunc/_rustyclaw
 
 # Run system diagnostics
-zeroclaw doctor
+rustyclaw doctor
 
 # Check channel health
-zeroclaw channel doctor
+rustyclaw channel doctor
 
 # Bind a Telegram identity into allowlist
-zeroclaw channel bind-telegram 123456789
+rustyclaw channel bind-telegram 123456789
 
 # Get integration setup details
-zeroclaw integrations info Telegram
+rustyclaw integrations info Telegram
 
 # Note: Channels (Telegram, Discord, Slack) require daemon to be running
-# zeroclaw daemon
+# rustyclaw daemon
 
 # Manage background service
-zeroclaw service install
-zeroclaw service status
-zeroclaw service restart
+rustyclaw service install
+rustyclaw service status
+rustyclaw service restart
 
-# On Alpine (OpenRC): sudo zeroclaw service install
+# On Alpine (OpenRC): sudo rustyclaw service install
 
 # Migrate memory from OpenClaw (safe preview first)
-zeroclaw migrate openclaw --dry-run
-zeroclaw migrate openclaw
+rustyclaw migrate openclaw --dry-run
+rustyclaw migrate openclaw
 ```
 
 > **Dev fallback (no global install):** prefix commands with `cargo run --release --` (example: `cargo run --release -- status`).
 
 ## Subscription Auth (OpenAI Codex / Claude Code)
 
-ZeroClaw now supports subscription-native auth profiles (multi-account, encrypted at rest).
+RustyClaw now supports subscription-native auth profiles (multi-account, encrypted at rest).
 
-- Store file: `~/.zeroclaw/auth-profiles.json`
-- Encryption key: `~/.zeroclaw/.secret_key`
+- Store file: `~/.rustyclaw/auth-profiles.json`
+- Encryption key: `~/.rustyclaw/.secret_key`
 - Profile id format: `<provider>:<profile_name>` (example: `openai-codex:work`)
 
 OpenAI Codex OAuth (ChatGPT subscription):
 
 ```bash
 # Recommended on servers/headless
-zeroclaw auth login --provider openai-codex --device-code
+rustyclaw auth login --provider openai-codex --device-code
 
 # Browser/callback flow with paste fallback
-zeroclaw auth login --provider openai-codex --profile default
-zeroclaw auth paste-redirect --provider openai-codex --profile default
+rustyclaw auth login --provider openai-codex --profile default
+rustyclaw auth paste-redirect --provider openai-codex --profile default
 
 # Check / refresh / switch profile
-zeroclaw auth status
-zeroclaw auth refresh --provider openai-codex --profile default
-zeroclaw auth use --provider openai-codex --profile work
+rustyclaw auth status
+rustyclaw auth refresh --provider openai-codex --profile default
+rustyclaw auth use --provider openai-codex --profile work
 ```
 
 Claude Code / Anthropic setup-token:
 
 ```bash
 # Paste subscription/setup token (Authorization header mode)
-zeroclaw auth paste-token --provider anthropic --profile default --auth-kind authorization
+rustyclaw auth paste-token --provider anthropic --profile default --auth-kind authorization
 
 # Alias command
-zeroclaw auth setup-token --provider anthropic --profile default
+rustyclaw auth setup-token --provider anthropic --profile default
 ```
 
 Run the agent with subscription auth:
 
 ```bash
-zeroclaw agent --provider openai-codex -m "hello"
-zeroclaw agent --provider openai-codex --auth-profile openai-codex:work -m "hello"
+rustyclaw agent --provider openai-codex -m "hello"
+rustyclaw agent --provider openai-codex --auth-profile openai-codex:work -m "hello"
 
 # Anthropic supports both API key and auth token env vars:
 # ANTHROPIC_AUTH_TOKEN, ANTHROPIC_OAUTH_TOKEN, ANTHROPIC_API_KEY
-zeroclaw agent --provider anthropic -m "hello"
+rustyclaw agent --provider anthropic -m "hello"
 ```
 
 ## Architecture
@@ -398,12 +398,12 @@ zeroclaw agent --provider anthropic -m "hello"
 Every subsystem is a **trait** — swap implementations with a config change, zero code changes.
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="ZeroClaw Architecture" width="900" />
+  <img src="docs/architecture.svg" alt="RustyClaw Architecture" width="900" />
 </p>
 
 | Subsystem         | Trait            | Ships with                                                                                                                                                                 | Extend                                                                                       |
 | ----------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| **AI Models**     | `Provider`       | Provider catalog via `zeroclaw providers` (built-ins + aliases, plus custom endpoints)                                                                                     | `custom:https://your-api.com` (OpenAI-compatible) or `anthropic-custom:https://your-api.com` |
+| **AI Models**     | `Provider`       | Provider catalog via `rustyclaw providers` (built-ins + aliases, plus custom endpoints)                                                                                     | `custom:https://your-api.com` (OpenAI-compatible) or `anthropic-custom:https://your-api.com` |
 | **Channels**      | `Channel`        | CLI, Telegram, Discord, Slack, Mattermost, iMessage, Matrix, Signal, WhatsApp, Linq, Email, IRC, Lark, DingTalk, QQ, Nostr, Webhook                                        | Any messaging API                                                                            |
 | **Memory**        | `Memory`         | SQLite hybrid search, PostgreSQL backend (configurable storage provider), Lucid bridge, Markdown files, explicit `none` backend, snapshot/hydrate, optional response cache | Any persistence backend                                                                      |
 | **Tools**         | `Tool`           | shell/file/memory, cron/schedule, git, pushover, browser, http_request, screenshot/image_info, composio (opt-in), delegate, hardware tools                                 | Any capability                                                                               |
@@ -421,7 +421,7 @@ Every subsystem is a **trait** — swap implementations with a config change, ze
 - ✅ Supported today: `runtime.kind = "native"` or `runtime.kind = "docker"`
 - 🚧 Planned, not implemented yet: WASM / edge runtimes
 
-When an unsupported `runtime.kind` is configured, ZeroClaw now exits with a clear error instead of silently falling back to native.
+When an unsupported `runtime.kind` is configured, RustyClaw now exits with a clear error instead of silently falling back to native.
 
 ### Memory System (Full-Stack Search Engine)
 
@@ -450,12 +450,12 @@ keyword_weight = 0.3
 # backend = "none" uses an explicit no-op memory backend (no persistence)
 
 # Optional: storage-provider override for remote memory backends.
-# When provider = "postgres", ZeroClaw uses PostgreSQL for memory persistence.
+# When provider = "postgres", RustyClaw uses PostgreSQL for memory persistence.
 # The db_url key also accepts alias `dbURL` for backward compatibility.
 #
 # [storage.provider.config]
 # provider = "postgres"
-# db_url = "postgres://user:password@host:5432/zeroclaw"
+# db_url = "postgres://user:password@host:5432/rustyclaw"
 # schema = "public"
 # table = "memories"
 # connect_timeout_secs = 15
@@ -464,17 +464,17 @@ keyword_weight = 0.3
 # sqlite_open_timeout_secs = 30
 
 # Optional for backend = "lucid"
-# ZEROCLAW_LUCID_CMD=/usr/local/bin/lucid            # default: lucid
-# ZEROCLAW_LUCID_BUDGET=200                          # default: 200
-# ZEROCLAW_LUCID_LOCAL_HIT_THRESHOLD=3               # local hit count to skip external recall
-# ZEROCLAW_LUCID_RECALL_TIMEOUT_MS=120               # low-latency budget for lucid context recall
-# ZEROCLAW_LUCID_STORE_TIMEOUT_MS=800                # async sync timeout for lucid store
-# ZEROCLAW_LUCID_FAILURE_COOLDOWN_MS=15000           # cooldown after lucid failure to avoid repeated slow attempts
+# RUSTYCLAW_LUCID_CMD=/usr/local/bin/lucid            # default: lucid
+# RUSTYCLAW_LUCID_BUDGET=200                          # default: 200
+# RUSTYCLAW_LUCID_LOCAL_HIT_THRESHOLD=3               # local hit count to skip external recall
+# RUSTYCLAW_LUCID_RECALL_TIMEOUT_MS=120               # low-latency budget for lucid context recall
+# RUSTYCLAW_LUCID_STORE_TIMEOUT_MS=800                # async sync timeout for lucid store
+# RUSTYCLAW_LUCID_FAILURE_COOLDOWN_MS=15000           # cooldown after lucid failure to avoid repeated slow attempts
 ```
 
 ## Security
 
-ZeroClaw enforces security at **every layer** — not just the sandbox. It passes all items from the community security checklist.
+RustyClaw enforces security at **every layer** — not just the sandbox. It passes all items from the community security checklist.
 
 ### Security Checklist
 
@@ -485,7 +485,7 @@ ZeroClaw enforces security at **every layer** — not just the sandbox. It passe
 | 3   | **Filesystem scoped (no /)**     | ✅     | `workspace_only = true` by default. 14 system dirs + 4 sensitive dotfiles blocked. Null byte injection blocked. Symlink escape detection via canonicalization + resolved-path workspace checks in file read/write tools. |
 | 4   | **Access via tunnel only**       | ✅     | Gateway refuses public bind without active tunnel. Supports Tailscale, Cloudflare, ngrok, or any custom tunnel.                                                                                                          |
 
-> **Run your own nmap:** `nmap -p 1-65535 <your-host>` — ZeroClaw binds to localhost only, so nothing is exposed unless you explicitly configure a tunnel.
+> **Run your own nmap:** `nmap -p 1-65535 <your-host>` — RustyClaw binds to localhost only, so nothing is exposed unless you explicitly configure a tunnel.
 
 ### Channel allowlists (deny-by-default)
 
@@ -512,13 +512,13 @@ Telegram operator-approval flow:
 
 1. Keep `[channels_config.telegram].allowed_users = []` for deny-by-default startup.
 2. Unauthorized users receive a hint with a copyable operator command:
-   `zeroclaw channel bind-telegram <IDENTITY>`.
+   `rustyclaw channel bind-telegram <IDENTITY>`.
 3. Operator runs that command locally, then user retries sending a message.
 
 If you need a one-shot manual approval, run:
 
 ```bash
-zeroclaw channel bind-telegram 123456789
+rustyclaw channel bind-telegram 123456789
 ```
 
 If you're not sure which identity to use:
@@ -531,7 +531,7 @@ If you hit authorization warnings in logs (for example: `ignoring message from u
 rerun channel setup only:
 
 ```bash
-zeroclaw onboard --channels-only
+rustyclaw onboard --channels-only
 ```
 
 ### Telegram media replies
@@ -539,7 +539,7 @@ zeroclaw onboard --channels-only
 Telegram routing now replies to the source **chat ID** from incoming updates (instead of usernames),
 which avoids `Bad Request: chat not found` failures.
 
-For non-text replies, ZeroClaw can send Telegram attachments when the assistant includes markers:
+For non-text replies, RustyClaw can send Telegram attachments when the assistant includes markers:
 
 - `[IMAGE:<path-or-url>]`
 - `[DOCUMENT:<path-or-url>]`
@@ -551,7 +551,7 @@ Paths can be local files (for example `/tmp/screenshot.png`) or HTTPS URLs.
 
 ### WhatsApp Setup
 
-ZeroClaw supports two WhatsApp backends:
+RustyClaw supports two WhatsApp backends:
 
 - **WhatsApp Web mode** (QR / pair code, no Meta Business API required)
 - **WhatsApp Business Cloud API mode** (official Meta webhook flow)
@@ -564,18 +564,18 @@ ZeroClaw supports two WhatsApp backends:
     cargo build --features whatsapp-web
     ```
 
-2. **Configure ZeroClaw:**
+2. **Configure RustyClaw:**
 
     ```toml
     [channels_config.whatsapp]
-    session_path = "~/.zeroclaw/state/whatsapp-web/session.db"
+    session_path = "~/.rustyclaw/state/whatsapp-web/session.db"
     pair_phone = "+15551234567"   # optional; omit to use QR flow
     pair_code = ""               # optional custom pair code
     allowed_numbers = ["+1234567890"]  # E.164 format, or ["*"] for all
     ```
 
 3. **Start channels/daemon and link device:**
-    - Run `zeroclaw channel start` (or `zeroclaw daemon`).
+    - Run `rustyclaw channel start` (or `rustyclaw daemon`).
     - Follow terminal pairing output (QR or pair code).
     - In WhatsApp on phone: **Settings → Linked Devices**.
 
@@ -595,7 +595,7 @@ WhatsApp uses Meta's Cloud API with webhooks (push-based, not polling):
     - **Phone Number ID:** From WhatsApp → API Setup → Phone number ID
     - **Verify Token:** You define this (any random string) — Meta will send it back during webhook verification
 
-3. **Configure ZeroClaw:**
+3. **Configure RustyClaw:**
 
     ```toml
     [channels_config.whatsapp]
@@ -608,7 +608,7 @@ WhatsApp uses Meta's Cloud API with webhooks (push-based, not polling):
 4. **Start the gateway with a tunnel:**
 
     ```bash
-    zeroclaw gateway --port 42617
+    rustyclaw gateway --port 42617
     ```
 
     WhatsApp requires HTTPS, so use a tunnel (ngrok, Cloudflare, Tailscale Funnel).
@@ -619,13 +619,13 @@ WhatsApp uses Meta's Cloud API with webhooks (push-based, not polling):
     - **Verify Token:** Same as your `verify_token` in config
     - Subscribe to `messages` field
 
-6. **Test:** Send a message to your WhatsApp Business number — ZeroClaw will respond via the LLM.
+6. **Test:** Send a message to your WhatsApp Business number — RustyClaw will respond via the LLM.
 
 ## Configuration
 
-Config: `~/.zeroclaw/config.toml` (created by `onboard`)
+Config: `~/.rustyclaw/config.toml` (created by `onboard`)
 
-When `zeroclaw channel start` is already running, changes to `default_provider`,
+When `rustyclaw channel start` is already running, changes to `default_provider`,
 `default_model`, `default_temperature`, `api_key`, `api_url`, and `reliability.*`
 are hot-applied on the next inbound channel message.
 
@@ -653,7 +653,7 @@ keyword_weight = 0.3
 # Optional remote storage-provider override (PostgreSQL example)
 # [storage.provider.config]
 # provider = "postgres"
-# db_url = "postgres://user:password@host:5432/zeroclaw"
+# db_url = "postgres://user:password@host:5432/rustyclaw"
 # schema = "public"
 # table = "memories"
 # connect_timeout_secs = 15
@@ -726,7 +726,7 @@ window_allowlist = []          # optional window title/process allowlist hints
 #   "action": "mouse_click",
 #   "params": {"x": 640, "y": 360, "button": "left"},
 #   "policy": {"allowed_domains": [...], "window_allowlist": [...], "max_coordinate_x": 3840, "max_coordinate_y": 2160},
-#   "metadata": {"session_name": "...", "source": "zeroclaw.browser", "version": "..."}
+#   "metadata": {"session_name": "...", "source": "rustyclaw.browser", "version": "..."}
 # }
 # Response: {"success": true, "data": {...}} or {"success": false, "error": "..."}
 
@@ -745,7 +745,7 @@ format = "openclaw"            # "openclaw" (default, markdown files) or "aieos"
 
 ### Ollama Local and Remote Endpoints
 
-ZeroClaw uses one provider key (`ollama`) for both local and remote Ollama deployments:
+RustyClaw uses one provider key (`ollama`) for both local and remote Ollama deployments:
 
 - Local Ollama: keep `api_url` unset, run `ollama serve`, and use models like `llama3.2`.
 - Remote Ollama endpoint (including Ollama Cloud): set `api_url` to the remote endpoint and set `api_key` (or `OLLAMA_API_KEY`) when required.
@@ -762,7 +762,7 @@ api_key = "ollama_api_key_here"
 
 ### llama.cpp Server Endpoint
 
-ZeroClaw now supports `llama-server` as a first-class local provider:
+RustyClaw now supports `llama-server` as a first-class local provider:
 
 - Provider ID: `llamacpp` (alias: `llama.cpp`)
 - Default endpoint: `http://localhost:8080/v1`
@@ -782,7 +782,7 @@ default_model = "ggml-org/gpt-oss-20b-GGUF"
 
 ### vLLM Server Endpoint
 
-ZeroClaw supports [vLLM](https://docs.vllm.ai/) as a first-class local provider:
+RustyClaw supports [vLLM](https://docs.vllm.ai/) as a first-class local provider:
 
 - Provider ID: `vllm`
 - Default endpoint: `http://localhost:8000/v1`
@@ -801,7 +801,7 @@ default_model = "meta-llama/Llama-3.1-8B-Instruct"
 
 ### Osaurus Server Endpoint
 
-ZeroClaw supports [Osaurus](https://github.com/dinoki-ai/osaurus) as a first-class local provider — a unified AI edge runtime for macOS that combines local MLX inference with cloud provider proxying and MCP support through a single endpoint:
+RustyClaw supports [Osaurus](https://github.com/dinoki-ai/osaurus) as a first-class local provider — a unified AI edge runtime for macOS that combines local MLX inference with cloud provider proxying and MCP support through a single endpoint:
 
 - Provider ID: `osaurus`
 - Default endpoint: `http://localhost:1337/v1`
@@ -818,16 +818,16 @@ default_model = "qwen3-30b-a3b-8bit"
 
 For detailed configuration of custom OpenAI-compatible and Anthropic-compatible endpoints, see [docs/custom-providers.md](docs/custom-providers.md).
 
-## Python Companion Package (`zeroclaw-tools`)
+## Python Companion Package (`rustyclaw-tools`)
 
-For LLM providers with inconsistent native tool calling (e.g., GLM-5/Zhipu), ZeroClaw ships a Python companion package with **LangGraph-based tool calling** for guaranteed consistency:
+For LLM providers with inconsistent native tool calling (e.g., GLM-5/Zhipu), RustyClaw ships a Python companion package with **LangGraph-based tool calling** for guaranteed consistency:
 
 ```bash
-pip install zeroclaw-tools
+pip install rustyclaw-tools
 ```
 
 ```python
-from zeroclaw_tools import create_agent, shell, file_read
+from rustyclaw_tools import create_agent, shell, file_read
 from langchain_core.messages import HumanMessage
 
 # Works with any OpenAI-compatible provider
@@ -855,7 +855,7 @@ See [`python/README.md`](python/README.md) for full documentation.
 
 ## Identity System (AIEOS Support)
 
-ZeroClaw supports **identity-agnostic** AI personas through two formats:
+RustyClaw supports **identity-agnostic** AI personas through two formats:
 
 ### OpenClaw (Default)
 
@@ -868,7 +868,7 @@ Traditional markdown files in your workspace:
 
 ### AIEOS (AI Entity Object Specification)
 
-[AIEOS](https://aieos.org) is a standardization framework for portable AI identity. ZeroClaw supports AIEOS v1.1 JSON payloads, allowing you to:
+[AIEOS](https://aieos.org) is a standardization framework for portable AI identity. RustyClaw supports AIEOS v1.1 JSON payloads, allowing you to:
 
 - **Import identities** from the AIEOS ecosystem
 - **Export identities** to other AIEOS-compatible systems
@@ -930,7 +930,7 @@ aieos_inline = '''
 '''
 ```
 
-ZeroClaw accepts both canonical AIEOS generator payloads and compact legacy payloads, then normalizes them into one system prompt format.
+RustyClaw accepts both canonical AIEOS generator payloads and compact legacy payloads, then normalizes them into one system prompt format.
 
 #### AIEOS Schema Sections
 
@@ -984,24 +984,24 @@ For a task-oriented command guide, see [`docs/commands-reference.md`](docs/comma
 
 ### Service Management
 
-ZeroClaw supports two init systems for background services:
+RustyClaw supports two init systems for background services:
 
 | Init System                    | Scope       | Config Path                 | Requires  |
 | ------------------------------ | ----------- | --------------------------- | --------- |
-| **systemd** (default on Linux) | User-level  | `~/.zeroclaw/config.toml`   | No sudo   |
-| **OpenRC** (Alpine)            | System-wide | `/etc/zeroclaw/config.toml` | sudo/root |
+| **systemd** (default on Linux) | User-level  | `~/.rustyclaw/config.toml`   | No sudo   |
+| **OpenRC** (Alpine)            | System-wide | `/etc/rustyclaw/config.toml` | sudo/root |
 
 Init system is auto-detected (`systemd` or `OpenRC`).
 
 ```bash
 # Linux with systemd (default, user-level)
-zeroclaw service install
-zeroclaw service start
+rustyclaw service install
+rustyclaw service start
 
 # Alpine with OpenRC (system-wide, requires sudo)
-sudo zeroclaw service install
-sudo rc-update add zeroclaw default
-sudo rc-service zeroclaw start
+sudo rustyclaw service install
+sudo rc-update add rustyclaw default
+sudo rc-service rustyclaw start
 ```
 
 For full OpenRC setup instructions, see [docs/network-deployment.md](docs/network-deployment.md#7-openrc-alpine-linux-service).
@@ -1017,9 +1017,9 @@ open_skills_enabled = true
 # prompt_injection_mode = "compact"          # optional: use for low-context local models
 ```
 
-You can also override at runtime with `ZEROCLAW_OPEN_SKILLS_ENABLED`, `ZEROCLAW_OPEN_SKILLS_DIR`, and `ZEROCLAW_SKILLS_PROMPT_MODE` (`full` or `compact`).
+You can also override at runtime with `RUSTYCLAW_OPEN_SKILLS_ENABLED`, `RUSTYCLAW_OPEN_SKILLS_DIR`, and `RUSTYCLAW_SKILLS_PROMPT_MODE` (`full` or `compact`).
 
-Skill installs are now gated by a built-in static security audit. `zeroclaw skills install <source>` blocks symlinks, script-like files, unsafe markdown link patterns, and high-risk shell payload snippets before accepting a skill. You can run `zeroclaw skills audit <source_or_name>` to validate a local directory or an installed skill manually.
+Skill installs are now gated by a built-in static security audit. `rustyclaw skills install <source>` blocks symlinks, script-like files, unsafe markdown link patterns, and high-risk shell payload snippets before accepting a skill. You can run `rustyclaw skills audit <source_or_name>` to validate a local directory or an installed skill manually.
 
 ## Development
 
@@ -1053,7 +1053,7 @@ cargo build --release --locked
 cargo install --path . --force --locked
 ```
 
-ZeroClaw is configured to use `rustls` for HTTP/TLS dependencies; `--locked` keeps the transitive graph deterministic on fresh environments.
+RustyClaw is configured to use `rustls` for HTTP/TLS dependencies; `--locked` keeps the transitive graph deterministic on fresh environments.
 
 ## Collaboration & Docs
 
@@ -1087,9 +1087,9 @@ For deployment and runtime operations:
 - Network deployment guide: [docs/network-deployment.md](docs/network-deployment.md)
 - Proxy agent playbook: [docs/proxy-agent-playbook.md](docs/proxy-agent-playbook.md)
 
-## Support ZeroClaw
+## Support RustyClaw
 
-If ZeroClaw helps your work and you want to support ongoing development, you can donate here:
+If RustyClaw helps your work and you want to support ongoing development, you can donate here:
 
 <a href="https://buymeacoffee.com/argenistherose"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Donate-yellow.svg?style=for-the-badge&logo=buy-me-a-coffee" alt="Buy Me a Coffee" /></a>
 
@@ -1106,19 +1106,19 @@ We're building in the open because the best ideas come from everywhere. If you'r
 
 ## ⚠️ Official Repository & Impersonation Warning
 
-**This is the only official ZeroClaw repository:**
+**This is the only official RustyClaw repository:**
 
-> https://github.com/zeroclaw-labs/zeroclaw
+> https://github.com/tezra-io/rustyclaw
 
-Any other repository, organization, domain, or package claiming to be "ZeroClaw" or implying affiliation with ZeroClaw Labs is **unauthorized and not affiliated with this project**. Known unauthorized forks will be listed in [TRADEMARK.md](TRADEMARK.md).
+Any other repository, organization, domain, or package claiming to be "RustyClaw" or implying affiliation with ZeroClaw Labs is **unauthorized and not affiliated with this project**. Known unauthorized forks will be listed in [TRADEMARK.md](TRADEMARK.md).
 
-If you encounter impersonation or trademark misuse, please [open an issue](https://github.com/zeroclaw-labs/zeroclaw/issues).
+If you encounter impersonation or trademark misuse, please [open an issue](https://github.com/tezra-io/rustyclaw/issues).
 
 ---
 
 ## License
 
-ZeroClaw is dual-licensed for maximum openness and contributor protection:
+RustyClaw is dual-licensed for maximum openness and contributor protection:
 
 | License | Use case |
 |---|---|
@@ -1129,7 +1129,7 @@ You may choose either license. **Contributors automatically grant rights under b
 
 ### Trademark
 
-The **ZeroClaw** name and logo are trademarks of ZeroClaw Labs. This license does not grant permission to use them to imply endorsement or affiliation. See [TRADEMARK.md](TRADEMARK.md) for permitted and prohibited uses.
+The **RustyClaw** name and logo are trademarks of ZeroClaw Labs. This license does not grant permission to use them to imply endorsement or affiliation. See [TRADEMARK.md](TRADEMARK.md) for permitted and prohibited uses.
 
 ### Contributor Protections
 
@@ -1140,7 +1140,7 @@ The **ZeroClaw** name and logo are trademarks of ZeroClaw Labs. This license doe
 
 ## Contributing
 
-New to ZeroClaw? Look for issues labeled [`good first issue`](https://github.com/zeroclaw-labs/zeroclaw/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) — see our [Contributing Guide](CONTRIBUTING.md#first-time-contributors) for how to get started.
+New to RustyClaw? Look for issues labeled [`good first issue`](https://github.com/tezra-io/rustyclaw/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) — see our [Contributing Guide](CONTRIBUTING.md#first-time-contributors) for how to get started.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLA.md](CLA.md). Implement a trait, submit a PR:
 
@@ -1151,20 +1151,20 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLA.md](CLA.md). Implement a trait, 
 - New `Tool` → `src/tools/`
 - New `Memory` → `src/memory/`
 - New `Tunnel` → `src/tunnel/`
-- New `Skill` → `~/.zeroclaw/workspace/skills/<name>/`
+- New `Skill` → `~/.rustyclaw/workspace/skills/<name>/`
 
 ---
 
-**ZeroClaw** — Zero overhead. Zero compromise. Deploy anywhere. Swap anything. 🦀
+**RustyClaw** — Zero overhead. Zero compromise. Deploy anywhere. Swap anything. 🦀
 
 ## Star History
 
 <p align="center">
-  <a href="https://www.star-history.com/#zeroclaw-labs/zeroclaw&type=date&legend=top-left">
+  <a href="https://www.star-history.com/#tezra-io/rustyclaw&type=date&legend=top-left">
     <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=zeroclaw-labs/zeroclaw&type=date&theme=dark&legend=top-left" />
-     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=zeroclaw-labs/zeroclaw&type=date&legend=top-left" />
-     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=zeroclaw-labs/zeroclaw&type=date&legend=top-left" />
+     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tezra-io/rustyclaw&type=date&theme=dark&legend=top-left" />
+     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tezra-io/rustyclaw&type=date&legend=top-left" />
+     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=tezra-io/rustyclaw&type=date&legend=top-left" />
     </picture>
   </a>
 </p>

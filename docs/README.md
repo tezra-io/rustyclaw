@@ -1,4 +1,4 @@
-# ZeroClaw Documentation Hub
+# RustyClaw Documentation Hub
 
 This page is the primary entry point for the documentation system.
 
@@ -10,7 +10,7 @@ Localized hubs: [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · 
 
 | I want to… | Read this |
 |---|---|
-| Install and run ZeroClaw quickly | [README.md (Quick Start)](../README.md#quick-start) |
+| Install and run RustyClaw quickly | [README.md (Quick Start)](../README.md#quick-start) |
 | Bootstrap in one command | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | Update or uninstall on macOS | [getting-started/macos-update-uninstall.md](getting-started/macos-update-uninstall.md) |
 | Find commands by task | [commands-reference.md](commands-reference.md) |

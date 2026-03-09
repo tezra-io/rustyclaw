@@ -5,7 +5,7 @@
 
 ## Context & Decision
 
-ZeroClaw (upstream) is a single-agent Rust system. The multi-agent orchestration layer (AgentBus, SubAgentRegistry, DelegateTool, AgentCoordinator) was built entirely by us on top of it. After a spike analysis (TEZ-136), the decision is:
+RustyClaw (upstream) is a single-agent Rust system. The multi-agent orchestration layer (AgentBus, SubAgentRegistry, DelegateTool, AgentCoordinator) was built entirely by us on top of it. After a spike analysis (TEZ-136), the decision is:
 
 **Rewrite the orchestration layer in Elixir/OTP. Keep the Rust core (channels, tools, security, providers) intact.**
 
@@ -35,7 +35,7 @@ The Elixir layer replaces: agent lifecycle, registry, message bus, delegation, s
                      │ Erlang Port (stdin/stdout JSON)
                      │ or HTTP (localhost)
 ┌────────────────────▼───────────────────────────────────┐
-│                  Rust/ZeroClaw Core                     │
+│                  Rust/RustyClaw Core                     │
 │                                                         │
 │  - Channel handlers (Signal, Telegram, Discord, etc.)  │
 │  - Tool execution (shell, file, web, memory)           │
@@ -53,7 +53,7 @@ The Elixir layer replaces: agent lifecycle, registry, message bus, delegation, s
 
 ### 1. AgentDefinition (data layer)
 - Parse agent definition files (YAML frontmatter + markdown body)
-- Load from `~/.zeroclaw/agents/*.md`
+- Load from `~/.rustyclaw/agents/*.md`
 - Validate fields: name, model, capabilities, delegates_to, persistent
 - No Elixir equiv exists — build from scratch using `YamlElixir` + `NimbleOptions`
 
@@ -125,7 +125,7 @@ Start with Option B for development speed, migrate to Option A if latency matter
 
 ---
 
-## What to Remove from ZeroClaw
+## What to Remove from RustyClaw
 
 The following Rust files implement what Elixir will replace. They should be **removed or stubbed** after the Elixir layer is working:
 

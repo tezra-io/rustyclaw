@@ -7,7 +7,7 @@
 
 ## Vấn đề
 
-ZeroClaw ghi log các hành động nhưng thiếu audit trail chống giả mạo cho:
+RustyClaw ghi log các hành động nhưng thiếu audit trail chống giả mạo cho:
 - Ai đã thực thi lệnh nào
 - Khi nào và từ channel nào
 - Những tài nguyên nào được truy cập
@@ -116,13 +116,13 @@ impl AuditLogger {
 ```toml
 [security.audit]
 enabled = true
-log_path = "~/.config/zeroclaw/audit.log"
+log_path = "~/.config/rustyclaw/audit.log"
 max_size_mb = 100
 rotate = "daily"  # daily | weekly | size
 
 # Chống giả mạo
 sign_events = true
-signing_key_path = "~/.config/zeroclaw/audit.key"
+signing_key_path = "~/.config/rustyclaw/audit.key"
 
 # Những gì cần log
 log_commands = true
@@ -137,19 +137,19 @@ log_policy_violations = true
 
 ```bash
 # Hiển thị tất cả lệnh được thực thi bởi @alice
-zeroclaw audit --user @alice
+rustyclaw audit --user @alice
 
 # Hiển thị tất cả lệnh rủi ro cao
-zeroclaw audit --risk high
+rustyclaw audit --risk high
 
 # Hiển thị vi phạm trong 24 giờ qua
-zeroclaw audit --since 24h --violations-only
+rustyclaw audit --since 24h --violations-only
 
 # Xuất sang JSON để phân tích
-zeroclaw audit --format json --output audit.json
+rustyclaw audit --format json --output audit.json
 
 # Xác minh tính toàn vẹn của log
-zeroclaw audit --verify-signatures
+rustyclaw audit --verify-signatures
 ```
 
 ---

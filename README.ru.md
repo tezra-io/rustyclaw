@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="zeroclaw.png" alt="ZeroClaw" width="200" />
+  <img src="rustyclaw.png" alt="RustyClaw" width="200" />
 </p>
 
-<h1 align="center">ZeroClaw 🦀（Русский）</h1>
+<h1 align="center">RustyClaw 🦀（Русский）</h1>
 
 <p align="center">
   <strong>Zero overhead. Zero compromise. 100% Rust. 100% Agnostic.</strong>
@@ -53,30 +53,30 @@
 
 | Дата (UTC) | Уровень | Объявление | Действие |
 |---|---|---|---|
-| 2026-02-19 | _Срочно_ | Мы **не аффилированы** с `openagen/zeroclaw` и `zeroclaw.org`. Домен `zeroclaw.org` сейчас указывает на fork `openagen/zeroclaw`, и этот домен/репозиторий выдают себя за наш официальный сайт и проект. | Не доверяйте информации, бинарникам, сборам средств и «официальным» объявлениям из этих источников. Используйте только [этот репозиторий](https://github.com/zeroclaw-labs/zeroclaw) и наши верифицированные соцсети. |
-| 2026-02-21 | _Важно_ | Наш официальный сайт уже запущен: [zeroclawlabs.ai](https://zeroclawlabs.ai). Спасибо, что дождались запуска. При этом попытки выдавать себя за ZeroClaw продолжаются, поэтому не участвуйте в инвестициях, сборах средств и похожих активностях, если они не подтверждены через наши официальные каналы. | Ориентируйтесь только на [этот репозиторий](https://github.com/zeroclaw-labs/zeroclaw); также следите за [X (@zeroclawlabs)](https://x.com/zeroclawlabs?s=21), [Telegram (@zeroclawlabs)](https://t.me/zeroclawlabs), [Facebook (группа)](https://www.facebook.com/groups/zeroclaw), [Reddit (r/zeroclawlabs)](https://www.reddit.com/r/zeroclawlabs/) и [Xiaohongshu](https://www.xiaohongshu.com/user/profile/67cbfc43000000000d008307?xsec_token=AB73VnYnGNx5y36EtnnZfGmAmS-6Wzv8WMuGpfwfkg6Yc%3D&xsec_source=pc_search) для официальных обновлений. |
+| 2026-02-19 | _Срочно_ | Мы **не аффилированы** с `openagen/rustyclaw` и `rustyclaw.org`. Домен `rustyclaw.org` сейчас указывает на fork `openagen/rustyclaw`, и этот домен/репозиторий выдают себя за наш официальный сайт и проект. | Не доверяйте информации, бинарникам, сборам средств и «официальным» объявлениям из этих источников. Используйте только [этот репозиторий](https://github.com/tezra-io/rustyclaw) и наши верифицированные соцсети. |
+| 2026-02-21 | _Важно_ | Наш официальный сайт уже запущен: [zeroclawlabs.ai](https://zeroclawlabs.ai). Спасибо, что дождались запуска. При этом попытки выдавать себя за RustyClaw продолжаются, поэтому не участвуйте в инвестициях, сборах средств и похожих активностях, если они не подтверждены через наши официальные каналы. | Ориентируйтесь только на [этот репозиторий](https://github.com/tezra-io/rustyclaw); также следите за [X (@zeroclawlabs)](https://x.com/zeroclawlabs?s=21), [Telegram (@zeroclawlabs)](https://t.me/zeroclawlabs), [Facebook (группа)](https://www.facebook.com/groups/zeroclaw), [Reddit (r/zeroclawlabs)](https://www.reddit.com/r/zeroclawlabs/) и [Xiaohongshu](https://www.xiaohongshu.com/user/profile/67cbfc43000000000d008307?xsec_token=AB73VnYnGNx5y36EtnnZfGmAmS-6Wzv8WMuGpfwfkg6Yc%3D&xsec_source=pc_search) для официальных обновлений. |
 | 2026-02-19 | _Важно_ | Anthropic обновил раздел Authentication and Credential Use 2026-02-19. В нем указано, что OAuth authentication (Free/Pro/Max) предназначена только для Claude Code и Claude.ai; использование OAuth-токенов, полученных через Claude Free/Pro/Max, в любых других продуктах, инструментах или сервисах (включая Agent SDK), не допускается и может считаться нарушением Consumer Terms of Service. | Чтобы избежать потерь, временно не используйте Claude Code OAuth-интеграции. Оригинал: [Authentication and Credential Use](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use). |
 
 ## О проекте
 
-ZeroClaw — это производительная и расширяемая инфраструктура автономного AI-агента. ZeroClaw — это **операционная система времени выполнения** для агентных рабочих процессов — инфраструктура, абстрагирующая модели, инструменты, память и выполнение, позволяя создавать агентов один раз и запускать где угодно.
+RustyClaw — это производительная и расширяемая инфраструктура автономного AI-агента. RustyClaw — это **операционная система времени выполнения** для агентных рабочих процессов — инфраструктура, абстрагирующая модели, инструменты, память и выполнение, позволяя создавать агентов один раз и запускать где угодно.
 
 - Нативно на Rust, единый бинарник, переносимость между ARM / x86 / RISC-V
 - Архитектура на Trait (`Provider`, `Channel`, `Tool`, `Memory` и др.)
 - Безопасные значения по умолчанию: pairing, явные allowlist, sandbox и scope-ограничения
 
-## Почему выбирают ZeroClaw
+## Почему выбирают RustyClaw
 
 - **Лёгкий runtime по умолчанию**: Повседневные CLI-операции и `status` обычно укладываются в несколько МБ памяти.
 - **Оптимизирован для недорогих сред**: Подходит для бюджетных плат и небольших cloud-инстансов без тяжёлой runtime-обвязки.
 - **Быстрый cold start**: Архитектура одного Rust-бинарника ускоряет запуск основных команд и daemon-режима.
 - **Портативная модель деплоя**: Единый подход для ARM / x86 / RISC-V и возможность менять providers/channels/tools.
 
-## Снимок бенчмарка (ZeroClaw vs OpenClaw, воспроизводимо)
+## Снимок бенчмарка (RustyClaw vs OpenClaw, воспроизводимо)
 
 Ниже — быстрый локальный сравнительный срез (macOS arm64, февраль 2026), нормализованный под 0.8GHz edge CPU.
 
-| | OpenClaw | NanoBot | PicoClaw | ZeroClaw 🦀 |
+| | OpenClaw | NanoBot | PicoClaw | RustyClaw 🦀 |
 |---|---|---|---|---|
 | **Язык** | TypeScript | Python | Go | **Rust** |
 | **RAM** | > 1GB | > 100MB | < 10MB | **< 5MB** |
@@ -84,10 +84,10 @@ ZeroClaw — это производительная и расширяемая �
 | **Размер бинарника** | ~28MB (dist) | N/A (скрипты) | ~8MB | **~8.8 MB** |
 | **Стоимость** | Mac Mini $599 | Linux SBC ~$50 | Linux-плата $10 | **Любое железо за $10** |
 
-> Примечание: результаты ZeroClaw получены на release-сборке с помощью `/usr/bin/time -l`. OpenClaw требует Node.js runtime; только этот runtime обычно добавляет около 390MB дополнительного потребления памяти. NanoBot требует Python runtime. PicoClaw и ZeroClaw — статические бинарники.
+> Примечание: результаты RustyClaw получены на release-сборке с помощью `/usr/bin/time -l`. OpenClaw требует Node.js runtime; только этот runtime обычно добавляет около 390MB дополнительного потребления памяти. NanoBot требует Python runtime. PicoClaw и RustyClaw — статические бинарники.
 
 <p align="center">
-  <img src="zero-claw.jpeg" alt="Сравнение ZeroClaw и OpenClaw" width="800" />
+  <img src="zero-claw.jpeg" alt="Сравнение RustyClaw и OpenClaw" width="800" />
 </p>
 
 ### Локально воспроизводимое измерение
@@ -96,23 +96,23 @@ ZeroClaw — это производительная и расширяемая �
 
 ```bash
 cargo build --release
-ls -lh target/release/zeroclaw
+ls -lh target/release/rustyclaw
 
-/usr/bin/time -l target/release/zeroclaw --help
-/usr/bin/time -l target/release/zeroclaw status
+/usr/bin/time -l target/release/rustyclaw --help
+/usr/bin/time -l target/release/rustyclaw status
 ```
 
 Текущие примерные значения из README (macOS arm64, 2026-02-18):
 
 - Размер release-бинарника: `8.8M`
-- `zeroclaw --help`: ~`0.02s`, пик памяти ~`3.9MB`
-- `zeroclaw status`: ~`0.01s`, пик памяти ~`4.1MB`
+- `rustyclaw --help`: ~`0.02s`, пик памяти ~`3.9MB`
+- `rustyclaw status`: ~`0.01s`, пик памяти ~`4.1MB`
 
 ## Установка в 1 клик
 
 ```bash
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/tezra-io/rustyclaw.git
+cd rustyclaw
 ./bootstrap.sh
 ```
 
@@ -125,69 +125,69 @@ cd zeroclaw
 ### Homebrew (macOS/Linuxbrew)
 
 ```bash
-brew install zeroclaw
+brew install rustyclaw
 ```
 
 ```bash
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/tezra-io/rustyclaw.git
+cd rustyclaw
 cargo build --release --locked
 cargo install --path . --force --locked
 
-zeroclaw onboard --api-key sk-... --provider openrouter
-zeroclaw onboard --interactive
+rustyclaw onboard --api-key sk-... --provider openrouter
+rustyclaw onboard --interactive
 
-zeroclaw agent -m "Hello, ZeroClaw!"
+rustyclaw agent -m "Hello, RustyClaw!"
 
 # default: 127.0.0.1:42617
-zeroclaw gateway
+rustyclaw gateway
 
-zeroclaw daemon
+rustyclaw daemon
 ```
 
 ## Subscription Auth (OpenAI Codex / Claude Code)
 
-ZeroClaw поддерживает нативные профили авторизации на основе подписки (мультиаккаунт, шифрование при хранении).
+RustyClaw поддерживает нативные профили авторизации на основе подписки (мультиаккаунт, шифрование при хранении).
 
-- Файл хранения: `~/.zeroclaw/auth-profiles.json`
-- Ключ шифрования: `~/.zeroclaw/.secret_key`
+- Файл хранения: `~/.rustyclaw/auth-profiles.json`
+- Ключ шифрования: `~/.rustyclaw/.secret_key`
 - Формат Profile ID: `<provider>:<profile_name>` (пример: `openai-codex:work`)
 
 OpenAI Codex OAuth (подписка ChatGPT):
 
 ```bash
 # Рекомендуется для серверов/headless-окружений
-zeroclaw auth login --provider openai-codex --device-code
+rustyclaw auth login --provider openai-codex --device-code
 
 # Браузерный/callback-поток с paste-фолбэком
-zeroclaw auth login --provider openai-codex --profile default
-zeroclaw auth paste-redirect --provider openai-codex --profile default
+rustyclaw auth login --provider openai-codex --profile default
+rustyclaw auth paste-redirect --provider openai-codex --profile default
 
 # Проверка / обновление / переключение профиля
-zeroclaw auth status
-zeroclaw auth refresh --provider openai-codex --profile default
-zeroclaw auth use --provider openai-codex --profile work
+rustyclaw auth status
+rustyclaw auth refresh --provider openai-codex --profile default
+rustyclaw auth use --provider openai-codex --profile work
 ```
 
 Claude Code / Anthropic setup-token:
 
 ```bash
 # Вставка subscription/setup token (режим Authorization header)
-zeroclaw auth paste-token --provider anthropic --profile default --auth-kind authorization
+rustyclaw auth paste-token --provider anthropic --profile default --auth-kind authorization
 
 # Команда-алиас
-zeroclaw auth setup-token --provider anthropic --profile default
+rustyclaw auth setup-token --provider anthropic --profile default
 ```
 
 Запуск agent с subscription auth:
 
 ```bash
-zeroclaw agent --provider openai-codex -m "hello"
-zeroclaw agent --provider openai-codex --auth-profile openai-codex:work -m "hello"
+rustyclaw agent --provider openai-codex -m "hello"
+rustyclaw agent --provider openai-codex --auth-profile openai-codex:work -m "hello"
 
 # Anthropic поддерживает и API key, и auth token через переменные окружения:
 # ANTHROPIC_AUTH_TOKEN, ANTHROPIC_OAUTH_TOKEN, ANTHROPIC_API_KEY
-zeroclaw agent --provider anthropic -m "hello"
+rustyclaw agent --provider anthropic -m "hello"
 ```
 
 ## Архитектура
@@ -195,12 +195,12 @@ zeroclaw agent --provider anthropic -m "hello"
 Каждая подсистема — это **Trait**: меняйте реализации через конфигурацию, без изменения кода.
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="Архитектура ZeroClaw" width="900" />
+  <img src="docs/architecture.svg" alt="Архитектура RustyClaw" width="900" />
 </p>
 
 | Подсистема | Trait | Встроенные реализации | Расширение |
 |-----------|-------|---------------------|------------|
-| **AI-модели** | `Provider` | Каталог через `zeroclaw providers` (сейчас 28 встроенных + алиасы, плюс пользовательские endpoint) | `custom:https://your-api.com` (OpenAI-совместимый) или `anthropic-custom:https://your-api.com` |
+| **AI-модели** | `Provider` | Каталог через `rustyclaw providers` (сейчас 28 встроенных + алиасы, плюс пользовательские endpoint) | `custom:https://your-api.com` (OpenAI-совместимый) или `anthropic-custom:https://your-api.com` |
 | **Каналы** | `Channel` | CLI, Telegram, Discord, Slack, Mattermost, iMessage, Matrix, Signal, WhatsApp, Linq, Email, IRC, Lark, DingTalk, QQ, Webhook | Любой messaging API |
 | **Память** | `Memory` | SQLite гибридный поиск, PostgreSQL-бэкенд, Lucid-мост, Markdown-файлы, явный `none`-бэкенд, snapshot/hydrate, опциональный кэш ответов | Любой persistence-бэкенд |
 | **Инструменты** | `Tool` | shell/file/memory, cron/schedule, git, pushover, browser, http_request, screenshot/image_info, composio (opt-in), delegate, аппаратные инструменты | Любая функциональность |
@@ -218,7 +218,7 @@ zeroclaw agent --provider anthropic -m "hello"
 - ✅ Поддерживается сейчас: `runtime.kind = "native"` или `runtime.kind = "docker"`
 - 🚧 Запланировано, но ещё не реализовано: WASM / edge-runtime
 
-При указании неподдерживаемого `runtime.kind` ZeroClaw завершается с явной ошибкой, а не молча откатывается к native.
+При указании неподдерживаемого `runtime.kind` RustyClaw завершается с явной ошибкой, а не молча откатывается к native.
 
 ### Система памяти (полнофункциональный поисковый движок)
 

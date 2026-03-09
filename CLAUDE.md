@@ -1,12 +1,12 @@
-# CLAUDE.md — ZeroClaw + Elixir Orchestration
+# CLAUDE.md — RustyClaw + Elixir Orchestration
 
 Instructions for Claude agents working on this codebase.
 
 ## 1) What This Is
 
-This is the **upstream ZeroClaw** repository — a Rust AI agent runtime. The internal package name is `zeroclaw`, the local directory is `rustyclaw`.
+This is the **upstream RustyClaw** repository — a Rust AI agent runtime. The internal package name is `rustyclaw`, the local directory is `rustyclaw`.
 
-ZeroClaw is currently a **single-agent** system. We are extending it with an **Elixir/OTP orchestration layer** for multi-agent capabilities. The Rust core stays intact; Elixir replaces the agent lifecycle, registry, message bus, delegation, and supervision that were previously hand-rolled in Rust (~4,500 LOC, now removed and backed up at `rustyclaw-rust-backup/`).
+RustyClaw is currently a **single-agent** system. We are extending it with an **Elixir/OTP orchestration layer** for multi-agent capabilities. The Rust core stays intact; Elixir replaces the agent lifecycle, registry, message bus, delegation, and supervision that were previously hand-rolled in Rust (~4,500 LOC, now removed and backed up at `rustyclaw-rust-backup/`).
 
 **Read `docs/ELIXIR_ORCHESTRATION_DESIGN.md` before any orchestration work.** It contains the full architecture, subsystem breakdown, implementation order, and anti-patterns.
 
@@ -24,7 +24,7 @@ ZeroClaw is currently a **single-agent** system. We are extending it with an **E
 └──────────────────┬──────────────────────────────-┘
                    │ Erlang Port or HTTP (localhost)
 ┌──────────────────▼──────────────────────────────-┐
-│              Rust/ZeroClaw Core (KEEP)            │
+│              Rust/RustyClaw Core (KEEP)            │
 │                                                   │
 │  Channels (19): Telegram, Discord, Signal, etc.   │
 │  Tools (37): shell, file, web, memory, browser    │
@@ -82,18 +82,18 @@ ZeroClaw is currently a **single-agent** system. We are extending it with an **E
 | `HookHandler` | `src/hooks/traits.rs` | Lifecycle event hooks |
 | `Sandbox` | `src/security/traits.rs` | OS-level process isolation |
 
-### Elixir Orchestration (`elixir/zeroclaw_orchestrator/`)
+### Elixir Orchestration (`elixir/rustyclaw_orchestrator/`)
 
 | Path | Purpose |
 |------|---------|
-| `lib/zeroclaw_orchestrator.ex` | Top-level API (spawn, delegate, list, stop, sessions) |
-| `lib/zeroclaw_orchestrator/application.ex` | OTP Application, supervision tree |
-| `lib/zeroclaw_orchestrator/agent_definition.ex` | YAML frontmatter + markdown parser, NimbleOptions validation |
-| `lib/zeroclaw_orchestrator/agent_server.ex` | GenServer per agent (health, tasks, messaging) |
-| `lib/zeroclaw_orchestrator/agent_supervisor.ex` | DynamicSupervisor wrapper (spawn/stop/list) |
-| `lib/zeroclaw_orchestrator/agent_coordinator.ex` | Capability routing, delegation ACL, strategies |
-| `lib/zeroclaw_orchestrator/sub_agent_session.ex` | ETS-backed session lifecycle (pending/active/completed/failed) |
-| `lib/zeroclaw_orchestrator/rust_bridge.ex` | HTTP bridge to Rust core with retry/backoff |
+| `lib/rustyclaw_orchestrator.ex` | Top-level API (spawn, delegate, list, stop, sessions) |
+| `lib/rustyclaw_orchestrator/application.ex` | OTP Application, supervision tree |
+| `lib/rustyclaw_orchestrator/agent_definition.ex` | YAML frontmatter + markdown parser, NimbleOptions validation |
+| `lib/rustyclaw_orchestrator/agent_server.ex` | GenServer per agent (health, tasks, messaging) |
+| `lib/rustyclaw_orchestrator/agent_supervisor.ex` | DynamicSupervisor wrapper (spawn/stop/list) |
+| `lib/rustyclaw_orchestrator/agent_coordinator.ex` | Capability routing, delegation ACL, strategies |
+| `lib/rustyclaw_orchestrator/sub_agent_session.ex` | ETS-backed session lifecycle (pending/active/completed/failed) |
+| `lib/rustyclaw_orchestrator/rust_bridge.ex` | HTTP bridge to Rust core with retry/backoff |
 
 See `docs/ELIXIR_ORCHESTRATION_DESIGN.md` for the full architecture.
 

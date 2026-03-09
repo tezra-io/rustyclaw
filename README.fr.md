@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="zeroclaw.png" alt="ZeroClaw" width="200" />
+  <img src="rustyclaw.png" alt="RustyClaw" width="200" />
 </p>
 
-<h1 align="center">ZeroClaw 🦀</h1>
+<h1 align="center">RustyClaw 🦀</h1>
 
 <p align="center">
   <strong>Zéro surcharge. Zéro compromis. 100% Rust. 100% Agnostique.</strong><br>
@@ -51,7 +51,7 @@ Construit par des étudiants et membres des communautés Harvard, MIT et Sundai.
 </p>
 
 <p align="center">
-  ZeroClaw est le <strong>système d'exploitation runtime</strong> pour les workflows agentiques — une infrastructure qui abstrait les modèles, outils, mémoire et exécution pour construire des agents une fois et les exécuter partout.
+  RustyClaw est le <strong>système d'exploitation runtime</strong> pour les workflows agentiques — une infrastructure qui abstrait les modèles, outils, mémoire et exécution pour construire des agents une fois et les exécuter partout.
 </p>
 
 <p align="center"><code>Architecture pilotée par traits · runtime sécurisé par défaut · fournisseur/canal/outil interchangeables · tout est pluggable</code></p>
@@ -62,8 +62,8 @@ Utilisez ce tableau pour les avis importants (changements incompatibles, avis de
 
 | Date (UTC) | Niveau      | Avis                                                                                                                                                                                                                                                                                                                                                                                                              | Action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ---------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-02-19 | _Critique_  | Nous ne sommes **pas affiliés** à `openagen/zeroclaw` ou `zeroclaw.org`. Le domaine `zeroclaw.org` pointe actuellement vers le fork `openagen/zeroclaw`, et ce domaine/dépôt usurpe l'identité de notre site web/projet officiel.                                                                                                                                                                                 | Ne faites pas confiance aux informations, binaires, levées de fonds ou annonces provenant de ces sources. Utilisez uniquement [ce dépôt](https://github.com/zeroclaw-labs/zeroclaw) et nos comptes sociaux vérifiés.                                                                                                                                                                                                                                                                                                                                                          |
-| 2026-02-21 | _Important_ | Notre site officiel est désormais en ligne : [zeroclawlabs.ai](https://zeroclawlabs.ai). Merci pour votre patience pendant cette attente. Nous constatons toujours des tentatives d'usurpation : ne participez à aucune activité d'investissement/financement au nom de ZeroClaw si elle n'est pas publiée via nos canaux officiels.                                                                                                                   | Utilisez [ce dépôt](https://github.com/zeroclaw-labs/zeroclaw) comme source unique de vérité. Suivez [X (@zeroclawlabs)](https://x.com/zeroclawlabs?s=21), [Telegram (@zeroclawlabs)](https://t.me/zeroclawlabs), [Facebook (groupe)](https://www.facebook.com/groups/zeroclaw), [Reddit (r/zeroclawlabs)](https://www.reddit.com/r/zeroclawlabs/), et [Xiaohongshu](https://www.xiaohongshu.com/user/profile/67cbfc43000000000d008307?xsec_token=AB73VnYnGNx5y36EtnnZfGmAmS-6Wzv8WMuGpfwfkg6Yc%3D&xsec_source=pc_search) pour les mises à jour officielles. |
+| 2026-02-19 | _Critique_  | Nous ne sommes **pas affiliés** à `openagen/rustyclaw` ou `rustyclaw.org`. Le domaine `rustyclaw.org` pointe actuellement vers le fork `openagen/rustyclaw`, et ce domaine/dépôt usurpe l'identité de notre site web/projet officiel.                                                                                                                                                                                 | Ne faites pas confiance aux informations, binaires, levées de fonds ou annonces provenant de ces sources. Utilisez uniquement [ce dépôt](https://github.com/tezra-io/rustyclaw) et nos comptes sociaux vérifiés.                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-02-21 | _Important_ | Notre site officiel est désormais en ligne : [zeroclawlabs.ai](https://zeroclawlabs.ai). Merci pour votre patience pendant cette attente. Nous constatons toujours des tentatives d'usurpation : ne participez à aucune activité d'investissement/financement au nom de RustyClaw si elle n'est pas publiée via nos canaux officiels.                                                                                                                   | Utilisez [ce dépôt](https://github.com/tezra-io/rustyclaw) comme source unique de vérité. Suivez [X (@zeroclawlabs)](https://x.com/zeroclawlabs?s=21), [Telegram (@zeroclawlabs)](https://t.me/zeroclawlabs), [Facebook (groupe)](https://www.facebook.com/groups/zeroclaw), [Reddit (r/zeroclawlabs)](https://www.reddit.com/r/zeroclawlabs/), et [Xiaohongshu](https://www.xiaohongshu.com/user/profile/67cbfc43000000000d008307?xsec_token=AB73VnYnGNx5y36EtnnZfGmAmS-6Wzv8WMuGpfwfkg6Yc%3D&xsec_source=pc_search) pour les mises à jour officielles. |
 | 2026-02-19 | _Important_ | Anthropic a mis à jour les conditions d'utilisation de l'authentification et des identifiants le 2026-02-19. L'authentification OAuth (Free, Pro, Max) est exclusivement destinée à Claude Code et Claude.ai ; l'utilisation de tokens OAuth de Claude Free/Pro/Max dans tout autre produit, outil ou service (y compris Agent SDK) n'est pas autorisée et peut violer les Conditions d'utilisation grand public. | Veuillez temporairement éviter les intégrations OAuth de Claude Code pour prévenir toute perte potentielle. Clause originale : [Authentication and Credential Use](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).                                                                                                                                                                                                                                                                                                                      |
 
 ### ✨ Fonctionnalités
@@ -73,18 +73,18 @@ Utilisez ce tableau pour les avis importants (changements incompatibles, avis de
 - ⚡ **Démarrages à Froid Rapides :** Le runtime Rust mono-binaire maintient le démarrage des commandes et démons quasi instantané pour les opérations quotidiennes.
 - 🌍 **Architecture Portable :** Un workflow binaire unique sur ARM, x86 et RISC-V avec fournisseurs/canaux/outils interchangeables.
 
-### Pourquoi les équipes choisissent ZeroClaw
+### Pourquoi les équipes choisissent RustyClaw
 
 - **Léger par défaut :** petit binaire Rust, démarrage rapide, empreinte mémoire faible.
 - **Sécurisé par conception :** appairage, sandboxing strict, listes d'autorisation explicites, portée de workspace.
 - **Entièrement interchangeable :** les systèmes centraux sont des traits (fournisseurs, canaux, outils, mémoire, tunnels).
 - **Aucun verrouillage :** support de fournisseur compatible OpenAI + endpoints personnalisés pluggables.
 
-## Instantané de Benchmark (ZeroClaw vs OpenClaw, Reproductible)
+## Instantané de Benchmark (RustyClaw vs OpenClaw, Reproductible)
 
 Benchmark rapide sur machine locale (macOS arm64, fév. 2026) normalisé pour matériel edge 0.8 GHz.
 
-|                              | OpenClaw      | NanoBot        | PicoClaw        | ZeroClaw 🦀           |
+|                              | OpenClaw      | NanoBot        | PicoClaw        | RustyClaw 🦀           |
 | ---------------------------- | ------------- | -------------- | --------------- | --------------------- |
 | **Langage**                  | TypeScript    | Python         | Go              | **Rust**              |
 | **RAM**                      | > 1 Go        | > 100 Mo       | < 10 Mo         | **< 5 Mo**            |
@@ -92,10 +92,10 @@ Benchmark rapide sur machine locale (macOS arm64, fév. 2026) normalisé pour ma
 | **Taille Binaire**           | ~28 Mo (dist) | N/A (Scripts)  | ~8 Mo           | **3.4 Mo**            |
 | **Coût**                     | Mac Mini 599$ | Linux SBC ~50$ | Carte Linux 10$ | **Tout matériel 10$** |
 
-> Notes : Les résultats ZeroClaw sont mesurés sur des builds de production utilisant `/usr/bin/time -l`. OpenClaw nécessite le runtime Node.js (typiquement ~390 Mo de surcharge mémoire supplémentaire), tandis que NanoBot nécessite le runtime Python. PicoClaw et ZeroClaw sont des binaires statiques. Les chiffres RAM ci-dessus sont la mémoire runtime ; les exigences de compilation build-time sont plus élevées.
+> Notes : Les résultats RustyClaw sont mesurés sur des builds de production utilisant `/usr/bin/time -l`. OpenClaw nécessite le runtime Node.js (typiquement ~390 Mo de surcharge mémoire supplémentaire), tandis que NanoBot nécessite le runtime Python. PicoClaw et RustyClaw sont des binaires statiques. Les chiffres RAM ci-dessus sont la mémoire runtime ; les exigences de compilation build-time sont plus élevées.
 
 <p align="center">
-  <img src="zero-claw.jpeg" alt="Comparaison ZeroClaw vs OpenClaw" width="800" />
+  <img src="zero-claw.jpeg" alt="Comparaison RustyClaw vs OpenClaw" width="800" />
 </p>
 
 ### Mesure locale reproductible
@@ -104,17 +104,17 @@ Les affirmations de benchmark peuvent dériver au fil de l'évolution du code et
 
 ```bash
 cargo build --release
-ls -lh target/release/zeroclaw
+ls -lh target/release/rustyclaw
 
-/usr/bin/time -l target/release/zeroclaw --help
-/usr/bin/time -l target/release/zeroclaw status
+/usr/bin/time -l target/release/rustyclaw --help
+/usr/bin/time -l target/release/rustyclaw status
 ```
 
 Exemple d'échantillon (macOS arm64, mesuré le 18 février 2026) :
 
 - Taille binaire release : `8.8M`
-- `zeroclaw --help` : environ `0.02s` de temps réel, ~`3.9 Mo` d'empreinte mémoire maximale
-- `zeroclaw status` : environ `0.01s` de temps réel, ~`4.1 Mo` d'empreinte mémoire maximale
+- `rustyclaw --help` : environ `0.02s` de temps réel, ~`3.9 Mo` d'empreinte mémoire maximale
+- `rustyclaw status` : environ `0.01s` de temps réel, ~`4.1 Mo` d'empreinte mémoire maximale
 
 ## Prérequis
 
@@ -188,22 +188,22 @@ Exemple d'échantillon (macOS arm64, mesuré le 18 février 2026) :
 
 ### Option 1 : Configuration automatisée (recommandée)
 
-Le script `bootstrap.sh` installe Rust, clone ZeroClaw, le compile, et configure votre environnement de développement initial :
+Le script `bootstrap.sh` installe Rust, clone RustyClaw, le compile, et configure votre environnement de développement initial :
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tezra-io/rustyclaw/main/bootstrap.sh | bash
 ```
 
 Ceci va :
 
 1. Installer Rust (si absent)
-2. Cloner le dépôt ZeroClaw
-3. Compiler ZeroClaw en mode release
-4. Installer `zeroclaw` dans `~/.cargo/bin/`
-5. Créer la structure de workspace par défaut dans `~/.zeroclaw/workspace/`
-6. Générer un fichier de configuration `~/.zeroclaw/workspace/config.toml` de démarrage
+2. Cloner le dépôt RustyClaw
+3. Compiler RustyClaw en mode release
+4. Installer `rustyclaw` dans `~/.cargo/bin/`
+5. Créer la structure de workspace par défaut dans `~/.rustyclaw/workspace/`
+6. Générer un fichier de configuration `~/.rustyclaw/workspace/config.toml` de démarrage
 
-Après le bootstrap, relancez votre shell ou exécutez `source ~/.cargo/env` pour utiliser la commande `zeroclaw` globalement.
+Après le bootstrap, relancez votre shell ou exécutez `source ~/.cargo/env` pour utiliser la commande `rustyclaw` globalement.
 
 ### Option 2 : Installation manuelle
 
@@ -212,8 +212,8 @@ Après le bootstrap, relancez votre shell ou exécutez `source ~/.cargo/env` pou
 
 ```bash
 # 1. Clonez le dépôt
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/tezra-io/rustyclaw.git
+cd rustyclaw
 
 # 2. Compilez en release
 cargo build --release --locked
@@ -222,11 +222,11 @@ cargo build --release --locked
 cargo install --path . --locked
 
 # 4. Initialisez le workspace
-zeroclaw init
+rustyclaw init
 
 # 5. Vérifiez l'installation
-zeroclaw --version
-zeroclaw status
+rustyclaw --version
+rustyclaw status
 ```
 
 </details>
@@ -236,7 +236,7 @@ zeroclaw status
 Une fois installé (via bootstrap ou manuellement), vous devriez voir :
 
 ```
-~/.zeroclaw/workspace/
+~/.rustyclaw/workspace/
 ├── config.toml          # Configuration principale
 ├── .pairing             # Secrets de pairing (généré au premier lancement)
 ├── logs/                # Journaux de daemon/agent
@@ -246,14 +246,14 @@ Une fois installé (via bootstrap ou manuellement), vous devriez voir :
 
 **Prochaines étapes :**
 
-1. Configurez vos fournisseurs d'IA dans `~/.zeroclaw/workspace/config.toml`
+1. Configurez vos fournisseurs d'IA dans `~/.rustyclaw/workspace/config.toml`
 2. Consultez la [référence de configuration](docs/config-reference.md) pour les options avancées
-3. Lancez l'agent : `zeroclaw agent start`
+3. Lancez l'agent : `rustyclaw agent start`
 4. Testez via votre canal préféré (voir [référence des canaux](docs/channels-reference.md))
 
 ## Configuration
 
-Éditez `~/.zeroclaw/workspace/config.toml` pour configurer les fournisseurs, canaux et comportement du système.
+Éditez `~/.rustyclaw/workspace/config.toml` pour configurer les fournisseurs, canaux et comportement du système.
 
 ### Référence de Configuration Rapide
 
@@ -292,7 +292,7 @@ kind = "native"    # ou "docker" (nécessite Docker)
 
 ### Support Runtime (actuel)
 
-ZeroClaw prend en charge deux backends d'exécution de code :
+RustyClaw prend en charge deux backends d'exécution de code :
 
 - **`native`** (par défaut) — exécution de processus directe, chemin le plus rapide, idéal pour les environnements de confiance
 - **`docker`** — isolation complète du conteneur, politiques de sécurité renforcées, nécessite Docker
@@ -303,32 +303,32 @@ Utilisez `runtime.kind = "docker"` si vous avez besoin d'un sandboxing strict ou
 
 ```bash
 # Gestion du workspace
-zeroclaw init                # Initialise un nouveau workspace
-zeroclaw status              # Affiche l'état du daemon/agent
-zeroclaw config validate     # Vérifie la syntaxe et les valeurs de config.toml
+rustyclaw init                # Initialise un nouveau workspace
+rustyclaw status              # Affiche l'état du daemon/agent
+rustyclaw config validate     # Vérifie la syntaxe et les valeurs de config.toml
 
 # Gestion du daemon
-zeroclaw daemon start        # Démarre le daemon en arrière-plan
-zeroclaw daemon stop         # Arrête le daemon en cours d'exécution
-zeroclaw daemon restart      # Redémarre le daemon (rechargement de config)
-zeroclaw daemon logs         # Affiche les journaux du daemon
+rustyclaw daemon start        # Démarre le daemon en arrière-plan
+rustyclaw daemon stop         # Arrête le daemon en cours d'exécution
+rustyclaw daemon restart      # Redémarre le daemon (rechargement de config)
+rustyclaw daemon logs         # Affiche les journaux du daemon
 
 # Gestion de l'agent
-zeroclaw agent start         # Démarre l'agent (nécessite daemon en cours d'exécution)
-zeroclaw agent stop          # Arrête l'agent
-zeroclaw agent restart       # Redémarre l'agent (rechargement de config)
+rustyclaw agent start         # Démarre l'agent (nécessite daemon en cours d'exécution)
+rustyclaw agent stop          # Arrête l'agent
+rustyclaw agent restart       # Redémarre l'agent (rechargement de config)
 
 # Opérations de pairing
-zeroclaw pairing init        # Génère un nouveau secret de pairing
-zeroclaw pairing rotate      # Fait tourner le secret de pairing existant
+rustyclaw pairing init        # Génère un nouveau secret de pairing
+rustyclaw pairing rotate      # Fait tourner le secret de pairing existant
 
 # Tunneling (pour exposition publique)
-zeroclaw tunnel start        # Démarre un tunnel vers le daemon local
-zeroclaw tunnel stop         # Arrête le tunnel actif
+rustyclaw tunnel start        # Démarre un tunnel vers le daemon local
+rustyclaw tunnel stop         # Arrête le tunnel actif
 
 # Diagnostic
-zeroclaw doctor              # Exécute les vérifications de santé du système
-zeroclaw version             # Affiche la version et les informations de build
+rustyclaw doctor              # Exécute les vérifications de santé du système
+rustyclaw version             # Affiche la version et les informations de build
 ```
 
 Voir [Référence des Commandes](docs/commands-reference.md) pour les options et exemples complets.
@@ -406,13 +406,13 @@ Le bot répond avec le code généré par l'IA, exécute les outils si demandé,
 [channels.matrix]
 enabled = true
 homeserver_url = "https://matrix.org"
-username = "@zeroclaw:matrix.org"
+username = "@rustyclaw:matrix.org"
 password = "..."
-device_name = "zeroclaw-prod"
+device_name = "rustyclaw-prod"
 e2ee_enabled = true
 ```
 
-Invitez `@zeroclaw:matrix.org` dans une salle chiffrée, et le bot répondra avec le chiffrement complet. Voir [Guide Matrix E2EE](docs/matrix-e2ee-guide.md) pour la configuration de vérification de dispositif.
+Invitez `@rustyclaw:matrix.org` dans une salle chiffrée, et le bot répondra avec le chiffrement complet. Voir [Guide Matrix E2EE](docs/matrix-e2ee-guide.md) pour la configuration de vérification de dispositif.
 
 ### Multi-Fournisseur
 
@@ -439,7 +439,7 @@ Si Anthropic échoue ou rate-limit, l'orchestrateur bascule automatiquement vers
 ```toml
 [memory]
 kind = "sqlite"
-path = "~/.zeroclaw/workspace/memory/conversations.db"
+path = "~/.rustyclaw/workspace/memory/conversations.db"
 retention_days = 90  # Purge automatique après 90 jours
 ```
 
@@ -448,7 +448,7 @@ Ou utilisez Markdown pour un stockage lisible par l'humain :
 ```toml
 [memory]
 kind = "markdown"
-path = "~/.zeroclaw/workspace/memory/"
+path = "~/.rustyclaw/workspace/memory/"
 ```
 
 Voir [Référence de Configuration](docs/config-reference.md#memory) pour toutes les options mémoire.
@@ -468,7 +468,7 @@ Voir [Référence de Configuration](docs/config-reference.md#memory) pour toutes
 
 ### Endpoints Personnalisés
 
-ZeroClaw prend en charge les endpoints compatibles OpenAI :
+RustyClaw prend en charge les endpoints compatibles OpenAI :
 
 ```toml
 [providers.custom]
@@ -498,7 +498,7 @@ Voir [Référence des Canaux](docs/channels-reference.md) pour les instructions 
 
 ## Support d'Outil
 
-ZeroClaw fournit des outils intégrés pour l'exécution de code, l'accès au système de fichiers et la récupération web :
+RustyClaw fournit des outils intégrés pour l'exécution de code, l'accès au système de fichiers et la récupération web :
 
 | Outil                | Description                 | Runtime Requis                |
 | -------------------- | --------------------------- | ----------------------------- |
@@ -529,8 +529,8 @@ Voir [Référence de Configuration](docs/config-reference.md#runtime) pour les o
 ### Déploiement Local (Développement)
 
 ```bash
-zeroclaw daemon start
-zeroclaw agent start
+rustyclaw daemon start
+rustyclaw agent start
 ```
 
 ### Déploiement Serveur (Production)
@@ -542,19 +542,19 @@ Utilisez systemd pour gérer le daemon et l'agent en tant que services :
 cargo install --path . --locked
 
 # Configurez le workspace
-zeroclaw init
+rustyclaw init
 
 # Créez les fichiers de service systemd
-sudo cp deployment/systemd/zeroclaw-daemon.service /etc/systemd/system/
-sudo cp deployment/systemd/zeroclaw-agent.service /etc/systemd/system/
+sudo cp deployment/systemd/rustyclaw-daemon.service /etc/systemd/system/
+sudo cp deployment/systemd/rustyclaw-agent.service /etc/systemd/system/
 
 # Activez et démarrez les services
-sudo systemctl enable zeroclaw-daemon zeroclaw-agent
-sudo systemctl start zeroclaw-daemon zeroclaw-agent
+sudo systemctl enable rustyclaw-daemon rustyclaw-agent
+sudo systemctl start rustyclaw-daemon rustyclaw-agent
 
 # Vérifiez le statut
-sudo systemctl status zeroclaw-daemon
-sudo systemctl status zeroclaw-agent
+sudo systemctl status rustyclaw-daemon
+sudo systemctl status rustyclaw-agent
 ```
 
 Voir [Guide de Déploiement Réseau](docs/network-deployment.md) pour les instructions de déploiement en production complètes.
@@ -563,21 +563,21 @@ Voir [Guide de Déploiement Réseau](docs/network-deployment.md) pour les instru
 
 ```bash
 # Compilez l'image
-docker build -t zeroclaw:latest .
+docker build -t rustyclaw:latest .
 
 # Exécutez le conteneur
 docker run -d \
-  --name zeroclaw \
-  -v ~/.zeroclaw/workspace:/workspace \
+  --name rustyclaw \
+  -v ~/.rustyclaw/workspace:/workspace \
   -e ANTHROPIC_API_KEY=sk-ant-... \
-  zeroclaw:latest
+  rustyclaw:latest
 ```
 
 Voir [`Dockerfile`](Dockerfile) pour les détails de construction et les options de configuration.
 
 ### Matériel Edge
 
-ZeroClaw est conçu pour fonctionner sur du matériel à faible consommation d'énergie :
+RustyClaw est conçu pour fonctionner sur du matériel à faible consommation d'énergie :
 
 - **Raspberry Pi Zero 2 W** — ~512 Mo RAM, cœur ARMv8 simple, <5$ coût matériel
 - **Raspberry Pi 4/5** — 1 Go+ RAM, multi-cœur, idéal pour les charges de travail concurrentes
@@ -588,10 +588,10 @@ Voir [Guide du Matériel](docs/hardware/README.md) pour les instructions de conf
 
 ## Tunneling (Exposition Publique)
 
-Exposez votre daemon ZeroClaw local au réseau public via des tunnels sécurisés :
+Exposez votre daemon RustyClaw local au réseau public via des tunnels sécurisés :
 
 ```bash
-zeroclaw tunnel start --provider cloudflare
+rustyclaw tunnel start --provider cloudflare
 ```
 
 Fournisseurs de tunnel supportés :
@@ -604,14 +604,14 @@ Voir [Référence de Configuration](docs/config-reference.md#tunnel) pour les op
 
 ## Sécurité
 
-ZeroClaw implémente plusieurs couches de sécurité :
+RustyClaw implémente plusieurs couches de sécurité :
 
 ### Pairing
 
-Le daemon génère un secret de pairing au premier lancement stocké dans `~/.zeroclaw/workspace/.pairing`. Les clients (agent, CLI) doivent présenter ce secret pour se connecter.
+Le daemon génère un secret de pairing au premier lancement stocké dans `~/.rustyclaw/workspace/.pairing`. Les clients (agent, CLI) doivent présenter ce secret pour se connecter.
 
 ```bash
-zeroclaw pairing rotate  # Génère un nouveau secret et invalide l'ancien
+rustyclaw pairing rotate  # Génère un nouveau secret et invalide l'ancien
 ```
 
 ### Sandboxing
@@ -638,10 +638,10 @@ Voir [Documentation Sécurité](docs/security/README.md) pour les politiques et 
 
 ## Observabilité
 
-ZeroClaw journalise vers `~/.zeroclaw/workspace/logs/` par défaut. Les journaux sont stockés par composant :
+RustyClaw journalise vers `~/.rustyclaw/workspace/logs/` par défaut. Les journaux sont stockés par composant :
 
 ```
-~/.zeroclaw/workspace/logs/
+~/.rustyclaw/workspace/logs/
 ├── daemon.log           # Journaux du daemon (startup, requêtes API, erreurs)
 ├── agent.log            # Journaux de l'agent (routage message, exécution outil)
 ├── telegram.log         # Journaux spécifiques au canal (si activé)
@@ -653,7 +653,7 @@ ZeroClaw journalise vers `~/.zeroclaw/workspace/logs/` par défaut. Les journaux
 ```toml
 [logging]
 level = "info"                           # debug, info, warn, error
-path = "~/.zeroclaw/workspace/logs/"
+path = "~/.rustyclaw/workspace/logs/"
 rotation = "daily"                       # daily, hourly, size
 max_size_mb = 100                        # Pour rotation basée sur la taille
 retention_days = 30                      # Purge automatique après N jours
@@ -663,15 +663,15 @@ Voir [Référence de Configuration](docs/config-reference.md#logging) pour toute
 
 ### Métriques (Planifié)
 
-Support de métriques Prometheus pour la surveillance en production à venir. Suivi dans [#234](https://github.com/zeroclaw-labs/zeroclaw/issues/234).
+Support de métriques Prometheus pour la surveillance en production à venir. Suivi dans [#234](https://github.com/tezra-io/rustyclaw/issues/234).
 
 ## Compétences (Skills)
 
-ZeroClaw prend en charge les compétences personnalisées — des modules réutilisables qui étendent les capacités du système.
+RustyClaw prend en charge les compétences personnalisées — des modules réutilisables qui étendent les capacités du système.
 
 ### Définition de Compétence
 
-Les compétences sont stockées dans `~/.zeroclaw/workspace/skills/<nom-compétence>/` avec cette structure :
+Les compétences sont stockées dans `~/.rustyclaw/workspace/skills/<nom-compétence>/` avec cette structure :
 
 ```
 skills/
@@ -718,7 +718,7 @@ Voir la section [Compétences (Skills)](#compétences-skills) pour les instructi
 
 ## Open Skills
 
-ZeroClaw prend en charge les [Open Skills](https://github.com/openagents-com/open-skills) — un système modulaire et agnostique des fournisseurs pour étendre les capacités des agents IA.
+RustyClaw prend en charge les [Open Skills](https://github.com/openagents-com/open-skills) — un système modulaire et agnostique des fournisseurs pour étendre les capacités des agents IA.
 
 ### Activer Open Skills
 
@@ -728,7 +728,7 @@ open_skills_enabled = true
 # open_skills_dir = "/path/to/open-skills"  # optionnel
 ```
 
-Vous pouvez également surcharger au runtime avec `ZEROCLAW_OPEN_SKILLS_ENABLED` et `ZEROCLAW_OPEN_SKILLS_DIR`.
+Vous pouvez également surcharger au runtime avec `RUSTYCLAW_OPEN_SKILLS_ENABLED` et `RUSTYCLAW_OPEN_SKILLS_DIR`.
 
 ## Développement
 
@@ -762,7 +762,7 @@ cargo build --release --locked
 cargo install --path . --force --locked
 ```
 
-ZeroClaw est configuré pour utiliser `rustls` pour les dépendances HTTP/TLS ; `--locked` maintient le graphe transitif déterministe sur les environnements vierges.
+RustyClaw est configuré pour utiliser `rustls` pour les dépendances HTTP/TLS ; `--locked` maintient le graphe transitif déterministe sur les environnements vierges.
 
 Pour sauter le hook lorsque vous avez besoin d'un push rapide pendant le développement :
 
@@ -803,9 +803,9 @@ Pour le déploiement et les opérations runtime :
 - Guide de déploiement réseau : [docs/network-deployment.md](docs/network-deployment.md)
 - Playbook d'agent proxy : [docs/proxy-agent-playbook.md](docs/proxy-agent-playbook.md)
 
-## Soutenir ZeroClaw
+## Soutenir RustyClaw
 
-Si ZeroClaw aide votre travail et que vous souhaitez soutenir le développement continu, vous pouvez faire un don ici :
+Si RustyClaw aide votre travail et que vous souhaitez soutenir le développement continu, vous pouvez faire un don ici :
 
 <a href="https://buymeacoffee.com/argenistherose"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Donate-yellow.svg?style=for-the-badge&logo=buy-me-a-coffee" alt="Offrez-moi un café" /></a>
 
@@ -822,19 +822,19 @@ Nous construisons en open source parce que les meilleures idées viennent de par
 
 ## ⚠️ Dépôt Officiel & Avertissement d'Usurpation d'Identité
 
-**Ceci est le seul dépôt officiel ZeroClaw :**
+**Ceci est le seul dépôt officiel RustyClaw :**
 
-> <https://github.com/zeroclaw-labs/zeroclaw>
+> <https://github.com/tezra-io/rustyclaw>
 
-Tout autre dépôt, organisation, domaine ou package prétendant être "ZeroClaw" ou impliquant une affiliation avec ZeroClaw Labs est **non autorisé et non affilié à ce projet**. Les forks non autorisés connus seront listés dans [TRADEMARK.md](TRADEMARK.md).
+Tout autre dépôt, organisation, domaine ou package prétendant être "RustyClaw" ou impliquant une affiliation avec ZeroClaw Labs est **non autorisé et non affilié à ce projet**. Les forks non autorisés connus seront listés dans [TRADEMARK.md](TRADEMARK.md).
 
-Si vous rencontrez une usurpation d'identité ou une utilisation abusive de marque, veuillez [ouvrir une issue](https://github.com/zeroclaw-labs/zeroclaw/issues).
+Si vous rencontrez une usurpation d'identité ou une utilisation abusive de marque, veuillez [ouvrir une issue](https://github.com/tezra-io/rustyclaw/issues).
 
 ---
 
 ## Licence
 
-ZeroClaw est sous double licence pour une ouverture maximale et la protection des contributeurs :
+RustyClaw est sous double licence pour une ouverture maximale et la protection des contributeurs :
 
 | Licence                      | Cas d'utilisation                                            |
 | ---------------------------- | ------------------------------------------------------------ |
@@ -845,7 +845,7 @@ Vous pouvez choisir l'une ou l'autre licence. **Les contributeurs accordent auto
 
 ### Marque
 
-Le nom **ZeroClaw** et le logo sont des marques déposées de ZeroClaw Labs. Cette licence n'accorde pas la permission de les utiliser pour impliquer une approbation ou une affiliation. Voir [TRADEMARK.md](TRADEMARK.md) pour les utilisations permises et interdites.
+Le nom **RustyClaw** et le logo sont des marques déposées de ZeroClaw Labs. Cette licence n'accorde pas la permission de les utiliser pour impliquer une approbation ou une affiliation. Voir [TRADEMARK.md](TRADEMARK.md) pour les utilisations permises et interdites.
 
 ### Protections des Contributeurs
 
@@ -865,20 +865,20 @@ Voir [CONTRIBUTING.md](CONTRIBUTING.md) et [CLA.md](CLA.md). Implémentez un tra
 - Nouveau `Tool` → `src/tools/`
 - Nouvelle `Memory` → `src/memory/`
 - Nouveau `Tunnel` → `src/tunnel/`
-- Nouvelle `Skill` → `~/.zeroclaw/workspace/skills/<n>/`
+- Nouvelle `Skill` → `~/.rustyclaw/workspace/skills/<n>/`
 
 ---
 
-**ZeroClaw** — Zéro surcharge. Zéro compromis. Déployez n'importe où. Échangez n'importe quoi. 🦀
+**RustyClaw** — Zéro surcharge. Zéro compromis. Déployez n'importe où. Échangez n'importe quoi. 🦀
 
 ## Historique des Étoiles
 
 <p align="center">
-  <a href="https://www.star-history.com/#zeroclaw-labs/zeroclaw&type=date&legend=top-left">
+  <a href="https://www.star-history.com/#tezra-io/rustyclaw&type=date&legend=top-left">
     <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=zeroclaw-labs/zeroclaw&type=date&theme=dark&legend=top-left" />
-     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=zeroclaw-labs/zeroclaw&type=date&legend=top-left" />
-     <img alt="Graphique Historique des Étoiles" src="https://api.star-history.com/svg?repos=zeroclaw-labs/zeroclaw&type=date&legend=top-left" />
+     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tezra-io/rustyclaw&type=date&theme=dark&legend=top-left" />
+     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tezra-io/rustyclaw&type=date&legend=top-left" />
+     <img alt="Graphique Historique des Étoiles" src="https://api.star-history.com/svg?repos=tezra-io/rustyclaw&type=date&legend=top-left" />
     </picture>
   </a>
 </p>

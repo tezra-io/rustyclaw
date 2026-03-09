@@ -1,4 +1,4 @@
-# ZeroClaw Documentation Inventory
+# RustyClaw Documentation Inventory
 
 This inventory classifies docs by intent so readers can quickly distinguish runtime-contract guides from design proposals.
 

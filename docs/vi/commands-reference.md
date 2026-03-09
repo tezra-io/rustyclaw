@@ -1,6 +1,6 @@
-# Tham khảo lệnh ZeroClaw
+# Tham khảo lệnh RustyClaw
 
-Dựa trên CLI hiện tại (`zeroclaw --help`).
+Dựa trên CLI hiện tại (`rustyclaw --help`).
 
 Xác minh lần cuối: **2026-02-20**.
 
@@ -31,60 +31,60 @@ Xác minh lần cuối: **2026-02-20**.
 
 ### `onboard`
 
-- `zeroclaw onboard`
-- `zeroclaw onboard --interactive`
-- `zeroclaw onboard --channels-only`
-- `zeroclaw onboard --api-key <KEY> --provider <ID> --memory <sqlite|lucid|markdown|none>`
-- `zeroclaw onboard --api-key <KEY> --provider <ID> --model <MODEL_ID> --memory <sqlite|lucid|markdown|none>`
+- `rustyclaw onboard`
+- `rustyclaw onboard --interactive`
+- `rustyclaw onboard --channels-only`
+- `rustyclaw onboard --api-key <KEY> --provider <ID> --memory <sqlite|lucid|markdown|none>`
+- `rustyclaw onboard --api-key <KEY> --provider <ID> --model <MODEL_ID> --memory <sqlite|lucid|markdown|none>`
 
 ### `agent`
 
-- `zeroclaw agent`
-- `zeroclaw agent -m "Hello"`
-- `zeroclaw agent --provider <ID> --model <MODEL> --temperature <0.0-2.0>`
-- `zeroclaw agent --peripheral <board:path>`
+- `rustyclaw agent`
+- `rustyclaw agent -m "Hello"`
+- `rustyclaw agent --provider <ID> --model <MODEL> --temperature <0.0-2.0>`
+- `rustyclaw agent --peripheral <board:path>`
 
 ### `gateway` / `daemon`
 
-- `zeroclaw gateway [--host <HOST>] [--port <PORT>]`
-- `zeroclaw daemon [--host <HOST>] [--port <PORT>]`
+- `rustyclaw gateway [--host <HOST>] [--port <PORT>]`
+- `rustyclaw daemon [--host <HOST>] [--port <PORT>]`
 
 ### `service`
 
-- `zeroclaw service install`
-- `zeroclaw service start`
-- `zeroclaw service stop`
-- `zeroclaw service restart`
-- `zeroclaw service status`
-- `zeroclaw service uninstall`
+- `rustyclaw service install`
+- `rustyclaw service start`
+- `rustyclaw service stop`
+- `rustyclaw service restart`
+- `rustyclaw service status`
+- `rustyclaw service uninstall`
 
 ### `cron`
 
-- `zeroclaw cron list`
-- `zeroclaw cron add <expr> [--tz <IANA_TZ>] <command>`
-- `zeroclaw cron add-at <rfc3339_timestamp> <command>`
-- `zeroclaw cron add-every <every_ms> <command>`
-- `zeroclaw cron once <delay> <command>`
-- `zeroclaw cron remove <id>`
-- `zeroclaw cron pause <id>`
-- `zeroclaw cron resume <id>`
+- `rustyclaw cron list`
+- `rustyclaw cron add <expr> [--tz <IANA_TZ>] <command>`
+- `rustyclaw cron add-at <rfc3339_timestamp> <command>`
+- `rustyclaw cron add-every <every_ms> <command>`
+- `rustyclaw cron once <delay> <command>`
+- `rustyclaw cron remove <id>`
+- `rustyclaw cron pause <id>`
+- `rustyclaw cron resume <id>`
 
 ### `models`
 
-- `zeroclaw models refresh`
-- `zeroclaw models refresh --provider <ID>`
-- `zeroclaw models refresh --force`
+- `rustyclaw models refresh`
+- `rustyclaw models refresh --provider <ID>`
+- `rustyclaw models refresh --force`
 
 `models refresh` hiện hỗ trợ làm mới danh mục trực tiếp cho các provider: `openrouter`, `openai`, `anthropic`, `groq`, `mistral`, `deepseek`, `xai`, `together-ai`, `gemini`, `ollama`, `astrai`, `venice`, `fireworks`, `cohere`, `moonshot`, `glm`, `zai`, `qwen` và `nvidia`.
 
 ### `channel`
 
-- `zeroclaw channel list`
-- `zeroclaw channel start`
-- `zeroclaw channel doctor`
-- `zeroclaw channel bind-telegram <IDENTITY>`
-- `zeroclaw channel add <type> <json>`
-- `zeroclaw channel remove <name>`
+- `rustyclaw channel list`
+- `rustyclaw channel start`
+- `rustyclaw channel doctor`
+- `rustyclaw channel bind-telegram <IDENTITY>`
+- `rustyclaw channel add <type> <json>`
+- `rustyclaw channel remove <name>`
 
 Lệnh trong chat khi runtime đang chạy (Telegram/Discord):
 
@@ -104,13 +104,13 @@ Channel runtime cũng theo dõi `config.toml` và tự động áp dụng thay �
 
 ### `integrations`
 
-- `zeroclaw integrations info <name>`
+- `rustyclaw integrations info <name>`
 
 ### `skills`
 
-- `zeroclaw skills list`
-- `zeroclaw skills install <source>`
-- `zeroclaw skills remove <name>`
+- `rustyclaw skills list`
+- `rustyclaw skills install <source>`
+- `rustyclaw skills remove <name>`
 
 `<source>` chấp nhận git remote (`https://...`, `http://...`, `ssh://...` và `git@host:owner/repo.git`) hoặc đường dẫn cục bộ.
 
@@ -118,43 +118,43 @@ Skill manifest (`SKILL.toml`) hỗ trợ `prompts` và `[[tools]]`; cả hai đ�
 
 ### `migrate`
 
-- `zeroclaw migrate openclaw [--source <path>] [--dry-run]`
+- `rustyclaw migrate openclaw [--source <path>] [--dry-run]`
 
 ### `config`
 
-- `zeroclaw config schema`
+- `rustyclaw config schema`
 
 `config schema` xuất JSON Schema (draft 2020-12) cho toàn bộ hợp đồng `config.toml` ra stdout.
 
 ### `completions`
 
-- `zeroclaw completions bash`
-- `zeroclaw completions fish`
-- `zeroclaw completions zsh`
-- `zeroclaw completions powershell`
-- `zeroclaw completions elvish`
+- `rustyclaw completions bash`
+- `rustyclaw completions fish`
+- `rustyclaw completions zsh`
+- `rustyclaw completions powershell`
+- `rustyclaw completions elvish`
 
 `completions` chỉ xuất ra stdout để script có thể được source trực tiếp mà không bị lẫn log/cảnh báo.
 
 ### `hardware`
 
-- `zeroclaw hardware discover`
-- `zeroclaw hardware introspect <path>`
-- `zeroclaw hardware info [--chip <chip_name>]`
+- `rustyclaw hardware discover`
+- `rustyclaw hardware introspect <path>`
+- `rustyclaw hardware info [--chip <chip_name>]`
 
 ### `peripheral`
 
-- `zeroclaw peripheral list`
-- `zeroclaw peripheral add <board> <path>`
-- `zeroclaw peripheral flash [--port <serial_port>]`
-- `zeroclaw peripheral setup-uno-q [--host <ip_or_host>]`
-- `zeroclaw peripheral flash-nucleo`
+- `rustyclaw peripheral list`
+- `rustyclaw peripheral add <board> <path>`
+- `rustyclaw peripheral flash [--port <serial_port>]`
+- `rustyclaw peripheral setup-uno-q [--host <ip_or_host>]`
+- `rustyclaw peripheral flash-nucleo`
 
 ## Kiểm tra nhanh
 
 Để xác minh nhanh tài liệu với binary hiện tại:
 
 ```bash
-zeroclaw --help
-zeroclaw <command> --help
+rustyclaw --help
+rustyclaw <command> --help
 ```
