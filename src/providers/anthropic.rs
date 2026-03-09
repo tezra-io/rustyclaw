@@ -1,3 +1,4 @@
+use crate::auth::AuthService;
 use crate::providers::traits::{
     ChatMessage, ChatRequest as ProviderChatRequest, ChatResponse as ProviderChatResponse,
     Provider, TokenUsage, ToolCall as ProviderToolCall,
@@ -10,6 +11,10 @@ use serde::{Deserialize, Serialize};
 pub struct AnthropicProvider {
     credential: Option<String>,
     base_url: String,
+    /// AuthService for managed profiles (auth-profiles.json).
+    auth_service: Option<AuthService>,
+    /// Optional profile override for auth service lookup.
+    auth_profile_override: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -170,7 +175,44 @@ impl AnthropicProvider {
                 .filter(|k| !k.is_empty())
                 .map(ToString::to_string),
             base_url,
+            auth_service: None,
+            auth_profile_override: None,
         }
+    }
+
+    /// Create with AuthService for managed auth-profiles.json credentials.
+    /// Falls back to env vars if no auth profile is found.
+    pub fn new_with_auth(
+        credential: Option<&str>,
+        auth_service: AuthService,
+        profile_override: Option<String>,
+    ) -> Self {
+        let mut provider = Self::new(credential);
+        provider.auth_service = Some(auth_service);
+        provider.auth_profile_override = profile_override;
+        provider
+    }
+
+    /// Resolve the best available credential:
+    /// 1. Directly provided credential (from env var or config)
+    /// 2. Auth profile from auth-profiles.json (via AuthService)
+    async fn resolve_credential(&self) -> Option<String> {
+        // Direct credential takes priority
+        if self.credential.is_some() {
+            return self.credential.clone();
+        }
+
+        // Try auth service for managed profiles
+        if let Some(auth_service) = &self.auth_service {
+            if let Ok(Some(token)) = auth_service
+                .get_provider_bearer_token("anthropic", self.auth_profile_override.as_deref())
+                .await
+            {
+                return Some(token);
+            }
+        }
+
+        None
     }
 
     fn is_setup_token(token: &str) -> bool {
@@ -430,9 +472,9 @@ impl Provider for AnthropicProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
-        let credential = self.credential.as_ref().ok_or_else(|| {
+        let credential = self.resolve_credential().await.ok_or_else(|| {
             anyhow::anyhow!(
-                "Anthropic credentials not set. Set ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN (setup-token)."
+                "Anthropic credentials not set. Set ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, or run `rustyclaw auth login --provider anthropic`."
             )
         })?;
 
@@ -454,7 +496,7 @@ impl Provider for AnthropicProvider {
             .header("content-type", "application/json")
             .json(&request);
 
-        request = self.apply_auth(request, credential);
+        request = self.apply_auth(request, &credential);
 
         let response = request.send().await?;
 
@@ -472,9 +514,9 @@ impl Provider for AnthropicProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<ProviderChatResponse> {
-        let credential = self.credential.as_ref().ok_or_else(|| {
+        let credential = self.resolve_credential().await.ok_or_else(|| {
             anyhow::anyhow!(
-                "Anthropic credentials not set. Set ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN (setup-token)."
+                "Anthropic credentials not set. Set ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, or run `rustyclaw auth login --provider anthropic`."
             )
         })?;
 
@@ -501,7 +543,7 @@ impl Provider for AnthropicProvider {
             .header("content-type", "application/json")
             .json(&native_request);
 
-        let response = self.apply_auth(req, credential).send().await?;
+        let response = self.apply_auth(req, &credential).send().await?;
         if !response.status().is_success() {
             return Err(super::api_error("Anthropic", response).await);
         }
@@ -562,12 +604,12 @@ impl Provider for AnthropicProvider {
     }
 
     async fn warmup(&self) -> anyhow::Result<()> {
-        if let Some(credential) = self.credential.as_ref() {
+        if let Some(credential) = self.resolve_credential().await {
             let mut request = self
                 .http_client()
                 .post(format!("{}/v1/messages", self.base_url))
                 .header("anthropic-version", "2023-06-01");
-            request = self.apply_auth(request, credential);
+            request = self.apply_auth(request, &credential);
             // Send a minimal request; the goal is TLS + HTTP/2 setup, not a valid response.
             // Anthropic has no lightweight GET endpoint, so we accept any non-network error.
             let _ = request.send().await?;
@@ -1245,6 +1287,8 @@ mod tests {
         let provider = AnthropicProvider {
             credential: Some("test-key".to_string()),
             base_url: format!("http://{addr}"),
+            auth_service: None,
+            auth_profile_override: None,
         };
 
         // Multi-turn conversation: system → user (Go code) → assistant (code response) → user (follow-up)

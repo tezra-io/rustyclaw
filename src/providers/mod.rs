@@ -969,7 +969,23 @@ fn create_provider_with_url_and_options(
         }
         // ── Primary providers (custom implementations) ───────
         "openrouter" => Ok(Box::new(openrouter::OpenRouterProvider::new(key))),
-        "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(key))),
+        "anthropic" => {
+            let state_dir = options
+                .rustyclaw_dir
+                .clone()
+                .unwrap_or_else(|| {
+                    directories::UserDirs::new().map_or_else(
+                        || PathBuf::from(".rustyclaw"),
+                        |dirs| dirs.home_dir().join(".rustyclaw"),
+                    )
+                });
+            let auth_service = AuthService::new(&state_dir, options.secrets_encrypt);
+            Ok(Box::new(anthropic::AnthropicProvider::new_with_auth(
+                key,
+                auth_service,
+                options.auth_profile_override.clone(),
+            )))
+        }
         "openai" => Ok(Box::new(openai::OpenAiProvider::with_base_url(api_url, key))),
         // Ollama uses api_url for custom base URL (e.g. remote Ollama instance)
         "ollama" => Ok(Box::new(ollama::OllamaProvider::new_with_reasoning(

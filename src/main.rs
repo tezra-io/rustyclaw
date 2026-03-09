@@ -486,9 +486,9 @@ enum EstopSubcommands {
 
 #[derive(Subcommand, Debug)]
 enum AuthCommands {
-    /// Login with OAuth (OpenAI Codex or Gemini)
+    /// Login with OAuth (OpenAI Codex, Gemini, or Anthropic)
     Login {
-        /// Provider (`openai-codex` or `gemini`)
+        /// Provider (`openai-codex`, `gemini`, or `anthropic`)
         #[arg(long)]
         provider: String,
         /// Profile name (default: default)
@@ -1564,9 +1564,46 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                     println!("Active profile for openai-codex: {profile}");
                     Ok(())
                 }
+                "anthropic" => {
+                    // Anthropic uses API keys or setup-tokens (bearer auth),
+                    // not a standard OAuth2 authorization flow.
+                    // Guide the user to paste a token interactively.
+                    println!("Anthropic authentication");
+                    println!();
+                    println!("Anthropic supports two credential types:");
+                    println!("  1. API key  — from https://console.anthropic.com/settings/keys");
+                    println!("  2. Setup token — from `claude setup-token` (requires Claude subscription)");
+                    println!();
+
+                    let token = read_auth_input("Paste your API key or setup token")?;
+                    if token.is_empty() {
+                        bail!("Token cannot be empty");
+                    }
+
+                    let kind = auth::anthropic_token::detect_auth_kind(&token, None);
+                    let mut metadata = std::collections::HashMap::new();
+                    metadata.insert(
+                        "auth_kind".to_string(),
+                        kind.as_metadata_value().to_string(),
+                    );
+
+                    let kind_label = match kind {
+                        auth::anthropic_token::AnthropicAuthKind::ApiKey => "API key",
+                        auth::anthropic_token::AnthropicAuthKind::Authorization => "setup token (bearer)",
+                    };
+                    println!("Detected credential type: {kind_label}");
+
+                    auth_service
+                        .store_provider_token("anthropic", &profile, &token, metadata, true)
+                        .await?;
+
+                    println!("Saved profile {profile}");
+                    println!("Active profile for anthropic: {profile}");
+                    Ok(())
+                }
                 _ => {
                     bail!(
-                        "`auth login` supports --provider openai-codex or gemini, got: {provider}"
+                        "`auth login` supports --provider openai-codex, gemini, or anthropic, got: {provider}"
                     );
                 }
             }
@@ -1768,7 +1805,26 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                         }
                     }
                 }
-                _ => bail!("`auth refresh` supports --provider openai-codex or gemini"),
+                "anthropic" => {
+                    // Anthropic API keys and setup tokens don't have refresh flows.
+                    // Just validate the credential exists.
+                    match auth_service
+                        .get_provider_bearer_token("anthropic", profile.as_deref())
+                        .await?
+                    {
+                        Some(_) => {
+                            println!("✓ Anthropic credential is configured");
+                            println!("  Note: Anthropic tokens do not support automatic refresh.");
+                            Ok(())
+                        }
+                        None => {
+                            bail!(
+                                "No Anthropic auth profile found. Run `rustyclaw auth login --provider anthropic`."
+                            )
+                        }
+                    }
+                }
+                _ => bail!("`auth refresh` supports --provider openai-codex, gemini, or anthropic"),
             }
         }
 
