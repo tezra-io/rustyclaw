@@ -129,6 +129,17 @@ mix format --check-formatted
 mix credo --strict
 ```
 
+### Smoke Test (E2E)
+
+```bash
+# Requires at least one provider key: OPENROUTER_API_KEY or ANTHROPIC_API_KEY
+OPENROUTER_API_KEY=sk-... ./scripts/smoke-test.sh
+```
+
+Builds the release binary, boots the gateway on a random port with pairing disabled,
+validates `GET /health` returns 200, and runs a chat round-trip via `POST /webhook`.
+Tests each available provider if multiple keys are set. Exit 0 = all pass.
+
 ## 5) Engineering Principles
 
 These are implementation constraints, not suggestions.
