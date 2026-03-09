@@ -74,11 +74,15 @@ fi
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
     PROVIDER_NAMES+=("anthropic")
     PROVIDER_KEYS+=("$ANTHROPIC_API_KEY")
-    PROVIDER_MODELS+=("claude-sonnet-4-5-20250514")
+    PROVIDER_MODELS+=("claude-sonnet-4-20250514")
+elif [[ -n "${ANTHROPIC_OAUTH_TOKEN:-}" ]]; then
+    PROVIDER_NAMES+=("anthropic")
+    PROVIDER_KEYS+=("$ANTHROPIC_OAUTH_TOKEN")
+    PROVIDER_MODELS+=("claude-sonnet-4-20250514")
 fi
 
 if [[ ${#PROVIDER_NAMES[@]} -eq 0 ]]; then
-    fatal "No provider API keys found. Set OPENROUTER_API_KEY or ANTHROPIC_API_KEY."
+    fatal "No provider API keys found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or ANTHROPIC_OAUTH_TOKEN."
 fi
 
 info "Detected ${#PROVIDER_NAMES[@]} provider(s): ${PROVIDER_NAMES[*]}"
@@ -189,6 +193,7 @@ host = "127.0.0.1"
 require_pairing = false
 
 [memory]
+backend = "none"
 auto_save = false
 INNEREOF
         chmod 600 "$CONFIG_DIR/config.toml"
