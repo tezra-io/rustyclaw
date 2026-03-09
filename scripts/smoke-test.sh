@@ -94,6 +94,7 @@ host = "127.0.0.1"
 require_pairing = false
 
 [memory]
+backend = "none"
 auto_save = false
 EOF
 chmod 600 "$CONFIG_DIR/config.toml"
@@ -242,10 +243,12 @@ INNEREOF
 # Test default provider
 run_chat_test "$DEFAULT_PROVIDER" "$DEFAULT_KEY" "${PROVIDER_MODELS[0]}"
 
-# Test additional providers
-for i in $(seq 1 $((${#PROVIDER_NAMES[@]} - 1))); do
-    run_chat_test "${PROVIDER_NAMES[$i]}" "${PROVIDER_KEYS[$i]}" "${PROVIDER_MODELS[$i]}"
-done
+# Test additional providers (if any)
+if [[ ${#PROVIDER_NAMES[@]} -gt 1 ]]; then
+    for i in $(seq 1 $((${#PROVIDER_NAMES[@]} - 1))); do
+        run_chat_test "${PROVIDER_NAMES[$i]}" "${PROVIDER_KEYS[$i]}" "${PROVIDER_MODELS[$i]}"
+    done
+fi
 
 # ── 7. Summary ────────────────────────────────────────────────────
 SCRIPT_END=$(date +%s)
