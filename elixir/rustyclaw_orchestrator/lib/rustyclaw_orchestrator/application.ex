@@ -12,6 +12,9 @@ defmodule RustyclawOrchestrator.Application do
       # Agent name -> pid mapping (:unique mode)
       {Registry, keys: :unique, name: RustyclawOrchestrator.AgentRegistry},
 
+      # Message provenance trace storage
+      RustyclawOrchestrator.TraceStore,
+
       # Dynamic agent lifecycle management — max 3 restarts per 5 seconds
       {DynamicSupervisor,
        name: RustyclawOrchestrator.AgentSupervisor,

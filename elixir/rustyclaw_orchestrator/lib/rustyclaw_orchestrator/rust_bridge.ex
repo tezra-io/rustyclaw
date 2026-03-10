@@ -12,6 +12,8 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   use GenServer
 
+  alias RustyclawOrchestrator.MessageProvenance
+
   @default_base_url "http://localhost:4200"
   @call_timeout 60_000
   @max_retries 3
@@ -23,7 +25,12 @@ defmodule RustyclawOrchestrator.RustBridge do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @doc "Execute an agent task via the Rust core."
+  @doc """
+  Execute an agent task via the Rust core.
+
+  Opts supports `:provenance` (`MessageProvenance.t()`) to include trace
+  metadata in the JSON payload sent to Rust.
+  """
   @spec run_task(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def run_task(agent_name, task, opts \\ []) do
     GenServer.call(
@@ -61,12 +68,16 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   @impl true
   def handle_call({:run_task, agent_name, task, opts}, _from, state) do
-    body = %{
-      agent: agent_name,
-      task: task,
-      model: Keyword.get(opts, :model),
-      temperature: Keyword.get(opts, :temperature)
-    }
+    provenance = Keyword.get(opts, :provenance)
+
+    body =
+      %{
+        agent: agent_name,
+        task: task,
+        model: Keyword.get(opts, :model),
+        temperature: Keyword.get(opts, :temperature)
+      }
+      |> maybe_add_provenance(provenance)
 
     result = post_with_retry(state.req, "/api/agent/run", body)
     {:reply, result, state}
@@ -133,4 +144,10 @@ defmodule RustyclawOrchestrator.RustBridge do
         {:error, reason}
     end
   end
+
+  defp maybe_add_provenance(body, %MessageProvenance{} = prov) do
+    Map.put(body, :provenance, MessageProvenance.to_map(prov))
+  end
+
+  defp maybe_add_provenance(body, _), do: body
 end

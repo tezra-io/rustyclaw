@@ -13,7 +13,9 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
 
   use GenServer
 
-  alias RustyclawOrchestrator.{AgentServer, AgentSupervisor}
+  alias RustyclawOrchestrator.{AgentServer, AgentSupervisor, MessageProvenance}
+
+  require Logger
 
   @call_timeout 30_000
 
@@ -30,6 +32,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
   - `:capabilities` — list of required capabilities (default: [])
   - `:strategy` — `:first_available | :sequential | :fanout` (default: `:first_available`)
   - `:from_agent` — name of the delegating agent (for ACL enforcement)
+  - `:provenance` — `MessageProvenance.t()` to propagate through delegation
   """
   @spec delegate(String.t(), keyword()) ::
           {:ok, term()} | {:error, :no_matching_agents | :acl_denied | :all_failed}
@@ -61,6 +64,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
     capabilities = Keyword.get(opts, :capabilities, [])
     strategy = Keyword.get(opts, :strategy, :first_available)
     from_agent = Keyword.get(opts, :from_agent)
+    provenance = Keyword.get(opts, :provenance)
 
     matching = find_matching_agents(capabilities)
 
@@ -81,7 +85,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
           {:error, :no_matching_agents}
 
         agents ->
-          execute_strategy(strategy, task, agents)
+          execute_strategy(strategy, task, agents, provenance)
       end
 
     {:reply, result, state}
@@ -123,23 +127,30 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
     end
   end
 
-  defp execute_strategy(:first_available, task, [agent | _]) do
-    AgentServer.run_task(agent, task)
+  defp execute_strategy(:first_available, task, [agent | _], provenance) do
+    child_prov = stamp_provenance(provenance, agent)
+    AgentServer.run_task(agent, task, child_prov)
   end
 
-  defp execute_strategy(:sequential, task, agents) do
+  defp execute_strategy(:sequential, task, agents, provenance) do
     Enum.reduce_while(agents, {:error, :all_failed}, fn agent, _acc ->
-      case AgentServer.run_task(agent, task) do
+      child_prov = stamp_provenance(provenance, agent)
+
+      case AgentServer.run_task(agent, task, child_prov) do
         {:ok, _} = result -> {:halt, result}
         {:error, _} -> {:cont, {:error, :all_failed}}
       end
     end)
   end
 
-  defp execute_strategy(:fanout, task, agents) do
+  defp execute_strategy(:fanout, task, agents, provenance) do
     results =
       agents
-      |> Task.async_stream(fn agent -> {agent, AgentServer.run_task(agent, task)} end,
+      |> Task.async_stream(
+        fn agent ->
+          child_prov = stamp_provenance(provenance, agent)
+          {agent, AgentServer.run_task(agent, task, child_prov)}
+        end,
         timeout: @call_timeout,
         on_timeout: :kill_task
       )
@@ -156,4 +167,19 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
   catch
     :exit, _ -> :error
   end
+
+  defp stamp_provenance(%MessageProvenance{} = prov, target_agent) do
+    child = MessageProvenance.propagate(prov, source_agent: target_agent)
+
+    Logger.info("Delegation routing",
+      trace_id: child.trace_id,
+      from: prov.source_agent,
+      to: target_agent,
+      delegation_depth: child.delegation_depth
+    )
+
+    child
+  end
+
+  defp stamp_provenance(nil, _target_agent), do: nil
 end

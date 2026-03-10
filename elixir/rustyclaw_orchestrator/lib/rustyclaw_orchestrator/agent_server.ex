@@ -8,7 +8,9 @@ defmodule RustyclawOrchestrator.AgentServer do
 
   use GenServer, restart: :transient
 
-  alias RustyclawOrchestrator.AgentDefinition
+  alias RustyclawOrchestrator.{AgentDefinition, MessageProvenance, TraceStore}
+
+  require Logger
 
   @health_check_interval 30_000
   @call_timeout 30_000
@@ -39,14 +41,14 @@ defmodule RustyclawOrchestrator.AgentServer do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Send a task to the agent for execution."
-  def run_task(agent_name, task) when is_binary(agent_name) do
-    GenServer.call(via_registry(agent_name), {:run_task, task}, @call_timeout)
+  @doc "Send a task to the agent for execution. Optionally pass provenance."
+  def run_task(agent_name, task, provenance \\ nil) when is_binary(agent_name) do
+    GenServer.call(via_registry(agent_name), {:run_task, task, provenance}, @call_timeout)
   end
 
-  @doc "Send an async message to the agent."
-  def send_message(agent_name, message) when is_binary(agent_name) do
-    GenServer.cast(via_registry(agent_name), {:send_message, message})
+  @doc "Send an async message to the agent. Optionally pass provenance."
+  def send_message(agent_name, message, provenance \\ nil) when is_binary(agent_name) do
+    GenServer.cast(via_registry(agent_name), {:send_message, message, provenance})
   end
 
   @doc "Get current agent state."
@@ -81,12 +83,17 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   @impl true
-  def handle_call({:run_task, task}, _from, %{health: :unhealthy} = state) do
+  def handle_call({:run_task, task, provenance}, _from, %{health: :unhealthy} = state) do
+    maybe_log_provenance(:task_rejected, state.definition.name, provenance)
+
     {:reply, {:error, :unhealthy},
      append_history(state, :task_rejected, %{task: task, reason: :unhealthy})}
   end
 
-  def handle_call({:run_task, task}, _from, state) do
+  def handle_call({:run_task, task, provenance}, _from, state) do
+    maybe_record_provenance(provenance)
+    maybe_log_provenance(:task_executed, state.definition.name, provenance)
+
     state = %{state | status: :running}
 
     # Task execution will be routed through RustBridge in TEZ-146.
@@ -110,7 +117,10 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   @impl true
-  def handle_cast({:send_message, message}, state) do
+  def handle_cast({:send_message, message, provenance}, state) do
+    maybe_record_provenance(provenance)
+    maybe_log_provenance(:message_received, state.definition.name, provenance)
+
     state = append_history(state, :message_received, %{message: message})
     {:noreply, state}
   end
@@ -166,4 +176,24 @@ defmodule RustyclawOrchestrator.AgentServer do
     history = Enum.take([entry | state.history], 100)
     %{state | history: history}
   end
+
+  defp maybe_record_provenance(%MessageProvenance{} = prov) do
+    TraceStore.record(prov)
+  end
+
+  defp maybe_record_provenance(_), do: :ok
+
+  defp maybe_log_provenance(event, agent_name, %MessageProvenance{} = prov) do
+    Logger.info("Agent #{event}",
+      agent: agent_name,
+      event: event,
+      trace_id: prov.trace_id,
+      origin_agent: prov.origin_agent,
+      source_agent: prov.source_agent,
+      kind: prov.kind,
+      delegation_depth: prov.delegation_depth
+    )
+  end
+
+  defp maybe_log_provenance(_event, _agent_name, _), do: :ok
 end

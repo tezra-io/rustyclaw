@@ -15,7 +15,12 @@ defmodule RustyclawOrchestrator do
   - `RustBridge` — HTTP bridge to the Rust/RustyClaw core
   """
 
-  alias RustyclawOrchestrator.{AgentCoordinator, AgentDefinition, AgentSupervisor, SubAgentSession}
+  alias RustyclawOrchestrator.{
+    AgentCoordinator,
+    AgentDefinition,
+    AgentSupervisor,
+    SubAgentSession
+  }
 
   @doc "Spawn an agent from a definition file."
   @spec spawn_from_file(Path.t()) :: {:ok, pid()} | {:error, term()}
