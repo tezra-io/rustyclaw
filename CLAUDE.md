@@ -165,8 +165,34 @@ These are implementation constraints, not suggestions.
 
 - Extend via trait implementation + factory registration. Don't cross subsystem boundaries.
 - Keep dependency direction inward: concrete integrations depend on traits/config, not on each other.
-- Run `cargo fmt && cargo clippy -- -D warnings && cargo test` before committing.
 - High-risk paths: `src/security/`, `src/runtime/`, `src/gateway/`, `src/tools/`.
+
+## ⛔ MANDATORY PRE-COMMIT GATE (DO NOT SKIP)
+
+**Before EVERY `git commit`, run the full gate for the code you changed. No exceptions.**
+
+A pre-commit hook enforces this, but if you're using `--no-verify` or committing programmatically, run these manually:
+
+### Rust changes (any `.rs` file modified):
+```bash
+cargo fmt                                  # Fix formatting
+cargo clippy --all-targets -- -D warnings  # Zero warnings allowed
+cargo test --quiet                         # All tests must pass
+```
+
+### Elixir changes (any file under `elixir/`):
+```bash
+cd elixir/rustyclaw_orchestrator
+mix format                          # Fix formatting
+mix compile --warnings-as-errors    # Zero warnings allowed
+mix credo --strict                  # Linting must pass
+mix test --quiet                    # All tests must pass
+```
+
+### Both changed? Run both gates.
+
+**If any gate fails: fix it before committing. Do NOT commit with known failures.**
+**Do NOT use `git commit --no-verify` to bypass the hook.**
 
 ### For Elixir Changes
 
