@@ -1,30 +1,21 @@
 #!/usr/bin/env bash
 #
-# RustyClaw E2E Smoke Test
-# Builds release binary, boots gateway, validates health + chat round-trip.
+# RustyClaw E2E Smoke Test Suite
+# Builds release binary, boots gateway, runs phased feature verification.
 # Exit 0 = all pass, non-zero = failure.
 #
 set -euo pipefail
 
-# ── Colours & helpers ─────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BOLD='\033[1m'
-RESET='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+SMOKE_DIR="$SCRIPT_DIR/smoke"
 
-PASS_COUNT=0
-FAIL_COUNT=0
-SKIP_COUNT=0
+# ── Bootstrap shared helpers ────────────────────────────────────
+source "$SMOKE_DIR/lib.sh"
+
 SCRIPT_START=$(date +%s)
 GATEWAY_PID=""
 TMPDIR_PATH=""
-
-info()  { printf "${BOLD}▸ %s${RESET}\n" "$*"; }
-pass()  { printf "${GREEN}  ✓ %s${RESET}\n" "$*"; PASS_COUNT=$((PASS_COUNT + 1)); }
-fail()  { printf "${RED}  ✗ %s${RESET}\n" "$*"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
-skip()  { printf "${YELLOW}  ⊘ %s${RESET}\n" "$*"; SKIP_COUNT=$((SKIP_COUNT + 1)); }
-fatal() { printf "${RED}FATAL: %s${RESET}\n" "$*" >&2; cleanup; exit 1; }
 
 cleanup() {
     if [[ -n "$GATEWAY_PID" ]] && kill -0 "$GATEWAY_PID" 2>/dev/null; then
@@ -37,7 +28,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
+fatal() { printf "${RED}FATAL: %s${RESET}\n" "$*" >&2; cleanup; exit 1; }
+
 # ── 1. Build ──────────────────────────────────────────────────────
+phase "Build"
 info "Building release binary..."
 BUILD_START=$(date +%s)
 if ! cargo build --release 2>&1; then
@@ -52,9 +46,6 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 # ── 2. Detect provider keys ──────────────────────────────────────
-# Source .env if present (project-local keys)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 if [[ -f "$PROJECT_DIR/.env" ]]; then
     set -a
     source "$PROJECT_DIR/.env"
@@ -79,6 +70,11 @@ elif [[ -n "${ANTHROPIC_OAUTH_TOKEN:-}" ]]; then
     PROVIDER_NAMES+=("anthropic")
     PROVIDER_KEYS+=("$ANTHROPIC_OAUTH_TOKEN")
     PROVIDER_MODELS+=("claude-sonnet-4-20250514")
+fi
+if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+    PROVIDER_NAMES+=("openai")
+    PROVIDER_KEYS+=("$OPENAI_API_KEY")
+    PROVIDER_MODELS+=("gpt-4o-mini")
 fi
 
 if [[ ${#PROVIDER_NAMES[@]} -eq 0 ]]; then
@@ -114,15 +110,15 @@ EOF
 chmod 600 "$CONFIG_DIR/config.toml"
 
 # ── 4. Boot gateway ──────────────────────────────────────────────
+phase "Gateway Boot"
 info "Starting gateway (random port, pairing disabled)..."
 
 GATEWAY_LOG="$TMPDIR_PATH/gateway.log"
 RUST_LOG=info RUSTYCLAW_CONFIG_DIR="$CONFIG_DIR" "$BINARY" gateway -p 0 > "$GATEWAY_LOG" 2>&1 &
 GATEWAY_PID=$!
 
-# Wait for gateway to print its listening address
 PORT=""
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
     if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
         echo "--- Gateway log ---"
         cat "$GATEWAY_LOG"
@@ -143,127 +139,42 @@ if [[ -z "$PORT" ]]; then
     fatal "Gateway did not report a listening port within 15s"
 fi
 
-BASE_URL="http://127.0.0.1:${PORT}"
-pass "Gateway listening on $BASE_URL (pid $GATEWAY_PID)"
+GATEWAY_URL="http://127.0.0.1:${PORT}"
+pass "Gateway listening on $GATEWAY_URL (pid $GATEWAY_PID)"
 
-# ── 5. Health check ──────────────────────────────────────────────
-info "Health check: GET /health"
+# ── 5. Export env for phase scripts ──────────────────────────────
+export GATEWAY_URL GATEWAY_LOG GATEWAY_PID TMPDIR_PATH CONFIG_DIR BINARY
+export PROVIDER_NAMES PROVIDER_KEYS PROVIDER_MODELS
+export DEFAULT_PROVIDER DEFAULT_KEY
+export PASS_COUNT FAIL_COUNT SKIP_COUNT
 
-HTTP_CODE="000"
-for attempt in $(seq 1 5); do
-    HTTP_CODE=$(curl -s -o "$TMPDIR_PATH/health.json" -w '%{http_code}' "$BASE_URL/health" 2>/dev/null || echo "000")
-    if [[ "$HTTP_CODE" == "200" ]]; then
-        break
-    fi
-    sleep 1
-done
+# ── 6. Run phase scripts sequentially ────────────────────────────
+PHASE_RESULTS=()
 
-if [[ "$HTTP_CODE" == "200" ]]; then
-    STATUS=$(jq -r '.status' "$TMPDIR_PATH/health.json" 2>/dev/null || echo "")
-    if [[ "$STATUS" == "ok" ]]; then
-        pass "GET /health → 200, status=ok"
-    else
-        fail "GET /health → 200 but status='$STATUS' (expected 'ok')"
-    fi
-else
-    fail "GET /health → HTTP $HTTP_CODE (expected 200)"
-fi
+run_phase() {
+    local phase_script="$1"
+    local phase_name
+    phase_name=$(basename "$phase_script" .sh)
 
-# ── 6. Chat round-trip (default provider) ────────────────────────
-run_chat_test() {
-    local provider_name="$1"
-    local provider_key="$2"
-    local model="$3"
-    local label="Chat round-trip ($provider_name / $model)"
+    local phase_pass_before=$PASS_COUNT
+    local phase_fail_before=$FAIL_COUNT
+    local phase_skip_before=$SKIP_COUNT
 
-    info "$label"
+    # Source the phase script so counters are shared
+    source "$phase_script" || true
 
-    # Reconfigure if not the default provider
-    if [[ "$provider_name" != "$DEFAULT_PROVIDER" ]]; then
-        # Update config for different provider
-        cat > "$CONFIG_DIR/config.toml" << INNEREOF
-api_key = "$provider_key"
-default_provider = "$provider_name"
-default_model = "$model"
-default_temperature = 0.7
+    local p=$((PASS_COUNT - phase_pass_before))
+    local f=$((FAIL_COUNT - phase_fail_before))
+    local s=$((SKIP_COUNT - phase_skip_before))
 
-[gateway]
-port = 0
-host = "127.0.0.1"
-require_pairing = false
-
-[memory]
-backend = "none"
-auto_save = false
-INNEREOF
-        chmod 600 "$CONFIG_DIR/config.toml"
-
-        # Restart gateway with new config (random port to avoid bind race)
-        kill "$GATEWAY_PID" 2>/dev/null || true
-        wait "$GATEWAY_PID" 2>/dev/null || true
-
-        # Truncate log to avoid reading stale port
-        > "$GATEWAY_LOG"
-
-        RUST_LOG=info RUSTYCLAW_CONFIG_DIR="$CONFIG_DIR" "$BINARY" gateway -p 0 > "$GATEWAY_LOG" 2>&1 &
-        GATEWAY_PID=$!
-
-        # Re-capture port
-        PORT=""
-        for i in $(seq 1 30); do
-            if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
-                fail "$label — gateway failed to restart"
-                return
-            fi
-            PORT=$(grep -oE 'listening on http://[^:]+:([0-9]+)' "$GATEWAY_LOG" | tail -1 | grep -oE '[0-9]+$' || true)
-            if [[ -n "$PORT" ]]; then
-                break
-            fi
-            sleep 0.5
-        done
-        if [[ -z "$PORT" ]]; then
-            fail "$label — gateway did not report port after restart"
-            return
-        fi
-        BASE_URL="http://127.0.0.1:${PORT}"
-    fi
-
-    local CHAT_RESPONSE
-    CHAT_RESPONSE=$(curl -s --max-time 30 -X POST "$BASE_URL/webhook" \
-        -H "Content-Type: application/json" \
-        -d '{"message": "Say hello in exactly 3 words"}' 2>/dev/null || echo "")
-
-    if [[ -z "$CHAT_RESPONSE" ]]; then
-        fail "$label — empty or timed-out response"
-        return
-    fi
-
-    local RESPONSE_TEXT
-    RESPONSE_TEXT=$(echo "$CHAT_RESPONSE" | jq -r '.response // empty' 2>/dev/null || echo "")
-
-    if [[ -z "$RESPONSE_TEXT" ]]; then
-        local ERROR_TEXT
-        ERROR_TEXT=$(echo "$CHAT_RESPONSE" | jq -r '.error // empty' 2>/dev/null || echo "")
-        if [[ -n "$ERROR_TEXT" ]]; then
-            fail "$label — error: $ERROR_TEXT"
-        else
-            fail "$label — no 'response' field in: ${CHAT_RESPONSE:0:200}"
-        fi
-        return
-    fi
-
-    pass "$label → \"${RESPONSE_TEXT:0:80}\""
+    PHASE_RESULTS+=("$phase_name: ${p} passed, ${f} failed, ${s} skipped")
 }
 
-# Test default provider
-run_chat_test "$DEFAULT_PROVIDER" "$DEFAULT_KEY" "${PROVIDER_MODELS[0]}"
-
-# Test additional providers (if any)
-if [[ ${#PROVIDER_NAMES[@]} -gt 1 ]]; then
-    for i in $(seq 1 $((${#PROVIDER_NAMES[@]} - 1))); do
-        run_chat_test "${PROVIDER_NAMES[$i]}" "${PROVIDER_KEYS[$i]}" "${PROVIDER_MODELS[$i]}"
-    done
-fi
+for phase_script in "$SMOKE_DIR"/[0-9]*.sh; do
+    if [[ -f "$phase_script" ]]; then
+        run_phase "$phase_script"
+    fi
+done
 
 # ── 7. Summary ────────────────────────────────────────────────────
 SCRIPT_END=$(date +%s)
@@ -271,6 +182,15 @@ ELAPSED=$((SCRIPT_END - SCRIPT_START))
 
 echo ""
 printf "${BOLD}━━━ Smoke Test Results ━━━${RESET}\n"
+echo ""
+
+# Per-phase breakdown
+for result in "${PHASE_RESULTS[@]}"; do
+    printf "  %s\n" "$result"
+done
+echo ""
+
+# Totals
 printf "${GREEN}  Passed:  %d${RESET}\n" "$PASS_COUNT"
 if [[ $FAIL_COUNT -gt 0 ]]; then
     printf "${RED}  Failed:  %d${RESET}\n" "$FAIL_COUNT"
