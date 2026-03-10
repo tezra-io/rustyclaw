@@ -74,6 +74,9 @@ uuid = { version = "1.11", default-features = false, features = ["v4", "std"] }
 # Authenticated encryption (AEAD) for secret store
 chacha20poly1305 = "0.10"
 
+# OS keychain integration (Apple Keychain, Linux Secret Service)
+keyring = { version = "3", features = ["apple-native", "linux-native"] }
+
 # HMAC for webhook signature verification
 hmac = "0.12"
 sha2 = "0.10"

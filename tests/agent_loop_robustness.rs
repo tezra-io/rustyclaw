@@ -9,8 +9,6 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::json;
-use std::sync::{Arc, Mutex};
 use rustyclaw::agent::agent::Agent;
 use rustyclaw::agent::dispatcher::NativeToolDispatcher;
 use rustyclaw::config::MemoryConfig;
@@ -19,6 +17,8 @@ use rustyclaw::memory::Memory;
 use rustyclaw::observability::{NoopObserver, Observer};
 use rustyclaw::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
 use rustyclaw::tools::{Tool, ToolResult};
+use serde_json::json;
+use std::sync::{Arc, Mutex};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock infrastructure

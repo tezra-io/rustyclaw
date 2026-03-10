@@ -1,5 +1,6 @@
 use crate::config::traits::ChannelConfig;
 use crate::providers::{is_glm_alias, is_zai_alias};
+use crate::secrets::KeychainStore;
 use crate::security::{AutonomyLevel, DomainMatcher};
 use anyhow::{Context, Result};
 use directories::UserDirs;
@@ -3974,11 +3975,7 @@ fn has_ollama_cloud_credential(config_api_key: Option<&str>) -> bool {
 
     ["OLLAMA_API_KEY", "RUSTYCLAW_API_KEY", "API_KEY"]
         .iter()
-        .any(|name| {
-            std::env::var(name)
-                .ok()
-                .is_some_and(|value| !value.trim().is_empty())
-        })
+        .any(|name| KeychainStore::get(name).is_some())
 }
 
 fn normalize_wire_api(raw: &str) -> Option<&'static str> {
@@ -4188,8 +4185,7 @@ impl Config {
                 .map(str::trim)
                 .is_none_or(|value| value.is_empty())
         {
-            let codex_key = std::env::var("OPENAI_API_KEY")
-                .ok()
+            let codex_key = KeychainStore::get("OPENAI_API_KEY")
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
                 .or_else(read_codex_openai_api_key);
@@ -4391,15 +4387,17 @@ impl Config {
 
     /// Apply environment variable overrides to config
     pub fn apply_env_overrides(&mut self) {
-        // API Key: RUSTYCLAW_API_KEY or API_KEY (generic)
-        if let Ok(key) = std::env::var("RUSTYCLAW_API_KEY").or_else(|_| std::env::var("API_KEY")) {
+        // API Key: RUSTYCLAW_API_KEY or API_KEY (generic) — keychain → env var
+        if let Some(key) =
+            KeychainStore::get("RUSTYCLAW_API_KEY").or_else(|| KeychainStore::get("API_KEY"))
+        {
             if !key.is_empty() {
                 self.api_key = Some(key);
             }
         }
         // API Key: GLM_API_KEY overrides when provider is a GLM/Zhipu variant.
         if self.default_provider.as_deref().is_some_and(is_glm_alias) {
-            if let Ok(key) = std::env::var("GLM_API_KEY") {
+            if let Some(key) = KeychainStore::get("GLM_API_KEY") {
                 if !key.is_empty() {
                     self.api_key = Some(key);
                 }
@@ -4408,7 +4406,7 @@ impl Config {
 
         // API Key: ZAI_API_KEY overrides when provider is a Z.AI variant.
         if self.default_provider.as_deref().is_some_and(is_zai_alias) {
-            if let Ok(key) = std::env::var("ZAI_API_KEY") {
+            if let Some(key) = KeychainStore::get("ZAI_API_KEY") {
                 if !key.is_empty() {
                     self.api_key = Some(key);
                 }
@@ -4552,9 +4550,9 @@ impl Config {
             }
         }
 
-        // Brave API key: RUSTYCLAW_BRAVE_API_KEY or BRAVE_API_KEY
-        if let Ok(api_key) =
-            std::env::var("RUSTYCLAW_BRAVE_API_KEY").or_else(|_| std::env::var("BRAVE_API_KEY"))
+        // Brave API key: RUSTYCLAW_BRAVE_API_KEY or BRAVE_API_KEY — keychain → env var
+        if let Some(api_key) = KeychainStore::get("RUSTYCLAW_BRAVE_API_KEY")
+            .or_else(|| KeychainStore::get("BRAVE_API_KEY"))
         {
             let api_key = api_key.trim();
             if !api_key.is_empty() {

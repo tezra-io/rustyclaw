@@ -2207,7 +2207,9 @@ async fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String,
             style("Custom Provider Setup").white().bold(),
             style("— any OpenAI-compatible API").dim()
         );
-        print_bullet("RustyClaw works with ANY API that speaks the OpenAI chat completions format.");
+        print_bullet(
+            "RustyClaw works with ANY API that speaks the OpenAI chat completions format.",
+        );
         print_bullet("Examples: LiteLLM, LocalAI, vLLM, text-generation-webui, LM Studio, etc.");
         println!();
 

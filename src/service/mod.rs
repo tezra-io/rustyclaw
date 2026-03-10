@@ -183,8 +183,11 @@ fn stop(config: &Config, init_system: InitSystem) -> Result<()> {
 fn stop_linux(init_system: InitSystem) -> Result<()> {
     match init_system {
         InitSystem::Systemd => {
-            let _ =
-                run_checked(Command::new("systemctl").args(["--user", "stop", "rustyclaw.service"]));
+            let _ = run_checked(Command::new("systemctl").args([
+                "--user",
+                "stop",
+                "rustyclaw.service",
+            ]));
         }
         InitSystem::Openrc => {
             let _ = run_checked(Command::new("rc-service").args(["rustyclaw", "stop"]));
@@ -222,7 +225,11 @@ fn restart_linux(init_system: InitSystem) -> Result<()> {
     match init_system {
         InitSystem::Systemd => {
             run_checked(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
-            run_checked(Command::new("systemctl").args(["--user", "restart", "rustyclaw.service"]))?;
+            run_checked(Command::new("systemctl").args([
+                "--user",
+                "restart",
+                "rustyclaw.service",
+            ]))?;
         }
         InitSystem::Openrc => {
             run_checked(Command::new("rc-service").args(["rustyclaw", "restart"]))?;
@@ -469,7 +476,9 @@ fn is_root() -> bool {
 /// Returns Ok if user doesn't exist (OpenRC will handle creation or fail gracefully).
 /// Returns error if user exists but has unexpected properties.
 fn check_rustyclaw_user() -> Result<()> {
-    let output = Command::new("getent").args(["passwd", "rustyclaw"]).output();
+    let output = Command::new("getent")
+        .args(["passwd", "rustyclaw"])
+        .output();
     let is_alpine = Path::new("/etc/alpine-release").exists();
 
     let (del_cmd, add_cmd) = if is_alpine {
@@ -525,7 +534,9 @@ fn check_rustyclaw_user() -> Result<()> {
 }
 
 fn ensure_rustyclaw_user() -> Result<()> {
-    let output = Command::new("getent").args(["passwd", "rustyclaw"]).output();
+    let output = Command::new("getent")
+        .args(["passwd", "rustyclaw"])
+        .output();
     if let Ok(output) = output {
         if output.status.success() {
             return check_rustyclaw_user();

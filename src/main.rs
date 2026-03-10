@@ -75,6 +75,7 @@ mod onboard;
 mod peripherals;
 mod providers;
 mod runtime;
+mod secrets;
 mod security;
 mod service;
 mod skillforge;
@@ -440,6 +441,24 @@ Examples:
         config_command: ConfigCommands,
     },
 
+    /// Manage secrets stored in the OS keychain
+    #[command(long_about = "\
+Manage secrets stored in the OS keychain (Apple Keychain / Linux Secret Service).
+
+Store, retrieve, list, and delete API keys and other secrets. \
+Keychain-stored secrets take priority over environment variables \
+and config file values.
+
+Examples:
+  rustyclaw secrets set ANTHROPIC_API_KEY sk-ant-...
+  rustyclaw secrets get ANTHROPIC_API_KEY
+  rustyclaw secrets list
+  rustyclaw secrets delete ANTHROPIC_API_KEY")]
+    Secrets {
+        #[command(subcommand)]
+        secrets_command: SecretsCommands,
+    },
+
     /// Generate shell completion script to stdout
     #[command(long_about = "\
 Generate shell completion scripts for `rustyclaw`.
@@ -461,6 +480,29 @@ Examples:
 enum ConfigCommands {
     /// Dump the full configuration JSON Schema to stdout
     Schema,
+}
+
+#[derive(Subcommand, Debug)]
+enum SecretsCommands {
+    /// Store a secret in the OS keychain
+    Set {
+        /// Secret name (e.g. ANTHROPIC_API_KEY)
+        key: String,
+        /// Secret value
+        value: String,
+    },
+    /// Retrieve a secret from the OS keychain (value is masked)
+    Get {
+        /// Secret name to retrieve
+        key: String,
+    },
+    /// List which well-known keys are stored in the keychain
+    List,
+    /// Delete a secret from the OS keychain
+    Delete {
+        /// Secret name to delete
+        key: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1035,6 +1077,47 @@ async fn main() -> Result<()> {
                 Ok(())
             }
         },
+
+        Commands::Secrets { secrets_command } => handle_secrets_command(secrets_command),
+    }
+}
+
+fn handle_secrets_command(cmd: SecretsCommands) -> Result<()> {
+    use crate::secrets::KeychainStore;
+
+    match cmd {
+        SecretsCommands::Set { key, value } => {
+            KeychainStore::set(&key, &value)?;
+            println!("Stored {key} in keychain.");
+            Ok(())
+        }
+        SecretsCommands::Get { key } => {
+            match KeychainStore::get(&key) {
+                Some(value) => {
+                    let masked = crate::security::redact(&value);
+                    println!("{key} = {masked}");
+                }
+                None => println!("{key}: not found (keychain or env var)"),
+            }
+            Ok(())
+        }
+        SecretsCommands::List => {
+            let stored = KeychainStore::list_stored();
+            if stored.is_empty() {
+                println!("No well-known keys found in keychain.");
+            } else {
+                println!("Keys stored in keychain:");
+                for key in stored {
+                    println!("  {key}");
+                }
+            }
+            Ok(())
+        }
+        SecretsCommands::Delete { key } => {
+            KeychainStore::delete(&key)?;
+            println!("Deleted {key} from keychain.");
+            Ok(())
+        }
     }
 }
 
@@ -1589,7 +1672,9 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
 
                     let kind_label = match kind {
                         auth::anthropic_token::AnthropicAuthKind::ApiKey => "API key",
-                        auth::anthropic_token::AnthropicAuthKind::Authorization => "setup token (bearer)",
+                        auth::anthropic_token::AnthropicAuthKind::Authorization => {
+                            "setup token (bearer)"
+                        }
                     };
                     println!("Detected credential type: {kind_label}");
 
