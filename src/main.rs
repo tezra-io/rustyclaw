@@ -81,6 +81,7 @@ mod service;
 mod skillforge;
 mod skills;
 mod tools;
+mod trajectory;
 mod tunnel;
 mod util;
 

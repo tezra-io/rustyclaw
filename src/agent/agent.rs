@@ -10,6 +10,7 @@ use crate::providers::{self, ChatMessage, ChatRequest, ConversationMessage, Prov
 use crate::runtime;
 use crate::security::SecurityPolicy;
 use crate::tools::{self, Tool, ToolSpec};
+use crate::trajectory::{ConversationStatus, TrajectoryCollector};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::io::Write as IoWrite;
@@ -37,6 +38,8 @@ pub struct Agent {
     classification_config: crate::config::QueryClassificationConfig,
     available_hints: Vec<String>,
     route_model_by_hint: HashMap<String, String>,
+    trajectory: Option<Arc<TrajectoryCollector>>,
+    conversation_id: String,
 }
 
 pub struct AgentBuilder {
@@ -58,6 +61,7 @@ pub struct AgentBuilder {
     classification_config: Option<crate::config::QueryClassificationConfig>,
     available_hints: Option<Vec<String>>,
     route_model_by_hint: Option<HashMap<String, String>>,
+    trajectory: Option<Arc<TrajectoryCollector>>,
 }
 
 impl AgentBuilder {
@@ -81,6 +85,7 @@ impl AgentBuilder {
             classification_config: None,
             available_hints: None,
             route_model_by_hint: None,
+            trajectory: None,
         }
     }
 
@@ -180,6 +185,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn trajectory(mut self, trajectory: Arc<TrajectoryCollector>) -> Self {
+        self.trajectory = Some(trajectory);
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let tools = self
             .tools
@@ -223,6 +233,8 @@ impl AgentBuilder {
             classification_config: self.classification_config.unwrap_or_default(),
             available_hints: self.available_hints.unwrap_or_default(),
             route_model_by_hint: self.route_model_by_hint.unwrap_or_default(),
+            trajectory: self.trajectory,
+            conversation_id: format!("conv_{}", uuid::Uuid::new_v4().as_simple()),
         })
     }
 }
@@ -317,7 +329,7 @@ impl Agent {
             .collect();
         let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
 
-        Agent::builder()
+        let mut builder = Agent::builder()
             .provider(provider)
             .tools(tools)
             .memory(memory)
@@ -341,8 +353,15 @@ impl Agent {
                 config,
             ))
             .skills_prompt_mode(config.skills.prompt_injection_mode)
-            .auto_save(config.memory.auto_save)
-            .build()
+            .auto_save(config.memory.auto_save);
+
+        if config.trajectory.enabled {
+            builder = builder.trajectory(Arc::new(TrajectoryCollector::new(
+                config.trajectory.clone(),
+            )));
+        }
+
+        builder.build()
     }
 
     fn trim_history(&mut self) {
@@ -464,13 +483,53 @@ impl Agent {
         self.model_name.clone()
     }
 
+    fn record_turn(&self, msg: &ConversationMessage) {
+        if let Some(ref tc) = self.trajectory {
+            tc.record_turn(&self.conversation_id, msg);
+        }
+    }
+
+    fn finish_trajectory(
+        &self,
+        status: ConversationStatus,
+        turn_start: Instant,
+        tool_calls: usize,
+        turns: usize,
+    ) {
+        if let Some(ref tc) = self.trajectory {
+            let provider = self
+                .model_name
+                .split('/')
+                .next()
+                .unwrap_or("unknown")
+                .to_string();
+            tc.finish_conversation(
+                &self.conversation_id,
+                status,
+                crate::trajectory::TrajectoryMetadata {
+                    model: self.model_name.clone(),
+                    provider,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    duration_ms: turn_start.elapsed().as_millis() as u64,
+                    tool_calls_count: tool_calls,
+                    turns,
+                    status: String::new(), // filled by collector
+                    tokens: None,
+                },
+            );
+        }
+    }
+
     pub async fn turn(&mut self, user_message: &str) -> Result<String> {
+        let turn_start = Instant::now();
+        let mut tool_calls_count: usize = 0;
+        let mut turn_count: usize = 0;
+
         if self.history.is_empty() {
             let system_prompt = self.build_system_prompt()?;
-            self.history
-                .push(ConversationMessage::Chat(ChatMessage::system(
-                    system_prompt,
-                )));
+            let msg = ConversationMessage::Chat(ChatMessage::system(system_prompt));
+            self.record_turn(&msg);
+            self.history.push(msg);
         }
 
         if self.auto_save {
@@ -493,8 +552,10 @@ impl Agent {
             format!("{context}[{now}] {user_message}")
         };
 
-        self.history
-            .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
+        let user_msg = ConversationMessage::Chat(ChatMessage::user(enriched));
+        self.record_turn(&user_msg);
+        self.history.push(user_msg);
+        turn_count += 1;
 
         let effective_model = self.classify_model(user_message);
 
@@ -517,7 +578,15 @@ impl Agent {
                 .await
             {
                 Ok(resp) => resp,
-                Err(err) => return Err(err),
+                Err(err) => {
+                    self.finish_trajectory(
+                        ConversationStatus::Failed(err.to_string()),
+                        turn_start,
+                        tool_calls_count,
+                        turn_count,
+                    );
+                    return Err(err);
+                }
             };
 
             let (text, calls) = self.tool_dispatcher.parse_response(&response);
@@ -528,36 +597,52 @@ impl Agent {
                     text
                 };
 
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::assistant(
-                        final_text.clone(),
-                    )));
+                let msg = ConversationMessage::Chat(ChatMessage::assistant(final_text.clone()));
+                self.record_turn(&msg);
+                self.history.push(msg);
+                turn_count += 1;
                 self.trim_history();
 
+                self.finish_trajectory(
+                    ConversationStatus::Completed,
+                    turn_start,
+                    tool_calls_count,
+                    turn_count,
+                );
                 return Ok(final_text);
             }
 
             if !text.is_empty() {
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::assistant(
-                        text.clone(),
-                    )));
+                let msg = ConversationMessage::Chat(ChatMessage::assistant(text.clone()));
+                self.record_turn(&msg);
+                self.history.push(msg);
                 print!("{text}");
                 let _ = std::io::stdout().flush();
             }
 
-            self.history.push(ConversationMessage::AssistantToolCalls {
+            let tc_msg = ConversationMessage::AssistantToolCalls {
                 text: response.text.clone(),
                 tool_calls: response.tool_calls.clone(),
                 reasoning_content: response.reasoning_content.clone(),
-            });
+            };
+            tool_calls_count += calls.len();
+            turn_count += 1;
+            self.record_turn(&tc_msg);
+            self.history.push(tc_msg);
 
             let results = self.execute_tools(&calls).await;
             let formatted = self.tool_dispatcher.format_results(&results);
+            self.record_turn(&formatted);
             self.history.push(formatted);
             self.trim_history();
         }
 
+        self.finish_trajectory(
+            ConversationStatus::Truncated,
+            turn_start,
+            tool_calls_count,
+            turn_count,
+        );
         anyhow::bail!(
             "Agent exceeded maximum tool iterations ({})",
             self.config.max_tool_iterations

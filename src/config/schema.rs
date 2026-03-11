@@ -218,6 +218,10 @@ pub struct Config {
     /// Voice transcription configuration (Whisper API via Groq).
     #[serde(default)]
     pub transcription: TranscriptionConfig,
+
+    /// Trajectory collection configuration for training data capture (`[trajectory]`).
+    #[serde(default)]
+    pub trajectory: crate::trajectory::TrajectoryConfig,
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -3630,6 +3634,7 @@ impl Default for Config {
             hardware: HardwareConfig::default(),
             query_classification: QueryClassificationConfig::default(),
             transcription: TranscriptionConfig::default(),
+            trajectory: crate::trajectory::TrajectoryConfig::default(),
         }
     }
 }
@@ -5159,6 +5164,7 @@ default_temperature = 0.7
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
+            trajectory: crate::trajectory::TrajectoryConfig::default(),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -5341,6 +5347,7 @@ tool_dispatcher = "xml"
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
+            trajectory: crate::trajectory::TrajectoryConfig::default(),
         };
 
         config.save().await.unwrap();
