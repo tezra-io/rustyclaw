@@ -68,6 +68,7 @@ pub(crate) mod security;
 pub(crate) mod service;
 pub(crate) mod skills;
 pub mod tools;
+pub mod trajectory;
 pub(crate) mod tunnel;
 pub(crate) mod util;
 
