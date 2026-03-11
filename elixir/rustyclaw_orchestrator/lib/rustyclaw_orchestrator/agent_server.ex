@@ -143,22 +143,28 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   def handle_call({:run_task, task, provenance}, _from, state) do
-    check_memory_limit!(state)
-    maybe_record_provenance(provenance)
-    maybe_log_provenance(:task_executed, state.definition.name, provenance)
+    case check_memory_limit(state) do
+      :ok ->
+        maybe_record_provenance(provenance)
+        maybe_log_provenance(:task_executed, state.definition.name, provenance)
 
-    state = %{state | status: :running, last_active_at: DateTime.utc_now()}
+        state = %{state | status: :running, last_active_at: DateTime.utc_now()}
 
-    # Task execution will be routed through RustBridge in TEZ-146.
-    # For now, record the task and return a placeholder.
-    result = {:ok, %{task: task, status: :pending_bridge}}
+        # Task execution will be routed through RustBridge in TEZ-146.
+        # For now, record the task and return a placeholder.
+        result = {:ok, %{task: task, status: :pending_bridge}}
 
-    state =
-      state
-      |> Map.put(:status, :idle)
-      |> append_history(:task_executed, %{task: task, result: result})
+        state =
+          state
+          |> Map.put(:status, :idle)
+          |> append_history(:task_executed, %{task: task, result: result})
 
-    {:reply, result, state}
+        {:reply, result, state}
+
+      {:error, _} = err ->
+        state = append_history(state, :task_rejected, %{task: task, reason: :memory_limit})
+        {:reply, err, state}
+    end
   end
 
   def handle_call(:get_state, _from, state) do
@@ -169,20 +175,30 @@ defmodule RustyclawOrchestrator.AgentServer do
     {:reply, state.health, state}
   end
 
-  def handle_call({:delegate_to_child, child_name, task}, _from, state) do
+  def handle_call({:delegate_to_child, child_name, task}, from, state) do
     case Registry.lookup(RustyclawOrchestrator.AgentRegistry, child_name) do
       [{child_pid, _}] ->
-        state = %{state | child_pids: MapSet.put(state.child_pids, child_pid)}
-        Process.monitor(child_pid)
+        # Track child and monitor if not already tracked
+        state =
+          if MapSet.member?(state.child_pids, child_pid) do
+            state
+          else
+            Process.monitor(child_pid)
+            %{state | child_pids: MapSet.put(state.child_pids, child_pid)}
+          end
 
-        result = run_task(child_name, task)
+        # Async delegation: spawn a task to avoid blocking this GenServer
+        Task.start(fn ->
+          result = run_task(child_name, task)
+          GenServer.reply(from, result)
+        end)
 
         state =
           state
           |> Map.put(:last_active_at, DateTime.utc_now())
-          |> append_history(:delegated_to_child, %{child: child_name, task: task, result: result})
+          |> append_history(:delegated_to_child, %{child: child_name, task: task})
 
-        {:reply, result, state}
+        {:noreply, state}
 
       [] ->
         {:reply, {:error, :child_not_found}, state}
@@ -209,7 +225,15 @@ defmodule RustyclawOrchestrator.AgentServer do
   def handle_call({:update_accumulated_state, updates}, _from, state) do
     new_acc = Map.merge(state.accumulated_state, updates)
     state = %{state | accumulated_state: new_acc, last_active_at: DateTime.utc_now()}
-    {:reply, :ok, state}
+
+    case check_memory_limit(state) do
+      :ok ->
+        {:reply, :ok, state}
+
+      {:error, _} = err ->
+        Logger.warning("Agent #{state.definition.name} state update rejected: memory limit")
+        {:reply, err, state}
+    end
   end
 
   def handle_call(:get_snapshot, _from, state) do
@@ -330,14 +354,14 @@ defmodule RustyclawOrchestrator.AgentServer do
 
   # --- Memory limit enforcement ---
 
-  defp check_memory_limit!(state) do
+  defp check_memory_limit(state) do
     case state.definition.max_memory_mb do
       nil -> :ok
-      limit_mb -> enforce_memory_limit!(state.definition.name, limit_mb)
+      limit_mb -> enforce_memory_limit(state.definition.name, limit_mb)
     end
   end
 
-  defp enforce_memory_limit!(agent_name, limit_mb) do
+  defp enforce_memory_limit(agent_name, limit_mb) do
     case Process.info(self(), :memory) do
       {:memory, bytes} ->
         mb = bytes / (1024 * 1024)
@@ -347,7 +371,9 @@ defmodule RustyclawOrchestrator.AgentServer do
             "Agent #{agent_name} exceeded memory limit: #{Float.round(mb, 2)}MB > #{limit_mb}MB"
           )
 
-          raise "Memory limit exceeded: #{Float.round(mb, 2)}MB > #{limit_mb}MB"
+          {:error, :memory_limit_exceeded}
+        else
+          :ok
         end
 
       nil ->
@@ -362,7 +388,9 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   defp snapshot_path(agent_name) do
-    Path.join(snapshot_dir(), "#{agent_name}.snapshot.etf")
+    # Sanitize agent name to prevent path traversal
+    safe_name = String.replace(agent_name, ~r"[^a-zA-Z0-9_\-]", "_")
+    Path.join(snapshot_dir(), "#{safe_name}.snapshot.etf")
   end
 
   defp build_snapshot(state) do

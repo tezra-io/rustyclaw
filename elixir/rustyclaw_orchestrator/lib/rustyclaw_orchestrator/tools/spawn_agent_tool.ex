@@ -52,13 +52,14 @@ defmodule RustyclawOrchestrator.Tools.SpawnAgentTool do
     end
   end
 
+  @known_keys ~w(name capabilities persistent parent max_memory_mb model personality delegates_to)
+
   defp normalize_keys(params) do
     Map.new(params, fn
-      {k, v} when is_binary(k) -> {String.to_existing_atom(k), v}
+      {k, v} when is_binary(k) and k in @known_keys -> {String.to_atom(k), v}
+      {k, v} when is_binary(k) -> {k, v}
       {k, v} when is_atom(k) -> {k, v}
     end)
-  rescue
-    ArgumentError -> params
   end
 
   defp build_definition(params) do

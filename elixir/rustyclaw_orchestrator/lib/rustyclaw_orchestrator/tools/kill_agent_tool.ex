@@ -9,7 +9,6 @@ defmodule RustyclawOrchestrator.Tools.KillAgentTool do
   ## Parameters
 
     * `name` — required, name of the agent to kill (string)
-    * `force` — boolean, skip graceful shutdown (default: false)
 
   ## Returns
 
