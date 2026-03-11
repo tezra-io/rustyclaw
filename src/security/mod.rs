@@ -21,6 +21,7 @@
 pub mod audit;
 #[cfg(feature = "sandbox-bubblewrap")]
 pub mod bubblewrap;
+pub mod content_scanner;
 pub mod detect;
 pub mod docker;
 
@@ -56,6 +57,8 @@ pub use secrets::SecretStore;
 #[allow(unused_imports)]
 pub use traits::{NoopSandbox, Sandbox};
 // Prompt injection defense exports
+#[allow(unused_imports)]
+pub use content_scanner::{ContentScanner, ScanFinding, ScanResult, Severity, ThreatCategory};
 #[allow(unused_imports)]
 pub use leak_detector::{LeakDetector, LeakResult};
 #[allow(unused_imports)]
