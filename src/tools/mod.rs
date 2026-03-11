@@ -51,6 +51,7 @@ pub mod schedule;
 pub mod schema;
 pub mod screenshot;
 pub mod shell;
+pub mod skill_create;
 pub mod traits;
 pub mod web_fetch;
 pub mod web_search_tool;
@@ -91,6 +92,7 @@ pub use schedule::ScheduleTool;
 pub use schema::{CleaningStrategy, SchemaCleanr};
 pub use screenshot::ScreenshotTool;
 pub use shell::ShellTool;
+pub use skill_create::SkillCreateTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
 pub use traits::{ToolResult, ToolSpec};
@@ -343,6 +345,16 @@ pub fn all_tools_with_runtime(
         .with_parent_tools(parent_tools)
         .with_multimodal_config(root_config.multimodal.clone());
         tool_arcs.push(Arc::new(delegate_tool));
+    }
+
+    // Skill CRUD tools (opt-in via config)
+    if root_config.skills.agent_writable {
+        let scanner = Arc::new(crate::security::ContentScanner::new());
+        tool_arcs.push(Arc::new(SkillCreateTool::new(
+            workspace_dir.to_path_buf(),
+            security.clone(),
+            scanner,
+        )));
     }
 
     boxed_registry_from_arcs(tool_arcs)

@@ -247,7 +247,11 @@ mod tests {
             .execute(json!({"key": "preference", "content": "User prefers dark mode"}))
             .await
             .unwrap();
-        assert!(result.success, "clean content should be stored: {:?}", result.error);
+        assert!(
+            result.success,
+            "clean content should be stored: {:?}",
+            result.error
+        );
         assert!(result.output.contains("preference"));
     }
 
@@ -264,7 +268,11 @@ mod tests {
             .unwrap();
         assert!(!result.success);
         assert!(result.output.contains("blocked by security scan"));
-        assert!(result.error.as_deref().unwrap_or("").contains("injection scan"));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("injection scan"));
         // Verify nothing was stored
         assert!(mem.get("note").await.unwrap().is_none());
     }

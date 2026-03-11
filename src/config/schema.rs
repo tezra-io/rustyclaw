@@ -476,6 +476,10 @@ pub struct SkillsConfig {
     /// `full` preserves legacy behavior. `compact` keeps context small and loads skills on demand.
     #[serde(default)]
     pub prompt_injection_mode: SkillsPromptInjectionMode,
+    /// Allow the agent to create/edit/delete skills at runtime via skill CRUD tools.
+    /// Default: `false` (opt-in).
+    #[serde(default)]
+    pub agent_writable: bool,
 }
 
 impl Default for SkillsConfig {
@@ -484,6 +488,7 @@ impl Default for SkillsConfig {
             open_skills_enabled: false,
             open_skills_dir: None,
             prompt_injection_mode: SkillsPromptInjectionMode::default(),
+            agent_writable: false,
         }
     }
 }
