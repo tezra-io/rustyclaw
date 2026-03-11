@@ -20,6 +20,8 @@ defmodule RustyclawOrchestrator.AgentDefinition do
   @type t :: %__MODULE__{
           name: String.t(),
           persistent: boolean(),
+          parent: String.t() | nil,
+          max_memory_mb: pos_integer() | nil,
           skills: [String.t()],
           memory: memory_isolation(),
           memory_backend: String.t(),
@@ -37,6 +39,8 @@ defmodule RustyclawOrchestrator.AgentDefinition do
   @enforce_keys [:name]
   defstruct name: nil,
             persistent: false,
+            parent: nil,
+            max_memory_mb: nil,
             skills: [],
             memory: :isolated,
             memory_backend: "markdown",
@@ -56,6 +60,8 @@ defmodule RustyclawOrchestrator.AgentDefinition do
   @nimble_schema NimbleOptions.new!(
                    name: [type: :string, required: true],
                    persistent: [type: :boolean, default: false],
+                   parent: [type: {:or, [:string, nil]}, default: nil],
+                   max_memory_mb: [type: {:or, [:pos_integer, nil]}, default: nil],
                    skills: [type: {:list, :string}, default: []],
                    memory: [type: :string, default: "isolated"],
                    memory_backend: [type: :string, default: "markdown"],
@@ -172,6 +178,8 @@ defmodule RustyclawOrchestrator.AgentDefinition do
          %__MODULE__{
            name: opts[:name],
            persistent: opts[:persistent],
+           parent: opts[:parent],
+           max_memory_mb: opts[:max_memory_mb],
            skills: opts[:skills],
            memory: mem,
            memory_backend: opts[:memory_backend],

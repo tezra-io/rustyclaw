@@ -3,7 +3,8 @@ defmodule RustyclawOrchestrator.AgentServer do
   GenServer managing a single agent instance.
 
   Each agent runs as a supervised process with periodic health checks,
-  message handling, and task execution capabilities.
+  message handling, task execution, parent-child relationships,
+  accumulated state, state persistence, and memory limit enforcement.
   """
 
   use GenServer, restart: :transient
@@ -14,6 +15,8 @@ defmodule RustyclawOrchestrator.AgentServer do
 
   @health_check_interval 30_000
   @call_timeout 30_000
+  @max_history 100
+  @snapshot_dir "~/.rustyclaw/agent_snapshots"
 
   @type status :: :initializing | :idle | :running | :stopping
   @type health :: :healthy | :degraded | :unhealthy
@@ -24,7 +27,11 @@ defmodule RustyclawOrchestrator.AgentServer do
           status: status(),
           health: health(),
           history: [map()],
+          accumulated_state: map(),
+          parent_pid: pid() | nil,
+          child_pids: MapSet.t(),
           started_at: DateTime.t(),
+          last_active_at: DateTime.t(),
           last_health_check: DateTime.t() | nil,
           recovery_attempts: non_neg_integer()
         }
@@ -34,6 +41,7 @@ defmodule RustyclawOrchestrator.AgentServer do
   @doc """
   Start an agent server linked to the caller.
   `opts` must include `:definition` (AgentDefinition.t()).
+  Optional: `:parent_pid` to establish parent-child relationship.
   """
   def start_link(opts) do
     definition = Keyword.fetch!(opts, :definition)
@@ -61,19 +69,63 @@ defmodule RustyclawOrchestrator.AgentServer do
     GenServer.call(via_registry(agent_name), :get_health, @call_timeout)
   end
 
+  @doc "Delegate a task to a child agent, tracking the parent-child relationship."
+  @spec delegate_to_child(String.t(), String.t(), String.t()) ::
+          {:ok, term()} | {:error, term()}
+  def delegate_to_child(parent_name, child_name, task)
+      when is_binary(parent_name) and is_binary(child_name) do
+    GenServer.call(
+      via_registry(parent_name),
+      {:delegate_to_child, child_name, task},
+      @call_timeout
+    )
+  end
+
+  @doc "Report a result back to the parent agent."
+  @spec report_to_parent(String.t(), term()) :: :ok | {:error, :no_parent}
+  def report_to_parent(child_name, result) when is_binary(child_name) do
+    GenServer.call(via_registry(child_name), {:report_to_parent, result}, @call_timeout)
+  end
+
+  @doc "Update the agent's accumulated state with a map merge."
+  @spec update_accumulated_state(String.t(), map()) :: :ok
+  def update_accumulated_state(agent_name, updates)
+      when is_binary(agent_name) and is_map(updates) do
+    GenServer.call(via_registry(agent_name), {:update_accumulated_state, updates}, @call_timeout)
+  end
+
+  @doc "Get a snapshot of the agent's persistent state."
+  @spec get_snapshot(String.t()) :: map()
+  def get_snapshot(agent_name) when is_binary(agent_name) do
+    GenServer.call(via_registry(agent_name), :get_snapshot, @call_timeout)
+  end
+
   # --- GenServer Callbacks ---
 
   @impl true
   def init(opts) do
+    # Trap exits so terminate/2 is called on shutdown (needed for snapshot persistence)
+    Process.flag(:trap_exit, true)
+
     definition = Keyword.fetch!(opts, :definition)
+    parent_pid = Keyword.get(opts, :parent_pid)
+
+    if parent_pid, do: Process.monitor(parent_pid)
+
+    now = DateTime.utc_now()
+    restored = maybe_restore_snapshot(definition.name)
 
     state = %{
       definition: definition,
       session_id: generate_session_id(),
       status: :idle,
       health: :healthy,
-      history: [],
-      started_at: DateTime.utc_now(),
+      history: Map.get(restored, :history, []),
+      accumulated_state: Map.get(restored, :accumulated_state, %{}),
+      parent_pid: parent_pid,
+      child_pids: MapSet.new(),
+      started_at: now,
+      last_active_at: now,
       last_health_check: nil,
       recovery_attempts: 0
     }
@@ -91,10 +143,11 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   def handle_call({:run_task, task, provenance}, _from, state) do
+    check_memory_limit!(state)
     maybe_record_provenance(provenance)
     maybe_log_provenance(:task_executed, state.definition.name, provenance)
 
-    state = %{state | status: :running}
+    state = %{state | status: :running, last_active_at: DateTime.utc_now()}
 
     # Task execution will be routed through RustBridge in TEZ-146.
     # For now, record the task and return a placeholder.
@@ -109,11 +162,58 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   def handle_call(:get_state, _from, state) do
-    {:reply, state, state}
+    {:reply, externalize_state(state), state}
   end
 
   def handle_call(:get_health, _from, state) do
     {:reply, state.health, state}
+  end
+
+  def handle_call({:delegate_to_child, child_name, task}, _from, state) do
+    case Registry.lookup(RustyclawOrchestrator.AgentRegistry, child_name) do
+      [{child_pid, _}] ->
+        state = %{state | child_pids: MapSet.put(state.child_pids, child_pid)}
+        Process.monitor(child_pid)
+
+        result = run_task(child_name, task)
+
+        state =
+          state
+          |> Map.put(:last_active_at, DateTime.utc_now())
+          |> append_history(:delegated_to_child, %{child: child_name, task: task, result: result})
+
+        {:reply, result, state}
+
+      [] ->
+        {:reply, {:error, :child_not_found}, state}
+    end
+  end
+
+  def handle_call({:report_to_parent, result}, _from, state) do
+    case state.parent_pid do
+      nil ->
+        {:reply, {:error, :no_parent}, state}
+
+      parent_pid when is_pid(parent_pid) ->
+        send(parent_pid, {:child_report, state.definition.name, result})
+
+        state =
+          state
+          |> Map.put(:last_active_at, DateTime.utc_now())
+          |> append_history(:reported_to_parent, %{result: result})
+
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:update_accumulated_state, updates}, _from, state) do
+    new_acc = Map.merge(state.accumulated_state, updates)
+    state = %{state | accumulated_state: new_acc, last_active_at: DateTime.utc_now()}
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:get_snapshot, _from, state) do
+    {:reply, build_snapshot(state), state}
   end
 
   @impl true
@@ -121,7 +221,11 @@ defmodule RustyclawOrchestrator.AgentServer do
     maybe_record_provenance(provenance)
     maybe_log_provenance(:message_received, state.definition.name, provenance)
 
-    state = append_history(state, :message_received, %{message: message})
+    state =
+      state
+      |> Map.put(:last_active_at, DateTime.utc_now())
+      |> append_history(:message_received, %{message: message})
+
     {:noreply, state}
   end
 
@@ -145,6 +249,37 @@ defmodule RustyclawOrchestrator.AgentServer do
       end
 
     {:noreply, state}
+  end
+
+  def handle_info({:child_report, child_name, result}, state) do
+    state =
+      state
+      |> Map.put(:last_active_at, DateTime.utc_now())
+      |> append_history(:child_reported, %{child: child_name, result: result})
+
+    {:noreply, state}
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    state = %{state | child_pids: MapSet.delete(state.child_pids, pid)}
+
+    state =
+      if state.parent_pid == pid do
+        %{state | parent_pid: nil}
+      else
+        state
+      end
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    if state.definition.persistent do
+      save_snapshot(state)
+    end
+
+    :ok
   end
 
   # --- Internals ---
@@ -172,10 +307,110 @@ defmodule RustyclawOrchestrator.AgentServer do
 
   defp append_history(state, event, data) do
     entry = Map.merge(data, %{event: event, timestamp: DateTime.utc_now()})
-    # Keep last 100 history entries
-    history = Enum.take([entry | state.history], 100)
+    history = Enum.take([entry | state.history], @max_history)
     %{state | history: history}
   end
+
+  defp externalize_state(state) do
+    %{
+      definition: state.definition,
+      session_id: state.session_id,
+      status: state.status,
+      health: state.health,
+      history: state.history,
+      accumulated_state: state.accumulated_state,
+      parent_pid: state.parent_pid,
+      child_pids: MapSet.to_list(state.child_pids),
+      started_at: state.started_at,
+      last_active_at: state.last_active_at,
+      last_health_check: state.last_health_check,
+      recovery_attempts: state.recovery_attempts
+    }
+  end
+
+  # --- Memory limit enforcement ---
+
+  defp check_memory_limit!(state) do
+    case state.definition.max_memory_mb do
+      nil -> :ok
+      limit_mb -> enforce_memory_limit!(state.definition.name, limit_mb)
+    end
+  end
+
+  defp enforce_memory_limit!(agent_name, limit_mb) do
+    case Process.info(self(), :memory) do
+      {:memory, bytes} ->
+        mb = bytes / (1024 * 1024)
+
+        if mb > limit_mb do
+          Logger.warning(
+            "Agent #{agent_name} exceeded memory limit: #{Float.round(mb, 2)}MB > #{limit_mb}MB"
+          )
+
+          raise "Memory limit exceeded: #{Float.round(mb, 2)}MB > #{limit_mb}MB"
+        end
+
+      nil ->
+        :ok
+    end
+  end
+
+  # --- State persistence (snapshots) ---
+
+  defp snapshot_dir do
+    @snapshot_dir |> Path.expand()
+  end
+
+  defp snapshot_path(agent_name) do
+    Path.join(snapshot_dir(), "#{agent_name}.snapshot.etf")
+  end
+
+  defp build_snapshot(state) do
+    %{
+      agent_name: state.definition.name,
+      accumulated_state: state.accumulated_state,
+      history: Enum.take(state.history, 20),
+      last_active_at: state.last_active_at,
+      snapshot_at: DateTime.utc_now()
+    }
+  end
+
+  defp save_snapshot(state) do
+    dir = snapshot_dir()
+    File.mkdir_p!(dir)
+    path = snapshot_path(state.definition.name)
+    data = build_snapshot(state)
+
+    case File.write(path, :erlang.term_to_binary(data)) do
+      :ok ->
+        Logger.debug("Saved snapshot for agent #{state.definition.name}")
+
+      {:error, reason} ->
+        Logger.warning("Failed to save snapshot for #{state.definition.name}: #{inspect(reason)}")
+    end
+  end
+
+  defp maybe_restore_snapshot(agent_name) do
+    path = snapshot_path(agent_name)
+
+    case File.read(path) do
+      {:ok, binary} ->
+        try do
+          data = :erlang.binary_to_term(binary, [:safe])
+          Logger.debug("Restored snapshot for agent #{agent_name}")
+          data
+        rescue
+          _ ->
+            Logger.warning("Corrupt snapshot for #{agent_name}, starting fresh")
+            %{}
+        end
+
+      {:error, _} ->
+        %{}
+    end
+  end
+
+  # --- Provenance helpers ---
 
   defp maybe_record_provenance(%MessageProvenance{} = prov) do
     TraceStore.record(prov)
