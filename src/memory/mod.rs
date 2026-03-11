@@ -10,6 +10,7 @@ pub mod none;
 pub mod postgres;
 pub mod qdrant;
 pub mod response_cache;
+pub mod scanning;
 pub mod snapshot;
 pub mod sqlite;
 pub mod traits;
@@ -27,6 +28,7 @@ pub use none::NoneMemory;
 pub use postgres::PostgresMemory;
 pub use qdrant::QdrantMemory;
 pub use response_cache::ResponseCache;
+pub use scanning::ScannedMemory;
 pub use sqlite::SqliteMemory;
 pub use traits::Memory;
 #[allow(unused_imports)]

@@ -262,13 +262,22 @@ impl Agent {
             &config.workspace_dir,
         ));
 
-        let memory: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage_and_routes(
+        let raw_memory: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage_and_routes(
             &config.memory,
             &config.embedding_routes,
             Some(&config.storage.provider.config),
             &config.workspace_dir,
             config.api_key.as_deref(),
         )?);
+
+        let memory: Arc<dyn Memory> = if config.security.memory_scanning {
+            Arc::new(memory::ScannedMemory::new(
+                raw_memory,
+                crate::security::ContentScanner::new(),
+            ))
+        } else {
+            raw_memory
+        };
 
         let composio_key = if config.composio.enabled {
             config.composio.api_key.as_deref()

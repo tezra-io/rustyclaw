@@ -3265,6 +3265,10 @@ pub struct SecurityConfig {
     /// Emergency-stop state machine configuration.
     #[serde(default)]
     pub estop: EstopConfig,
+
+    /// Enable injection scanning on memory writes (default: true).
+    #[serde(default = "default_true")]
+    pub memory_scanning: bool,
 }
 
 /// OTP validation strategy.
