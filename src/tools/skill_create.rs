@@ -35,7 +35,7 @@ impl SkillCreateTool {
 
 /// Validate skill name: lowercase alphanumeric + hyphens, 1-64 chars,
 /// no leading/trailing/double hyphens.
-fn is_valid_skill_name(name: &str) -> bool {
+pub(crate) fn is_valid_skill_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name

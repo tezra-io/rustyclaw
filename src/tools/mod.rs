@@ -52,6 +52,9 @@ pub mod schema;
 pub mod screenshot;
 pub mod shell;
 pub mod skill_create;
+pub mod skill_delete;
+pub mod skill_edit;
+pub mod skill_patch;
 pub mod traits;
 pub mod web_fetch;
 pub mod web_search_tool;
@@ -93,6 +96,9 @@ pub use schema::{CleaningStrategy, SchemaCleanr};
 pub use screenshot::ScreenshotTool;
 pub use shell::ShellTool;
 pub use skill_create::SkillCreateTool;
+pub use skill_delete::SkillDeleteTool;
+pub use skill_edit::SkillEditTool;
+pub use skill_patch::SkillPatchTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
 pub use traits::{ToolResult, ToolSpec};
@@ -353,7 +359,21 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(SkillCreateTool::new(
             workspace_dir.to_path_buf(),
             security.clone(),
+            scanner.clone(),
+        )));
+        tool_arcs.push(Arc::new(SkillEditTool::new(
+            workspace_dir.to_path_buf(),
+            security.clone(),
+            scanner.clone(),
+        )));
+        tool_arcs.push(Arc::new(SkillPatchTool::new(
+            workspace_dir.to_path_buf(),
+            security.clone(),
             scanner,
+        )));
+        tool_arcs.push(Arc::new(SkillDeleteTool::new(
+            workspace_dir.to_path_buf(),
+            security.clone(),
         )));
     }
 
