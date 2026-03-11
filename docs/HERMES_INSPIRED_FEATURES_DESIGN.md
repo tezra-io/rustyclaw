@@ -1281,41 +1281,37 @@ Implement `SkillDeleteTool` — remove skill directory with security policy enfo
 
 ---
 
-### Elixir Layer — P1/P2
+### Elixir Layer — P0
 
-#### TEZ-170: Persistent Sub-Agents — AgentServer State Extension
+#### TEZ-170: Persistent Sub-Agents — Runtime Creation via spawn_agent Tool
 
-**Priority:** P1 | **Complexity:** L | **Dependencies:** TEZ-143
+**Priority:** P0 | **Complexity:** L | **Dependencies:** TEZ-143
 
 **Description:**
-Extend `AgentServer` GenServer to support persistent mode with accumulated state, parent-child relationships, and idle monitoring.
+Extend `AgentServer` GenServer to support persistent mode. Sub-agents are created at runtime by the main agent via a `spawn_agent` tool call — no config changes needed, no UI. The main agent decides when it needs a persistent helper and creates one dynamically.
+
+**Creation UX:** Agent-initiated via tool call:
+```
+spawn_agent(name="coding-agent", persistent=true, toolsets=["terminal","file","web"], task="work through Linear issues nightly")
+```
+
+The main agent can also list, message, pause, resume, and kill persistent agents via tool calls.
 
 **Acceptance Criteria:**
-- [ ] `persistent: true` in agent definition keeps server alive indefinitely
-- [ ] `accumulated_state` map persists across interactions
+- [ ] `spawn_agent` tool with parameters: name, persistent (bool), toolsets, task, schedule (optional)
+- [ ] `persistent: true` keeps GenServer alive indefinitely (survives individual task completion)
+- [ ] `accumulated_state` map persists across interactions within the process
 - [ ] `parent_pid` / `child_pids` tracking for parent-child messaging
 - [ ] `delegate_to_child/3` sends task via GenServer.call
 - [ ] `report_to_parent/2` sends result via GenServer.cast
 - [ ] `last_active_at` updated on every interaction
+- [ ] `list_agents` tool returns all running persistent agents with status, uptime, current task
+- [ ] `message_agent` tool sends a message to a persistent agent by name
+- [ ] `kill_agent` tool terminates a persistent agent by name
 - [ ] Memory limit enforcement via `max_memory_mb` config
-- [ ] Tests for lifecycle, messaging, restart recovery
-
----
-
-#### TEZ-171: Agent Dashboard — Phoenix LiveView Scaffold
-
-**Priority:** P2 | **Complexity:** XL | **Dependencies:** TEZ-143, TEZ-145, TEZ-170
-
-**Description:**
-Phoenix LiveView dashboard with real-time agent observability.
-
-**Acceptance Criteria:**
-- [ ] Agent list view with live status updates
-- [ ] Message flow visualization (delegation graph)
-- [ ] Token usage charts (rolling 24h per agent)
-- [ ] Live conversation stream via WebSocket
-- [ ] AgentServer broadcasts via Phoenix.PubSub
-- [ ] Responsive layout, dark/light mode
+- [ ] Supervisor restarts crashed persistent agents automatically
+- [ ] State snapshot to disk on crash for recovery (best-effort)
+- [ ] Tests for lifecycle, messaging, restart recovery, dynamic creation
 
 ---
 
@@ -1327,8 +1323,7 @@ Phoenix LiveView dashboard with real-time agent observability.
 | Trajectory Collection | 4 | 3 | M | P0 |
 | Memory Injection Scanning | 1 | 3 | S | P0 |
 | Agent-Writable Skills | 4 | 2 | M | P0 |
-| Persistent Sub-Agents | 0 | 2 (Elixir) | L | P1 |
-| Agent Dashboard | 5+ (Elixir) | 2 (Elixir) | XL | P2 |
+| Persistent Sub-Agents | 1 | 3 (Elixir) | L | P0 |
 
 **Total new Rust files:** 10
 **Total modified Rust files:** ~8
