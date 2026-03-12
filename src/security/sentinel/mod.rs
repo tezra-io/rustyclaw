@@ -10,11 +10,14 @@
 pub mod config;
 pub mod engine;
 pub mod patterns;
+pub mod redacting_channel;
 pub mod sanitize_config;
 pub mod sanitizer;
 
 pub use config::RedactionConfig;
 #[allow(unused_imports)]
 pub use engine::{redact, SentinelEngine};
+#[allow(unused_imports)]
+pub use redacting_channel::RedactingChannel;
 pub use sanitize_config::SanitizationConfig;
 pub use sanitizer::SanitizationEngine;
