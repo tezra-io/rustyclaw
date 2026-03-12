@@ -3274,6 +3274,10 @@ pub struct SecurityConfig {
     /// Enable injection scanning on memory writes (default: true).
     #[serde(default = "default_true")]
     pub memory_scanning: bool,
+
+    /// Sentinel: visibility-boundary secret redaction & unicode sanitization.
+    #[serde(default)]
+    pub sentinel: crate::security::sentinel::schema::SentinelSchemaConfig,
 }
 
 /// OTP validation strategy.

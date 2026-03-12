@@ -15,6 +15,7 @@ pub mod redacting_channel;
 pub mod redacting_tool;
 pub mod sanitize_config;
 pub mod sanitizer;
+pub mod schema;
 
 pub use config::RedactionConfig;
 #[allow(unused_imports)]
