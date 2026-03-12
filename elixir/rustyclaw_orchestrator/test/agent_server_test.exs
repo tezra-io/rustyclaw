@@ -243,6 +243,40 @@ defmodule RustyclawOrchestrator.AgentServerTest do
     end
   end
 
+  describe "memory limit enforcement" do
+    test "run_task rejects when memory limit exceeded" do
+      # max_memory_mb: 0 ensures any process memory exceeds the limit
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("mem-limit-task", max_memory_mb: 0))
+
+      assert {:error, :memory_limit_exceeded} =
+               AgentServer.run_task("mem-limit-task", "should be rejected")
+
+      state = AgentServer.get_state("mem-limit-task")
+      assert Enum.any?(state.history, &(&1.reason == :memory_limit))
+    end
+
+    test "update_accumulated_state rejects when memory limit exceeded" do
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("mem-limit-state", max_memory_mb: 0))
+
+      assert {:error, :memory_limit_exceeded} =
+               AgentServer.update_accumulated_state("mem-limit-state", %{data: "test"})
+    end
+
+    test "agent without max_memory_mb accepts unlimited state" do
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("no-mem-limit"))
+
+      assert {:ok, _} = AgentServer.run_task("no-mem-limit", "should succeed")
+
+      assert :ok =
+               AgentServer.update_accumulated_state("no-mem-limit", %{
+                 large: String.duplicate("x", 10_000)
+               })
+
+      state = AgentServer.get_state("no-mem-limit")
+      assert byte_size(state.accumulated_state.large) == 10_000
+    end
+  end
+
   describe "state persistence" do
     test "persistent agent saves snapshot on terminate" do
       {:ok, _} = AgentSupervisor.spawn_agent(make_definition("persist-test", persistent: true))
