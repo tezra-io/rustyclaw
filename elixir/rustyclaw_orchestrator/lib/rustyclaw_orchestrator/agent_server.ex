@@ -16,7 +16,7 @@ defmodule RustyclawOrchestrator.AgentServer do
   @health_check_interval 30_000
   @call_timeout 30_000
   @max_history 100
-  @snapshot_dir "~/.rustyclaw/agent_snapshots"
+  @default_snapshot_dir "~/.rustyclaw/agent_snapshots"
 
   @type status :: :initializing | :idle | :running | :stopping
   @type health :: :healthy | :degraded | :unhealthy
@@ -384,7 +384,8 @@ defmodule RustyclawOrchestrator.AgentServer do
   # --- State persistence (snapshots) ---
 
   defp snapshot_dir do
-    @snapshot_dir |> Path.expand()
+    Application.get_env(:rustyclaw_orchestrator, :snapshot_dir, @default_snapshot_dir)
+    |> Path.expand()
   end
 
   defp snapshot_path(agent_name) do

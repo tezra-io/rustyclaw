@@ -3,6 +3,13 @@ defmodule RustyclawOrchestrator.AgentServerTest do
 
   alias RustyclawOrchestrator.{AgentDefinition, AgentServer, AgentSupervisor}
 
+  @snapshot_dir Application.compile_env(
+                  :rustyclaw_orchestrator,
+                  :snapshot_dir,
+                  "~/.rustyclaw/agent_snapshots"
+                )
+                |> Path.expand()
+
   setup do
     on_exit(fn ->
       for name <- AgentSupervisor.list_agents() do
@@ -10,13 +17,8 @@ defmodule RustyclawOrchestrator.AgentServerTest do
       end
 
       # Clean up any snapshot files created during tests
-      snapshot_dir = Path.expand("~/.rustyclaw/agent_snapshots")
-
-      if File.dir?(snapshot_dir) do
-        snapshot_dir
-        |> File.ls!()
-        |> Enum.filter(&String.contains?(&1, "test"))
-        |> Enum.each(&File.rm(Path.join(snapshot_dir, &1)))
+      if File.dir?(@snapshot_dir) do
+        File.rm_rf!(@snapshot_dir)
       end
     end)
 
@@ -249,7 +251,7 @@ defmodule RustyclawOrchestrator.AgentServerTest do
       AgentSupervisor.stop_agent("persist-test")
       :timer.sleep(20)
 
-      snapshot_path = Path.expand("~/.rustyclaw/agent_snapshots/persist-test.snapshot.etf")
+      snapshot_path = Path.join(@snapshot_dir, "persist-test.snapshot.etf")
       assert File.exists?(snapshot_path)
 
       data = snapshot_path |> File.read!() |> :erlang.binary_to_term([:safe])
@@ -258,9 +260,8 @@ defmodule RustyclawOrchestrator.AgentServerTest do
 
     test "persistent agent restores snapshot on restart" do
       # Create and save snapshot manually
-      snapshot_dir = Path.expand("~/.rustyclaw/agent_snapshots")
-      File.mkdir_p!(snapshot_dir)
-      path = Path.join(snapshot_dir, "restore-test.snapshot.etf")
+      File.mkdir_p!(@snapshot_dir)
+      path = Path.join(@snapshot_dir, "restore-test.snapshot.etf")
 
       snapshot = %{
         accumulated_state: %{restored: true, step: 5},
@@ -275,8 +276,6 @@ defmodule RustyclawOrchestrator.AgentServerTest do
       assert state.accumulated_state == %{restored: true, step: 5}
       assert length(state.history) == 1
       assert hd(state.history).event == :old_event
-
-      File.rm(path)
     end
 
     test "non-persistent agent does not save snapshot" do
@@ -286,7 +285,7 @@ defmodule RustyclawOrchestrator.AgentServerTest do
       AgentSupervisor.stop_agent("ephemeral-test")
       :timer.sleep(20)
 
-      snapshot_path = Path.expand("~/.rustyclaw/agent_snapshots/ephemeral-test.snapshot.etf")
+      snapshot_path = Path.join(@snapshot_dir, "ephemeral-test.snapshot.etf")
       refute File.exists?(snapshot_path)
     end
   end
