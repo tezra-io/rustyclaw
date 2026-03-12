@@ -11,6 +11,7 @@ pub mod config;
 pub mod engine;
 pub mod patterns;
 pub mod redacting_channel;
+pub mod redacting_tool;
 pub mod sanitize_config;
 pub mod sanitizer;
 
