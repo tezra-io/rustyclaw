@@ -5,8 +5,9 @@ defmodule RustyclawOrchestrator.Application do
 
   @impl true
   def start(_type, _args) do
-    # Initialize ETS table for sub-agent session tracking
+    # Initialize ETS tables
     RustyclawOrchestrator.SubAgentSession.init()
+    RustyclawOrchestrator.ResourceLock.init()
 
     children = [
       # Agent name -> pid mapping (:unique mode)
@@ -22,11 +23,19 @@ defmodule RustyclawOrchestrator.Application do
        max_restarts: 3,
        max_seconds: 5},
 
+      # BTW side-channel task supervisor — temporary processes, high restart tolerance
+      {DynamicSupervisor,
+       name: RustyclawOrchestrator.BtwSupervisor,
+       strategy: :one_for_one,
+       max_restarts: 10,
+       max_seconds: 5},
+
       # Capability routing and delegation ACL
       RustyclawOrchestrator.AgentCoordinator,
 
       # HTTP bridge to Rust/RustyClaw core
-      RustyclawOrchestrator.RustBridge
+      {RustyclawOrchestrator.RustBridge,
+       Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])}
     ]
 
     opts = [strategy: :one_for_one, name: RustyclawOrchestrator.Supervisor]

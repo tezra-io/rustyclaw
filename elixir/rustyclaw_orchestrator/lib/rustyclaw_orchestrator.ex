@@ -26,6 +26,7 @@ defmodule RustyclawOrchestrator do
     AgentCoordinator,
     AgentDefinition,
     AgentSupervisor,
+    BtwRouter,
     SubAgentSession
   }
 
@@ -75,4 +76,20 @@ defmodule RustyclawOrchestrator do
 
   @doc "Create a new task session."
   defdelegate create_session(agent_name, task, opts \\ []), to: SubAgentSession, as: :create
+
+  # --- BTW Side-Channel (TEZ-182) ---
+
+  @doc """
+  Route an inbound message to either the main agent or a BTW side-channel.
+
+  Messages prefixed with `/btw ` are handled in parallel without interrupting
+  the main agent task. All other messages go to the main agent queue.
+
+  ## Options
+
+    - `:channel_info` — map with `:channel`, `:reply_to_message_id`, `:chat_id`
+    - `:provenance` — optional `MessageProvenance` for tracing
+  """
+  @spec route_message(String.t(), String.t(), keyword()) :: BtwRouter.route_result()
+  defdelegate route_message(agent_name, message, opts \\ []), to: BtwRouter, as: :route
 end

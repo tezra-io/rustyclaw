@@ -10,5 +10,15 @@ config :logger, :default_formatter,
     :kind,
     :delegation_depth,
     :from,
-    :to
+    :to,
+    :btw_pid,
+    :message_preview,
+    :reason,
+    :elapsed_ms,
+    :status,
+    :channel,
+    :quote_reply
   ]
+
+# Import environment-specific config (must be at the end)
+import_config "#{config_env()}.exs"

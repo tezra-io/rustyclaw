@@ -57,10 +57,13 @@ defmodule RustyclawOrchestrator.RustBridge do
   @impl true
   def init(opts) do
     base_url = Keyword.get(opts, :base_url, @default_base_url)
+    max_retries = Keyword.get(opts, :max_retries, @max_retries)
+    connect_timeout = Keyword.get(opts, :connect_timeout, 5_000)
 
     state = %{
       base_url: base_url,
-      req: build_req(base_url)
+      max_retries: max_retries,
+      req: build_req(base_url, connect_timeout)
     }
 
     {:ok, state}
@@ -79,7 +82,7 @@ defmodule RustyclawOrchestrator.RustBridge do
       }
       |> maybe_add_provenance(provenance)
 
-    result = post_with_retry(state.req, "/api/agent/run", body)
+    result = post_with_retry(state.req, "/api/agent/run", body, 0, state.max_retries)
     {:reply, result, state}
   end
 
@@ -100,26 +103,22 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   # --- Internals ---
 
-  defp build_req(base_url) do
+  defp build_req(base_url, connect_timeout) do
     Req.new(
       base_url: base_url,
       headers: [{"content-type", "application/json"}],
       receive_timeout: 30_000,
-      connect_options: [timeout: 5_000],
+      connect_options: [timeout: connect_timeout],
       # Disable Req's built-in retry — we handle retries ourselves
       retry: false
     )
   end
 
-  defp post_with_retry(req, path, body) do
-    post_with_retry(req, path, body, 0)
-  end
-
-  defp post_with_retry(_req, _path, _body, attempt) when attempt >= @max_retries do
+  defp post_with_retry(_req, _path, _body, attempt, max_retries) when attempt >= max_retries do
     {:error, :max_retries_exceeded}
   end
 
-  defp post_with_retry(req, path, body, attempt) do
+  defp post_with_retry(req, path, body, attempt, max_retries) do
     case Req.post(req, url: path, json: body) do
       {:ok, %Req.Response{status: status, body: resp_body}} when status in 200..299 ->
         {:ok, resp_body}
@@ -128,7 +127,7 @@ defmodule RustyclawOrchestrator.RustBridge do
         # Server error — retry with backoff
         backoff = @initial_backoff_ms * Integer.pow(2, attempt)
         Process.sleep(backoff)
-        post_with_retry(req, path, body, attempt + 1)
+        post_with_retry(req, path, body, attempt + 1, max_retries)
 
       {:ok, %Req.Response{status: status, body: resp_body}} ->
         # Client error — don't retry
@@ -138,7 +137,7 @@ defmodule RustyclawOrchestrator.RustBridge do
         # Connection error — retry with backoff
         backoff = @initial_backoff_ms * Integer.pow(2, attempt)
         Process.sleep(backoff)
-        post_with_retry(req, path, body, attempt + 1)
+        post_with_retry(req, path, body, attempt + 1, max_retries)
 
       {:error, reason} ->
         {:error, reason}
