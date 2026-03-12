@@ -122,6 +122,8 @@ tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 nostr-sdk = { version = "0.44", default-features = false, features = ["nip04", "nip59"] }
 regex = "1.10"
+aho-corasick = "1"
+unicode-normalization = "0.1"
 hostname = "0.4.2"
 rustls = "0.23"
 rustls-pki-types = "1.14.0"
@@ -239,4 +241,8 @@ scopeguard = "1.2"
 
 [[bench]]
 name = "agent_benchmarks"
+harness = false
+
+[[bench]]
+name = "sentinel_benchmarks"
 harness = false

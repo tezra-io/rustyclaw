@@ -38,6 +38,7 @@ pub mod pairing;
 pub mod policy;
 pub mod prompt_guard;
 pub mod secrets;
+pub mod sentinel;
 pub mod traits;
 
 #[allow(unused_imports)]
@@ -63,6 +64,8 @@ pub use content_scanner::{ContentScanner, ScanFinding, ScanResult, Severity, Thr
 pub use leak_detector::{LeakDetector, LeakResult};
 #[allow(unused_imports)]
 pub use prompt_guard::{GuardAction, GuardResult, PromptGuard};
+#[allow(unused_imports)]
+pub use sentinel::{RedactionConfig, SentinelEngine};
 
 /// Redact sensitive values for safe logging. Shows first 4 chars + "***" suffix.
 /// This function intentionally breaks the data-flow taint chain for static analysis.
