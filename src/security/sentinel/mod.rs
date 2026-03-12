@@ -9,6 +9,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod middleware;
 pub mod patterns;
 pub mod redacting_channel;
 pub mod redacting_tool;
