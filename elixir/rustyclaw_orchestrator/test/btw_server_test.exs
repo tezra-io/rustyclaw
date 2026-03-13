@@ -5,7 +5,7 @@ defmodule RustyclawOrchestrator.BtwServerTest do
 
   use ExUnit.Case
 
-  alias RustyclawOrchestrator.{BtwServer, BtwSupervisor}
+  alias RustyclawOrchestrator.{BtwServer, BtwSupervisor, ResourceLock}
 
   # --- Lifecycle ---
 
@@ -208,6 +208,87 @@ defmodule RustyclawOrchestrator.BtwServerTest do
       after
         5_000 -> flunk("BtwServer did not terminate within 5 seconds")
       end
+    end
+  end
+
+  # --- Resource tracking ---
+
+  describe "resource tracking" do
+    test "releases only actually-acquired resources after task completion" do
+      # A message mentioning "browser" should acquire and then release the browser lock
+      {:ok, pid} =
+        BtwServer.start_link(
+          message: "open browser and check site",
+          agent_name: "res-agent",
+          context: %{},
+          channel_info: %{}
+        )
+
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, reason} when reason in [:normal, :noproc] -> :ok
+      after
+        5_000 -> flunk("BtwServer did not terminate")
+      end
+
+      # Browser lock should be released after task completes
+      refute ResourceLock.locked?("browser")
+    end
+
+    test "does not release resources that were never acquired" do
+      # A message NOT mentioning any exclusive resource should not touch locks
+      # Pre-acquire browser lock from this test process to verify it's not released
+      :ok = ResourceLock.acquire("browser")
+
+      {:ok, pid} =
+        BtwServer.start_link(
+          message: "check the weather",
+          agent_name: "nores-agent",
+          context: %{},
+          channel_info: %{}
+        )
+
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, reason} when reason in [:normal, :noproc] -> :ok
+      after
+        5_000 -> flunk("BtwServer did not terminate")
+      end
+
+      # Our lock should still be held — BtwServer should not have released it
+      assert ResourceLock.locked?("browser")
+      assert ResourceLock.holder("browser") == self()
+      :ok = ResourceLock.release("browser")
+    end
+
+    test "partial acquisition failure releases already-acquired resources" do
+      # Hold the browser lock from this test process to force acquisition failure
+      :ok = ResourceLock.acquire("browser")
+
+      {:ok, pid} =
+        BtwServer.start_link(
+          message: "open browser and check site",
+          agent_name: "partial-agent",
+          context: %{},
+          channel_info: %{},
+          # Short wait so the test doesn't block
+          provenance: nil
+        )
+
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, reason} when reason in [:normal, :noproc] -> :ok
+      after
+        10_000 -> flunk("BtwServer did not terminate")
+      end
+
+      # Our lock should still be held — BtwServer couldn't acquire it
+      assert ResourceLock.locked?("browser")
+      assert ResourceLock.holder("browser") == self()
+      :ok = ResourceLock.release("browser")
     end
   end
 

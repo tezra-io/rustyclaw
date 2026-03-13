@@ -91,8 +91,8 @@ defmodule RustyclawOrchestrator.BtwServer do
 
   defp execute_with_resource_check(state) do
     case check_exclusive_resources(state.message) do
-      :ok ->
-        execute_task(state)
+      {:ok, acquired} ->
+        execute_task(state, acquired)
 
       {:error, :resource_busy} = err ->
         err
@@ -102,10 +102,14 @@ defmodule RustyclawOrchestrator.BtwServer do
   defp check_exclusive_resources(message) do
     needed = detect_exclusive_resources(message)
 
-    Enum.reduce_while(needed, :ok, fn resource, :ok ->
+    Enum.reduce_while(needed, {:ok, []}, fn resource, {:ok, acquired} ->
       case ResourceLock.acquire(resource, wait_ms: 2_000) do
-        :ok -> {:cont, :ok}
-        {:error, _} = err -> {:halt, err}
+        :ok ->
+          {:cont, {:ok, [resource | acquired]}}
+
+        {:error, _} = err ->
+          release_resources(acquired)
+          {:halt, err}
       end
     end)
   end
@@ -118,7 +122,7 @@ defmodule RustyclawOrchestrator.BtwServer do
     end)
   end
 
-  defp execute_task(state) do
+  defp execute_task(state, acquired_resources) do
     task =
       Task.async(fn ->
         RustBridge.run_task(state.agent_name, state.message,
@@ -133,11 +137,11 @@ defmodule RustyclawOrchestrator.BtwServer do
       nil -> {:error, :timeout}
     end
   after
-    release_all_resources()
+    release_resources(acquired_resources)
   end
 
-  defp release_all_resources do
-    Enum.each(@exclusive_resources, fn resource ->
+  defp release_resources(resources) do
+    Enum.each(resources, fn resource ->
       ResourceLock.release(resource)
     end)
   end
