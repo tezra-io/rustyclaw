@@ -6438,7 +6438,7 @@ requires_openai_auth = true
     }
 
     #[test]
-    async fn env_override_zero_claw_provider_overrides_non_default_provider() {
+    async fn env_override_rustyclaw_provider_overrides_non_default_provider() {
         let _env_guard = env_override_lock().await;
         let mut config = Config {
             default_provider: Some("custom:https://proxy.example.com/v1".to_string()),

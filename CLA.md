@@ -1,14 +1,14 @@
 # RustyClaw Contributor License Agreement (CLA)
 
 **Version 1.0 — February 2026**  
-**ZeroClaw Labs**
+**RustyClaw Labs**
 
 ---
 
 ## Purpose
 
 This Contributor License Agreement ("CLA") clarifies the intellectual
-property rights granted by contributors to ZeroClaw Labs. This agreement
+property rights granted by contributors to RustyClaw Labs. This agreement
 protects both contributors and users of the RustyClaw project.
 
 By submitting a contribution (pull request, patch, issue with code, or any
@@ -20,19 +20,19 @@ terms of this CLA.
 ## 1. Definitions
 
 - **"Contribution"** means any original work of authorship, including any
-  modifications or additions to existing work, submitted to ZeroClaw Labs
+  modifications or additions to existing work, submitted to RustyClaw Labs
   for inclusion in the RustyClaw project.
 
 - **"You"** means the individual or legal entity submitting a Contribution.
 
-- **"ZeroClaw Labs"** means the maintainers and organization responsible
+- **"RustyClaw Labs"** means the maintainers and organization responsible
   for the RustyClaw project at https://github.com/tezra-io/rustyclaw.
 
 ---
 
 ## 2. Grant of Copyright License
 
-You grant ZeroClaw Labs and recipients of software distributed by RustyClaw
+You grant RustyClaw Labs and recipients of software distributed by RustyClaw
 Labs a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
 irrevocable copyright license to:
 
@@ -44,7 +44,7 @@ irrevocable copyright license to:
 
 ## 3. Grant of Patent License
 
-You grant ZeroClaw Labs and recipients of software distributed by RustyClaw
+You grant RustyClaw Labs and recipients of software distributed by RustyClaw
 Labs a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
 irrevocable patent license to make, have made, use, offer to sell, sell,
 import, and otherwise transfer your Contributions.
@@ -77,7 +77,7 @@ You represent that:
    copyright, trademark, or other intellectual property right.
 3. If your employer has rights to intellectual property you create, you
    have received permission to submit the Contribution, or your employer
-   has signed a corporate CLA with ZeroClaw Labs.
+   has signed a corporate CLA with RustyClaw Labs.
 
 ---
 
@@ -90,7 +90,7 @@ trademarks, service marks, or logos. See TRADEMARK.md for trademark policy.
 
 ## 7. Attribution
 
-ZeroClaw Labs will maintain attribution to contributors in the repository
+RustyClaw Labs will maintain attribution to contributors in the repository
 commit history and NOTICE file. Your contributions are permanently and
 publicly recorded.
 

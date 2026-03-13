@@ -1,16 +1,16 @@
 # RustyClaw Trademark Policy
 
 **Effective date:** February 2026  
-**Maintained by:** ZeroClaw Labs
+**Maintained by:** RustyClaw Labs
 
 ---
 
 ## Our Trademarks
 
-The following are trademarks of ZeroClaw Labs:
+The following are trademarks of RustyClaw Labs:
 
 - **RustyClaw** (word mark)
-- **zeroclaw-labs** (organization name)
+- **tezra-io** (organization name)
 - The RustyClaw logo and associated visual identity
 
 These marks identify the official RustyClaw project and distinguish it from
@@ -25,11 +25,11 @@ The **only** official RustyClaw repository is:
 > https://github.com/tezra-io/rustyclaw
 
 Any other repository, organization, domain, or product claiming to be
-"RustyClaw" or implying affiliation with ZeroClaw Labs is unauthorized and
+"RustyClaw" or implying affiliation with RustyClaw Labs is unauthorized and
 may constitute trademark infringement.
 
 **Known unauthorized forks:**
-- `openagen/rustyclaw` — not affiliated with ZeroClaw Labs
+- `openagen/rustyclaw` — not affiliated with RustyClaw Labs
 
 If you encounter an unauthorized use, please report it by opening an issue
 at https://github.com/tezra-io/rustyclaw/issues.
@@ -60,7 +60,7 @@ prior written permission:
 You **may not** use the RustyClaw name or marks in ways that:
 
 1. **Imply official endorsement** — suggest your project, product, or
-   organization is officially affiliated with or endorsed by ZeroClaw Labs.
+   organization is officially affiliated with or endorsed by RustyClaw Labs.
 
 2. **Cause brand confusion** — use "RustyClaw" as the primary name of a
    competing or derivative product in a way that could confuse users about
@@ -69,11 +69,11 @@ You **may not** use the RustyClaw name or marks in ways that:
 3. **Impersonate the project** — create repositories, domains, packages,
    or accounts that could be mistaken for the official RustyClaw project.
 
-4. **Misrepresent origin** — remove or obscure attribution to ZeroClaw Labs
+4. **Misrepresent origin** — remove or obscure attribution to RustyClaw Labs
    while distributing the software or derivatives.
 
 5. **Commercial trademark use** — use the marks in commercial products,
-   services, or marketing without prior written permission from ZeroClaw Labs.
+   services, or marketing without prior written permission from RustyClaw Labs.
 
 ---
 
@@ -119,7 +119,7 @@ through the repository.
 
 ## Changes to This Policy
 
-ZeroClaw Labs reserves the right to update this policy at any time. Changes
+RustyClaw Labs reserves the right to update this policy at any time. Changes
 will be committed to the official repository with a clear commit message.
 
 ---

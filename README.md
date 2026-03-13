@@ -130,7 +130,7 @@ cargo install --path .
 
 ```bash
 # Initialize configuration
-rustyclaw init
+rustyclaw onboard
 
 # Start the gateway
 rustyclaw start
