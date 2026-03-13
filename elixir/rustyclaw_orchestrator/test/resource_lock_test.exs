@@ -1,26 +1,29 @@
 defmodule RustyclawOrchestrator.ResourceLockTest do
   @moduledoc """
-  Tests for ResourceLock: acquisition, release, contention, and dead-process cleanup.
+  Tests for ResourceLock: acquisition, release, contention, dead-process cleanup,
+  and priority-based preemption.
   """
 
   use ExUnit.Case
 
   alias RustyclawOrchestrator.ResourceLock
 
+  @cleanup_resources [
+    "test-res",
+    "browser",
+    "serial",
+    "dead-res",
+    "contend-res",
+    "multi-res",
+    "stale-mon",
+    "preempt-res"
+  ]
+
   setup do
-    # Clean up any leftover locks between tests
     on_exit(fn ->
-      for resource <- [
-            "test-res",
-            "browser",
-            "serial",
-            "dead-res",
-            "contend-res",
-            "multi-res",
-            "stale-mon"
-          ] do
+      for resource <- @cleanup_resources do
         ResourceLock.release(resource)
-        # Also force-clean ETS in case release fails (different process)
+
         try do
           :ets.delete(ResourceLock, resource)
         rescue
@@ -211,6 +214,154 @@ defmodule RustyclawOrchestrator.ResourceLockTest do
       :ok = ResourceLock.acquire("test-res", wait_ms: 100)
       ResourceLock.release("test-res")
       refute ResourceLock.locked?("test-res")
+    end
+  end
+
+  # --- Priority preemption ---
+
+  describe "priority preemption" do
+    test "main preempts btw holder immediately" do
+      test_pid = self()
+
+      btw_holder =
+        spawn(fn ->
+          :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :btw)
+          send(test_pid, :btw_acquired)
+
+          receive do
+            {:resource_preempted, "preempt-res"} ->
+              send(test_pid, :btw_preempted)
+
+            :done ->
+              :ok
+          after
+            5_000 -> :ok
+          end
+        end)
+
+      assert_receive :btw_acquired, 1_000
+      assert ResourceLock.holder("preempt-res") == btw_holder
+
+      # Main priority acquire should preempt the BTW holder
+      assert :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :main)
+      assert ResourceLock.holder("preempt-res") == self()
+
+      # BTW holder should have received preemption notification
+      assert_receive :btw_preempted, 1_000
+
+      ResourceLock.release("preempt-res")
+    end
+
+    test "btw cannot preempt main holder" do
+      test_pid = self()
+
+      # Main task acquires
+      :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :main)
+
+      # BTW task tries to acquire — should time out
+      task =
+        Task.async(fn ->
+          result = ResourceLock.acquire("preempt-res", wait_ms: 200, priority: :btw)
+          send(test_pid, {:btw_result, result})
+        end)
+
+      assert_receive {:btw_result, {:error, :resource_busy}}, 2_000
+      Task.await(task, 5_000)
+
+      ResourceLock.release("preempt-res")
+    end
+
+    test "main does not preempt another main holder" do
+      test_pid = self()
+
+      # First main task acquires
+      :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :main)
+
+      # Second main task tries — should time out (no same-priority preemption)
+      task =
+        Task.async(fn ->
+          result = ResourceLock.acquire("preempt-res", wait_ms: 200, priority: :main)
+          send(test_pid, {:main2_result, result})
+        end)
+
+      assert_receive {:main2_result, {:error, :resource_busy}}, 2_000
+      Task.await(task, 5_000)
+
+      ResourceLock.release("preempt-res")
+    end
+
+    test "preempted btw process receives notification message" do
+      test_pid = self()
+
+      btw_holder =
+        spawn(fn ->
+          :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :btw)
+          send(test_pid, :btw_ready)
+
+          msg =
+            receive do
+              {:resource_preempted, resource} -> {:preempted, resource}
+            after
+              5_000 -> :timeout
+            end
+
+          send(test_pid, {:btw_msg, msg})
+        end)
+
+      assert_receive :btw_ready, 1_000
+      assert ResourceLock.holder("preempt-res") == btw_holder
+
+      :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :main)
+      assert_receive {:btw_msg, {:preempted, "preempt-res"}}, 1_000
+
+      ResourceLock.release("preempt-res")
+    end
+
+    test "dead lock reclamation works with priority tuple format" do
+      {pid, ref} =
+        spawn_monitor(fn ->
+          ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :btw)
+        end)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, :normal} -> :ok
+      after
+        1_000 -> flunk("Process did not exit")
+      end
+
+      Process.sleep(50)
+
+      # Should be reclaimable by either priority
+      assert :ok = ResourceLock.acquire("preempt-res", wait_ms: 500, priority: :main)
+      ResourceLock.release("preempt-res")
+    end
+
+    test "main preemption when btw holder is in different process" do
+      test_pid = self()
+
+      # BTW acquires in a spawned process that stays alive
+      btw_holder =
+        spawn(fn ->
+          :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :btw)
+          send(test_pid, :btw_holding)
+
+          receive do
+            {:resource_preempted, _} -> send(test_pid, :btw_got_preempted)
+            :done -> :ok
+          after
+            5_000 -> :ok
+          end
+        end)
+
+      assert_receive :btw_holding, 1_000
+
+      # Main acquires from test process — should preempt
+      assert :ok = ResourceLock.acquire("preempt-res", wait_ms: 100, priority: :main)
+      assert ResourceLock.holder("preempt-res") == self()
+      refute ResourceLock.holder("preempt-res") == btw_holder
+
+      assert_receive :btw_got_preempted, 1_000
+      ResourceLock.release("preempt-res")
     end
   end
 end

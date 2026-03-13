@@ -103,7 +103,7 @@ defmodule RustyclawOrchestrator.BtwServer do
     needed = detect_exclusive_resources(message)
 
     Enum.reduce_while(needed, {:ok, []}, fn resource, {:ok, acquired} ->
-      case ResourceLock.acquire(resource, wait_ms: 2_000) do
+      case ResourceLock.acquire(resource, wait_ms: 2_000, priority: :btw) do
         :ok ->
           {:cont, {:ok, [resource | acquired]}}
 
