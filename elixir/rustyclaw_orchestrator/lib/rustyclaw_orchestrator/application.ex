@@ -3,12 +3,15 @@ defmodule RustyclawOrchestrator.Application do
 
   use Application
 
+  alias RustyclawOrchestrator.ToolSynthesis
+
   @impl true
   def start(_type, _args) do
     # Initialize ETS tables
     RustyclawOrchestrator.SubAgentSession.init()
     RustyclawOrchestrator.ResourceLock.init()
-    RustyclawOrchestrator.ToolSynthesis.Registry.init()
+    ToolSynthesis.Registry.init()
+    ToolSynthesis.Composer.init_table()
 
     children = [
       # Agent name -> pid mapping (:unique mode)
@@ -51,6 +54,12 @@ defmodule RustyclawOrchestrator.Application do
 
       # Tool probation lifecycle state machine
       RustyclawOrchestrator.ToolSynthesis.Probation,
+
+      # Tool composition and dependency tracking
+      RustyclawOrchestrator.ToolSynthesis.Composer,
+
+      # Iterative tool improvement with versioning
+      RustyclawOrchestrator.ToolSynthesis.Improver,
 
       # HTTP bridge to Rust/RustyClaw core
       {RustyclawOrchestrator.RustBridge,

@@ -31,7 +31,8 @@ defmodule RustyclawOrchestrator.ToolSynthesis.StaticAnalyzer do
     Date,
     Time,
     DateTime,
-    NaiveDateTime
+    NaiveDateTime,
+    RustyclawOrchestrator.ToolSynthesis.Composer
   ]
 
   @blocked_directives [:import, :use, :require]

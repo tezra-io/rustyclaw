@@ -3,17 +3,21 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
   HTTP API for tool synthesis operations.
 
   Serves Plug.Router endpoints for Rust-side SynthToolProxy and CLI integration:
-  - `GET  /api/synth/tools`       — list active synthesized tools
-  - `POST /api/synth/execute`     — execute a synthesized tool
-  - `POST /api/synth/synthesize`  — trigger synthesis
-  - `POST /api/synth/approve`     — promote a tool
-  - `POST /api/synth/suspend`     — suspend a tool
-  - `DELETE /api/synth/tools/:name` — delete a tool
+  - `GET  /api/synth/tools`          — list active synthesized tools
+  - `POST /api/synth/execute`        — execute a synthesized tool
+  - `POST /api/synth/synthesize`     — trigger synthesis
+  - `POST /api/synth/approve`        — promote a tool
+  - `POST /api/synth/suspend`        — suspend a tool
+  - `POST /api/synth/improve`        — request tool improvement
+  - `POST /api/synth/rollback`       — rollback to previous version
+  - `GET  /api/synth/versions/:name` — list version history
+  - `DELETE /api/synth/tools/:name`  — delete a tool
   """
 
   use Plug.Router
 
   alias RustyclawOrchestrator.ToolSynthesis.{
+    Improver,
     Persistence,
     Probation,
     Registry,
@@ -157,6 +161,57 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
 
       {:error, :not_found} ->
         json_response(conn, 404, %{ok: false, error: "tool not found"})
+    end
+  end
+
+  # --- POST /api/synth/improve ---
+
+  post "/api/synth/improve" do
+    case require_field(conn.body_params, "name") do
+      {:ok, name} ->
+        opts =
+          []
+          |> maybe_add_opt(conn.body_params, "failure_input", :failure_input)
+          |> maybe_add_opt(conn.body_params, "expected_output", :expected_output)
+          |> maybe_add_opt(conn.body_params, "error", :error_message)
+
+        case Improver.improve(name, opts) do
+          {:ok, result} ->
+            json_response(conn, 200, %{
+              ok: true,
+              tool: %{name: result.name, version: result.version}
+            })
+
+          {:error, reason} ->
+            json_response(conn, 200, %{ok: false, error: inspect(reason)})
+        end
+
+      {:error, {:missing_field, field}} ->
+        json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+    end
+  end
+
+  # --- POST /api/synth/rollback ---
+
+  post "/api/synth/rollback" do
+    case require_field(conn.body_params, "name") do
+      {:ok, name} ->
+        case Improver.rollback(name) do
+          :ok -> json_response(conn, 200, %{ok: true})
+          {:error, reason} -> json_response(conn, 200, %{ok: false, error: inspect(reason)})
+        end
+
+      {:error, {:missing_field, field}} ->
+        json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+    end
+  end
+
+  # --- GET /api/synth/versions/:name ---
+
+  get "/api/synth/versions/:name" do
+    case Improver.versions(name) do
+      {:ok, versions} -> json_response(conn, 200, %{ok: true, versions: versions})
+      {:error, reason} -> json_response(conn, 200, %{ok: false, error: inspect(reason)})
     end
   end
 
