@@ -14,3 +14,6 @@ config :rustyclaw_orchestrator,
 # Use temp dir for synthesized tools in tests
 config :rustyclaw_orchestrator,
   synthesized_tools_dir: Path.join(System.tmp_dir!(), "rustyclaw_test_synth_tools")
+
+# Use port 0 for synth API in tests (OS assigns a random available port)
+config :rustyclaw_orchestrator, synth_api_port: 0

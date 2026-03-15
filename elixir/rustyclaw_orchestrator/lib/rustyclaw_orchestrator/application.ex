@@ -51,7 +51,13 @@ defmodule RustyclawOrchestrator.Application do
 
       # HTTP bridge to Rust/RustyClaw core
       {RustyclawOrchestrator.RustBridge,
-       Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])}
+       Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])},
+
+      # HTTP API for tool synthesis (Bandit + Plug)
+      {Bandit,
+       plug: RustyclawOrchestrator.ToolSynthesis.ApiRouter,
+       port: Application.get_env(:rustyclaw_orchestrator, :synth_api_port, 4001),
+       scheme: :http}
     ]
 
     opts = [strategy: :one_for_one, name: RustyclawOrchestrator.Supervisor]

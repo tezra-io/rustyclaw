@@ -55,6 +55,7 @@ pub mod skill_create;
 pub mod skill_delete;
 pub mod skill_edit;
 pub mod skill_patch;
+pub mod synth_proxy;
 pub mod traits;
 pub mod web_fetch;
 pub mod web_search_tool;
