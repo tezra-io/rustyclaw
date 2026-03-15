@@ -8,6 +8,7 @@ defmodule RustyclawOrchestrator.Application do
     # Initialize ETS tables
     RustyclawOrchestrator.SubAgentSession.init()
     RustyclawOrchestrator.ResourceLock.init()
+    RustyclawOrchestrator.ToolSynthesis.Registry.init()
 
     children = [
       # Agent name -> pid mapping (:unique mode)
@@ -41,6 +42,9 @@ defmodule RustyclawOrchestrator.Application do
 
       # Task supervisor for async RustBridge HTTP calls
       {Task.Supervisor, name: RustyclawOrchestrator.RustBridge.TaskSupervisor},
+
+      # Task supervisor for sandboxed synthesized tool execution
+      RustyclawOrchestrator.ToolSynthesis.Sandbox,
 
       # HTTP bridge to Rust/RustyClaw core
       {RustyclawOrchestrator.RustBridge,
