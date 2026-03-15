@@ -33,6 +33,9 @@ defmodule RustyclawOrchestrator.Application do
       # Capability routing and delegation ACL
       RustyclawOrchestrator.AgentCoordinator,
 
+      # Task supervisor for async RustBridge HTTP calls
+      {Task.Supervisor, name: RustyclawOrchestrator.RustBridge.TaskSupervisor},
+
       # HTTP bridge to Rust/RustyClaw core
       {RustyclawOrchestrator.RustBridge,
        Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])}

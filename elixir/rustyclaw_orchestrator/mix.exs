@@ -27,7 +27,8 @@ defmodule RustyclawOrchestrator.MixProject do
       {:req, "~> 0.5"},
 
       # Dev/test
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:bypass, "~> 2.1", only: :test}
     ]
   end
 
