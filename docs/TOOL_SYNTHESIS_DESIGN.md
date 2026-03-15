@@ -1,6 +1,32 @@
 # Tool Synthesis — BEAM Hot-Loaded Agent Tool Generation
 
 *Branch: `feature/tool-synthesis` | Author: Aira | Created: 2026-03-14*
+*Revised: 2026-03-14 — incorporated review feedback, made my calls*
+
+---
+
+## Revision Log
+
+**Rev 2 (2026-03-14):** Both reviewers (Codex, Claude Code) said REVISE. I agree on the security changes, disagree on scope reduction.
+
+**What I'm taking:**
+- Switch from blocklist to **allowlist-primary** static analysis. Both reviewers flagged `apply/3`, `:erlang` escape hatches, `import/use/require` bypasses. They're right — blocklist is a game of whack-a-mole.
+- Block `import`, `use`, `require`, `defmacro`, `defmacrop` — no metaprogramming in synthesized tools
+- Add `apply/3`, `Kernel.apply/3`, `:erlang.apply/3`, `Function.capture/3` to hard blocks
+- Block `@on_load` callbacks (execute during compilation)
+- Block `:ets`, `:file`, `:os`, `Module.create/3`, `:code.load_binary/3` (Erlang-level escapes)
+- Add `String.to_atom/1` block (atom exhaustion — atoms aren't GC'd)
+- Add output validation + size cap at execution layer
+- Add synthesis rate limiting (max 3 per agent per hour)
+- Specify Rust-side tool discovery mechanism
+
+**What I'm rejecting:**
+- Codex says "avoid compiling arbitrary Elixir entirely" and suggests DSL. No. The whole point is real Elixir modules. If we wanted a DSL, we'd build a DSL — this is about leverage. Allowlist makes it safe enough.
+- Codex says compile in separate VM/container. Overkill for Phase 1-3. Sacrificial Erlang node is a good Phase 5 idea (Claude Code suggested this too) but not needed when allowlist + no metaprogramming + hard timeouts are in place.
+- Codex says drop probation for v1. Disagree — it's not that much complexity and it prevents garbage accumulation. But I'll simplify it.
+- Codex says "require human approval before first execution." Compromise: opt-in. Default is `auto_compile = false` (preview mode), but users can set `auto_compile = true` if they trust the system.
+
+See reviews: `docs/CODEX_SYNTHESIS_REVIEW.md`, `docs/CLAUDE_CODE_SYNTHESIS_REVIEW.md`
 
 ---
 
@@ -111,82 +137,141 @@ The Elixir tool gets exposed to the Rust side via RustBridge — Rust calls Elix
 
 ---
 
-## Security Model
+## Security Model (Revised — Allowlist-Primary)
 
-This is the section that matters most. Generated code is inherently risky. Here's how we make it safe:
+This is the section that matters most. Generated code is inherently risky. The original design used a blocklist — reviewers correctly identified that blocklists lose to `apply/3`, Erlang escape hatches, and metaprogramming. Revised to allowlist-primary.
 
-### Layer 1: Static Analysis (before compilation)
+### Layer 1: Static Analysis — Allowlist-Primary (before compilation)
 
-Before `Code.compile_string/1` ever runs:
+Before `Code.compile_string/1` ever runs, the AST is walked. The fundamental principle: **if it's not explicitly allowed, it's rejected.**
 
-**Hard blocks (compilation rejected):**
-- `System.cmd`, `System.shell`, `:os.cmd` — no shell access
-- `File.write`, `File.rm`, `File.rename` — no filesystem writes
-- `Port.open`, `:erlang.open_port` — no port/process spawning
-- `Node.connect`, `:net_kernel` — no distributed Erlang
-- `Application.put_env`, `System.put_env` — no env mutation
-- `Code.eval_string`, `Code.compile_string` — no meta-compilation (no turtles)
-- `Process.exit`, `Process.flag` — no process manipulation
-- `send/2` to arbitrary pids — no message injection
-- Any module attribute with `@external_resource`
-- Network calls: `:httpc`, `:gen_tcp`, `:ssl` — must go through sanctioned HTTP tool
-- `__ENV__`, `__CALLER__`, `__STACKTRACE__` — no compiler introspection
-- Kernel functions: `spawn`, `spawn_link`, `spawn_monitor`
+**Allowed modules (the allowlist — exhaustive):**
+```elixir
+@allowed_modules [
+  Enum, Map, List, String, Regex, Jason, Integer, Float,
+  Tuple, Keyword, MapSet, Stream, Range, Access, URI,
+  Base, Bitwise, Date, Time, DateTime, NaiveDateTime,
+  IO  # Only IO.inspect for debugging — IO.cmd blocked separately
+]
+```
 
-**Soft blocks (require human approval):**
-- `File.read`, `File.ls` — filesystem reads (may be needed, but gated)
-- `Req.get`, `Req.post` — HTTP calls (useful but network access)
-- `DateTime`, `System.monotonic_time` — time access (usually fine)
+**Allowed language constructs:**
+- `defmodule` (exactly one, in `RustyclawOrchestrator.Synth.*` namespace)
+- `def`, `defp` (regular function definitions)
+- Pattern matching, guards, `case`, `cond`, `if`, `with`, `for`
+- Pipe operator, comprehensions, `fn` lambdas
+- Binary/string patterns, sigils (`~r`, `~s`, `~w`)
+- `@doc`, `@moduledoc`, `@behaviour`, `@type`, `@spec` (documentation/types only)
+- `Logger.debug/info/warning/error` (observability)
 
-**Allowed freely:**
-- Pure computation (math, string manipulation, data transformation)
-- Pattern matching, guards, comprehensions
-- Jason/JSON encoding/decoding
-- Map/List/Enum/Stream operations
-- Regex
-- Binary pattern matching
+**Hard blocks (anything not in the allowlist, plus explicit blocks for defense-in-depth):**
+- ALL `import`, `use`, `require` statements (no module importing = no capability escalation)
+- `defmacro`, `defmacrop` (no metaprogramming — macros execute at compile time)
+- `apply/3`, `Kernel.apply/3`, `:erlang.apply/3` (dynamic dispatch bypass)
+- `Function.capture/3`, `&Module.fun/arity` for non-allowed modules
+- `@on_load` (executes during compilation, before validation)
+- `Module.create/3`, `:code.load_binary/3`, `:code.load_abs/1` (runtime module/bytecode loading)
+- `Code.*` (no meta-compilation)
+- `EEx.*` (template execution)
+- `String.to_atom/1` (atom exhaustion — atoms aren't GC'd; use `String.to_existing_atom/1`)
+- ALL Erlang module calls (`:file`, `:os`, `:erlang`, `:ets`, `:net_kernel`, `:gen_tcp`, `:ssl`, `:httpc`, etc.)
+- `Process.*`, `spawn*`, `send/2`, `Port.*`, `Node.*`, `System.*`
+- `File.*`, `Path.*` (filesystem access)
+- Any remote call `Module.function` where `Module` is not in `@allowed_modules`
+
+**How the AST walk works:**
+```elixir
+# Parse without compilation
+{:ok, ast} = Code.string_to_quoted(source)
+
+# Walk every node
+Macro.prewalk(ast, fn
+  # Reject any remote call to non-allowed module
+  {{:., _, [{:__aliases__, _, module_parts}, _fun]}, _, _} = node ->
+    module = Module.concat(module_parts)
+    if module not in @allowed_modules, do: raise("blocked: #{module}")
+    node
+
+  # Reject Erlang module calls (:atom.function)
+  {{:., _, [atom, _fun]}, _, _} = node when is_atom(atom) ->
+    raise("blocked: Erlang module #{atom}")
+
+  # Reject import/use/require
+  {directive, _, _} = node when directive in [:import, :use, :require] ->
+    raise("blocked: #{directive}")
+
+  # Reject defmacro
+  {macro_def, _, _} = node when macro_def in [:defmacro, :defmacrop] ->
+    raise("blocked: #{macro_def}")
+
+  # Reject apply
+  {:apply, _, _} = node -> raise("blocked: apply")
+
+  node -> node
+end)
+```
+
+**Why allowlist > blocklist:** We don't need to predict what the LLM tries. If it uses any module/construct outside the allowlist, it's rejected. New Elixir features, obscure stdlib modules, Erlang interop — all blocked by default. We only open doors, never close them after the fact.
 
 ### Layer 2: Compilation Sandbox
 
 - Compile in a short-lived process with `:kill` timeout (5s max)
-- Module name forced to `RustyclawOrchestrator.Synth.<ToolName>` namespace
+- Module name **enforced** to `RustyclawOrchestrator.Synth.<ToolName>` namespace (not just a convention — reject if AST shows different module name)
+- Single module per compilation (reject if AST contains multiple `defmodule`)
 - If compilation fails, error returned to agent — no retry spam
 - Compiled module's exports validated against the `SynthesizedTool` behaviour
+- Module IS globally visible on the BEAM (this is how the BEAM works — accepted tradeoff, mitigated by namespace + allowlist)
+- `@on_load` blocked in Layer 1, so no compile-time code execution
 
 ### Layer 3: Runtime Sandbox
 
 - Synthesized tools execute under `ToolSandbox` DynamicSupervisor
 - Each execution wrapped in `Task.async` with hard timeout (30s default, configurable)
-- Process memory monitored — killed if exceeds limit (50MB default)
-- No access to other GenServer state — tools are pure functions with I/O restrictions
+- Process memory monitored — killed if exceeds limit (50MB default). Note: this is best-effort, not a hard BEAM guarantee. Acceptable because allowlisted functions can't do memory-intensive operations (no process spawning, no ETS, no file I/O)
+- **Output validation:** Must return `{:ok, String.t()} | {:error, String.t()}`. Anything else = failure.
+- **Output size cap:** 1MB max. Larger outputs truncated.
 - All tool output passes through Rust's credential scrubbing before reaching the agent
 
-### Layer 4: Probation System
+### Layer 4: Probation System (Simplified)
 
-Every new tool starts on probation:
+Every new tool starts on probation. Simplified from original — fewer states, clearer triggers:
 
 ```
 PROBATION (first 10 invocations)
   │
-  ├── Success rate ≥ 80% → PROMOTED (persisted, available to all agents)
+  ├── Success rate ≥ 80% AND human approves → PROMOTED
+  │   (auto_promote=true skips human approval)
   │
-  ├── Success rate < 50% → DEPRECATED (unloaded, source kept for analysis)
+  ├── Success rate < 50% after 10 runs → DEPRECATED (unloaded)
   │
-  └── Any crash/timeout → SUSPENDED (human review required)
+  └── Any crash/timeout/blocked-output → SUSPENDED
       │
-      ├── Human approves fix → back to PROBATION
-      └── Human rejects → DELETED
+      └── Human reviews → PROMOTE / DEPRECATE / DELETE
 ```
+
+**Metrics tracked beyond success rate:**
+- Average latency per invocation
+- Output size distribution
+- Input diversity (are the same inputs being recycled?)
+- Failure patterns (same error repeated = systematic bug, not flaky)
+
+**Rate limiting:** Max 3 synthesis attempts per agent per hour. Prevents synthesis spam loops.
 
 ### Layer 5: Human Override
 
 - `rustyclaw synth list` — show all synthesized tools with status
-- `rustyclaw synth inspect <name>` — show source code + metrics
+- `rustyclaw synth inspect <name>` — show source code + metrics + static analysis results
+- `rustyclaw synth preview <request>` — dry run: generate code but don't compile (NEW)
 - `rustyclaw synth approve <name>` — manually promote
 - `rustyclaw synth suspend <name>` — take offline
 - `rustyclaw synth delete <name>` — remove permanently
-- Config flag: `tool_synthesis.enabled = true/false` (default: false — opt-in)
-- Config flag: `tool_synthesis.auto_promote = true/false` (default: false — require human approval for promotion)
+- Config: `tool_synthesis.enabled = false` (default — opt-in)
+- Config: `tool_synthesis.auto_compile = false` (default — preview mode, human approves before compilation)
+- Config: `tool_synthesis.auto_promote = false` (default — human approves before promotion)
+
+### Layer 6: Future — Sacrificial Node (Phase 5)
+
+For maximum isolation: compile and execute synthesized tools on a connected-but-separate Erlang node started with restricted OS capabilities (no file access, no network, capped memory). This is how Erlang was designed for telecom fault isolation. Communicate via `:erpc`. Not needed for Phases 1-4 but the right move for hardened production deployments.
 
 ---
 
@@ -274,21 +359,53 @@ end
 
 ## Rust Integration
 
-Synthesized tools need to be callable from Rust's agent loop. Two approaches:
+Synthesized tools need to be callable from Rust's agent loop.
 
-### Approach A: Bridge call per invocation (simple, start here)
+### SynthToolProxy (Rust-side)
 
-When Rust's agent loop encounters a tool call for a synthesized tool:
-1. Tool name matches prefix `synth.*` or is in the synthesized tool list
-2. Rust sends `POST /api/synth/execute` to Elixir: `{tool: "csv_column_extractor", params: {...}}`
-3. Elixir executes in ToolSandbox, returns result
-4. Rust passes result back to agent loop
+A single Rust struct implementing the `Tool` trait that proxies all synthesized tool calls to Elixir:
 
-This adds one HTTP hop per synthesized tool call. Fine for now — synthesized tools are typically called once or twice per agent run, not in tight loops.
+```rust
+struct SynthToolProxy {
+    name: String,
+    description: String,
+    schema: serde_json::Value,
+    elixir_url: String,
+}
 
-### Approach B: Rust-side stub generation (future optimization)
+#[async_trait]
+impl Tool for SynthToolProxy {
+    fn name(&self) -> &str { &self.name }
+    fn description(&self) -> &str { &self.description }
+    fn parameters_schema(&self) -> serde_json::Value { self.schema.clone() }
 
-For promoted tools with stable interfaces, auto-generate a Rust `Tool` impl that caches the schema and calls Elixir only for execution. Eliminates schema lookup overhead.
+    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        let resp = reqwest::Client::new()
+            .post(format!("{}/api/synth/execute", self.elixir_url))
+            .json(&json!({"tool": self.name, "params": args}))
+            .timeout(Duration::from_secs(35)) // slightly above Elixir's 30s
+            .send().await?;
+        // Parse Elixir response → ToolResult
+        let body: SynthResponse = resp.json().await?;
+        Ok(ToolResult {
+            success: body.ok,
+            output: body.output,
+            error: body.error,
+        })
+    }
+}
+```
+
+### Tool Discovery (NEW — from review feedback)
+
+Rust needs to know which synthesized tools exist so it can include them in the LLM's tool list. Mechanism:
+
+1. **On agent run start:** Rust calls `GET /api/synth/tools` → Elixir returns list of `{name, description, schema, status}` for all active synthesized tools
+2. **Rust builds `SynthToolProxy` instances** for each and adds them to the tool registry for that agent run
+3. **Cache with TTL:** Rust caches the tool list for 60s. Synthesis doesn't happen often enough to need real-time updates.
+4. **Cache invalidation:** When a new tool is synthesized, Elixir can optionally POST a notification to Rust to bust the cache. If missed, TTL handles it.
+
+This is lightweight — one HTTP call per agent run start, cached. Synthesized tools show up alongside built-in tools in the LLM's function list.
 
 ---
 
@@ -319,12 +436,16 @@ elixir/rustyclaw_orchestrator/lib/rustyclaw_orchestrator/
 ```toml
 [tool_synthesis]
 enabled = false                    # Opt-in (safe default)
+auto_compile = false               # Preview mode by default — human approves before compilation
 auto_promote = false               # Require human approval for promotion
 max_tools = 50                     # Cap on total synthesized tools
+max_tools_per_agent = 10           # Per-agent cap (prevents spam)
+max_synthesis_per_hour = 3         # Rate limit per agent
 max_code_lines = 500               # Per-tool source limit
 compilation_timeout_ms = 5000      # Kill compilation after 5s
 execution_timeout_ms = 30000       # Kill execution after 30s
-memory_limit_mb = 50               # Per-execution memory ceiling
+execution_output_max_bytes = 1048576  # 1MB output cap
+memory_limit_mb = 50               # Per-execution memory ceiling (best-effort)
 probation_invocations = 10         # Runs before promotion eligible
 min_success_rate = 0.8             # Required for auto-promotion
 model = "anthropic/claude-sonnet"  # LLM used for code generation
@@ -394,4 +515,23 @@ model = "anthropic/claude-sonnet"  # LLM used for code generation
 
 ---
 
-*This is my feature. Reviews welcome, but I'll make the calls.*
+---
+
+## Review Response Summary
+
+| Reviewer finding | My call |
+|-----------------|---------|
+| Blocklist bypassable via `apply/3`, `:erlang`, `import` | **ACCEPTED** — switched to allowlist-primary |
+| `@on_load` executes during compilation | **ACCEPTED** — blocked in Layer 1 |
+| `:ets`, `:file`, `:os` bypass Elixir blocks | **ACCEPTED** — all Erlang modules blocked |
+| `String.to_atom/1` atom exhaustion | **ACCEPTED** — blocked |
+| Compile in separate VM/container | **DEFERRED** to Phase 5 (sacrificial node) |
+| Avoid compiling arbitrary Elixir / use DSL | **REJECTED** — whole point is real Elixir. Allowlist makes it safe enough. |
+| Drop probation for v1 | **REJECTED** — keeps garbage out. Simplified instead. |
+| Require human approval before first execution | **COMPROMISE** — opt-in via `auto_compile` flag |
+| Add output validation + size cap | **ACCEPTED** |
+| Rate limit synthesis per agent | **ACCEPTED** — 3/hour |
+| Specify Rust-side discovery | **ACCEPTED** — SynthToolProxy + cache with TTL |
+| Probation needs better success metrics | **ACCEPTED** — added latency, output size, input diversity tracking |
+
+*This is my feature. Reviews inform, I decide.*
