@@ -1,6 +1,7 @@
 /// Configuration for the Sentinel unicode sanitization pipeline.
 /// Controls which sanitization steps are applied to inbound messages.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SanitizationConfig {
     /// Strip zero-width characters (U+200B, U+200C, U+FEFF, U+00AD, U+034F, U+180E, U+FFFC).
     pub strip_zero_width: bool,
