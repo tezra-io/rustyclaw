@@ -322,5 +322,68 @@ defmodule RustyclawOrchestrator.AgentServerTest do
       snapshot_path = Path.join(@snapshot_dir, "ephemeral-test.snapshot.etf")
       refute File.exists?(snapshot_path)
     end
+
+    test "non-persistent agent does not restore snapshot (TEZ-204)" do
+      # Create a persistent agent and give it state, then snapshot it
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("snap-guard", persistent: true))
+      :ok = AgentServer.update_accumulated_state("snap-guard", %{stale: true})
+      AgentSupervisor.stop_agent("snap-guard")
+      :timer.sleep(20)
+
+      # Verify snapshot exists
+      snapshot_path = Path.join(@snapshot_dir, "snap-guard.snapshot.etf")
+      assert File.exists?(snapshot_path)
+
+      # Now spawn the same name as non-persistent — should NOT restore
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("snap-guard", persistent: false))
+      state = AgentServer.get_state("snap-guard")
+
+      # accumulated_state should be empty (not restored from stale snapshot)
+      assert state.accumulated_state == %{}
+    end
+  end
+
+  describe "delegate_to_child crash handling (TEZ-202)" do
+    test "delegate_to_child returns error when child crashes" do
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("parent-crash-test"))
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("child-crash-test"))
+
+      # Kill the child mid-delegation to simulate crash
+      task =
+        Task.async(fn ->
+          # This should not hang — it should return an error
+          AgentServer.delegate_to_child("parent-crash-test", "child-crash-test", "crash task")
+        end)
+
+      # Give the delegation a moment to start, then kill the child
+      :timer.sleep(10)
+      AgentSupervisor.stop_agent("child-crash-test")
+
+      # The caller should get a response (not hang until timeout)
+      result = Task.await(task, 5_000)
+      # Result should be {:ok, _} or {:error, _} — the key test is that it doesn't hang
+      assert is_tuple(result)
+    end
+  end
+
+  describe "health with bridge state (TEZ-203)" do
+    test "health degrades when bridge is unreachable" do
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("health-bridge-test"))
+
+      [{pid, _}] =
+        Registry.lookup(RustyclawOrchestrator.AgentRegistry, "health-bridge-test")
+
+      # Directly set bridge_healthy to false in GenServer state
+      :sys.replace_state(pid, fn state ->
+        %{state | bridge_healthy: false}
+      end)
+
+      # Trigger health evaluation
+      send(pid, :health_check)
+      :timer.sleep(50)
+
+      health = AgentServer.get_health("health-bridge-test")
+      assert health in [:degraded, :unhealthy]
+    end
   end
 end

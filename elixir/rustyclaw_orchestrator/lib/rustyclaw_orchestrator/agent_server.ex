@@ -17,6 +17,7 @@ defmodule RustyclawOrchestrator.AgentServer do
   @call_timeout 30_000
   @max_history 100
   @default_snapshot_dir "~/.rustyclaw/agent_snapshots"
+  @task_supervisor __MODULE__.TaskSupervisor
 
   @type status :: :initializing | :idle | :running | :stopping
   @type health :: :healthy | :degraded | :unhealthy
@@ -113,7 +114,13 @@ defmodule RustyclawOrchestrator.AgentServer do
     if parent_pid, do: Process.monitor(parent_pid)
 
     now = DateTime.utc_now()
-    restored = maybe_restore_snapshot(definition.name)
+
+    restored =
+      if definition.persistent do
+        maybe_restore_snapshot(definition.name)
+      else
+        %{}
+      end
 
     state = %{
       definition: definition,
@@ -127,7 +134,10 @@ defmodule RustyclawOrchestrator.AgentServer do
       started_at: now,
       last_active_at: now,
       last_health_check: nil,
-      recovery_attempts: 0
+      recovery_attempts: 0,
+      pending_delegations: %{},
+      bridge_healthy: true,
+      last_successful_task: now
     }
 
     schedule_health_check()
@@ -157,6 +167,7 @@ defmodule RustyclawOrchestrator.AgentServer do
         state =
           state
           |> Map.put(:status, :idle)
+          |> Map.put(:last_successful_task, DateTime.utc_now())
           |> append_history(:task_executed, %{task: task, result: result})
 
         {:reply, result, state}
@@ -187,15 +198,16 @@ defmodule RustyclawOrchestrator.AgentServer do
             %{state | child_pids: MapSet.put(state.child_pids, child_pid)}
           end
 
-        # Async delegation: spawn a task to avoid blocking this GenServer
-        Task.start(fn ->
-          result = run_task(child_name, task)
-          GenServer.reply(from, result)
-        end)
+        # Async delegation via supervised Task — crashes are caught via :DOWN
+        %Task{ref: ref} =
+          Task.Supervisor.async_nolink(@task_supervisor, fn ->
+            run_task(child_name, task)
+          end)
 
         state =
           state
           |> Map.put(:last_active_at, DateTime.utc_now())
+          |> Map.update!(:pending_delegations, &Map.put(&1, ref, from))
           |> append_history(:delegated_to_child, %{child: child_name, task: task})
 
         {:noreply, state}
@@ -257,6 +269,11 @@ defmodule RustyclawOrchestrator.AgentServer do
   def handle_info(:health_check, state) do
     schedule_health_check()
 
+    # Non-blocking bridge health check
+    Task.Supervisor.async_nolink(@task_supervisor, fn ->
+      {:bridge_health, RustyclawOrchestrator.RustBridge.health_check()}
+    end)
+
     health = evaluate_health(state)
     state = %{state | health: health, last_health_check: DateTime.utc_now()}
 
@@ -275,6 +292,28 @@ defmodule RustyclawOrchestrator.AgentServer do
     {:noreply, state}
   end
 
+  # Delegation task completed successfully
+  def handle_info({ref, result}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+
+    case Map.pop(state.pending_delegations, ref) do
+      {nil, _} ->
+        # Not a delegation task — could be bridge health check result
+        state = handle_task_result(result, state)
+        {:noreply, state}
+
+      {from, remaining} ->
+        GenServer.reply(from, result)
+
+        state =
+          state
+          |> Map.put(:pending_delegations, remaining)
+          |> Map.put(:last_active_at, DateTime.utc_now())
+
+        {:noreply, state}
+    end
+  end
+
   def handle_info({:child_report, child_name, result}, state) do
     state =
       state
@@ -284,17 +323,26 @@ defmodule RustyclawOrchestrator.AgentServer do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    state = %{state | child_pids: MapSet.delete(state.child_pids, pid)}
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    # Check if this is a pending delegation task that crashed
+    case Map.pop(state.pending_delegations, ref) do
+      {nil, _} ->
+        # Not a delegation — handle as child/parent process exit
+        state = %{state | child_pids: MapSet.delete(state.child_pids, pid)}
 
-    state =
-      if state.parent_pid == pid do
-        %{state | parent_pid: nil}
-      else
-        state
-      end
+        state =
+          if state.parent_pid == pid do
+            %{state | parent_pid: nil}
+          else
+            state
+          end
 
-    {:noreply, state}
+        {:noreply, state}
+
+      {from, remaining} ->
+        GenServer.reply(from, {:error, {:delegation_crashed, reason}})
+        {:noreply, %{state | pending_delegations: remaining}}
+    end
   end
 
   @impl true
@@ -321,12 +369,30 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   defp evaluate_health(state) do
+    seconds_since_success =
+      DateTime.diff(DateTime.utc_now(), state.last_successful_task, :second)
+
     cond do
       state.status == :stopping -> :unhealthy
       state.recovery_attempts >= 3 -> :unhealthy
+      not state.bridge_healthy and state.recovery_attempts >= 3 -> :unhealthy
+      not state.bridge_healthy -> :degraded
+      seconds_since_success > 300 -> :degraded
       state.recovery_attempts >= 1 -> :degraded
       true -> :healthy
     end
+  end
+
+  defp handle_task_result({:bridge_health, :ok}, state) do
+    %{state | bridge_healthy: true}
+  end
+
+  defp handle_task_result({:bridge_health, {:error, _}}, state) do
+    %{state | bridge_healthy: false}
+  end
+
+  defp handle_task_result(_other, state) do
+    state
   end
 
   defp append_history(state, event, data) do
