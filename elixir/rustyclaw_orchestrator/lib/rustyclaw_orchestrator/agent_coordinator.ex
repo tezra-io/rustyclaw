@@ -56,11 +56,11 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
 
   @impl true
   def init(_opts) do
-    {:ok, %{}}
+    {:ok, %{pending: %{}}}
   end
 
   @impl true
-  def handle_call({:delegate, task, opts}, _from, state) do
+  def handle_call({:delegate, task, opts}, from, state) do
     capabilities = Keyword.get(opts, :capabilities, [])
     strategy = Keyword.get(opts, :strategy, :first_available)
     from_agent = Keyword.get(opts, :from_agent)
@@ -76,19 +76,23 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
         matching
       end
 
-    result =
-      case agents do
-        [] when matching != [] and from_agent != nil ->
-          {:error, :acl_denied}
+    case agents do
+      [] when matching != [] and from_agent != nil ->
+        {:reply, {:error, :acl_denied}, state}
 
-        [] ->
-          {:error, :no_matching_agents}
+      [] ->
+        {:reply, {:error, :no_matching_agents}, state}
 
-        agents ->
-          execute_strategy(strategy, task, agents, provenance)
-      end
+      agents ->
+        # Dispatch strategy execution to a supervised Task to avoid blocking
+        %Task{ref: ref} =
+          Task.Supervisor.async_nolink(
+            __MODULE__.TaskSupervisor,
+            fn -> execute_strategy(strategy, task, agents, provenance) end
+          )
 
-    {:reply, result, state}
+        {:noreply, put_in(state, [:pending, ref], from)}
+    end
   end
 
   def handle_call({:find_agents, capabilities}, _from, state) do
@@ -97,6 +101,31 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
 
   def handle_call({:check_acl, from_agent, to_agent}, _from, state) do
     {:reply, check_delegation_acl(from_agent, to_agent), state}
+  end
+
+  @impl true
+  def handle_info({ref, result}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+
+    case pop_in(state, [:pending, ref]) do
+      {nil, state} ->
+        {:noreply, state}
+
+      {from, state} ->
+        GenServer.reply(from, result)
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    case pop_in(state, [:pending, ref]) do
+      {nil, state} ->
+        {:noreply, state}
+
+      {from, state} ->
+        GenServer.reply(from, {:error, {:task_crashed, reason}})
+        {:noreply, state}
+    end
   end
 
   # --- Internals ---

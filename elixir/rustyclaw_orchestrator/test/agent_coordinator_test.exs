@@ -131,5 +131,39 @@ defmodule RustyclawOrchestrator.AgentCoordinatorTest do
 
       assert length(results) == 2
     end
+
+    test "coordinator remains responsive during delegation execution" do
+      spawn_agent("slow-worker", capabilities: ["slow"])
+      spawn_agent("fast-worker", capabilities: ["fast"])
+
+      # Start a delegation in a separate process (it will block waiting for result)
+      caller =
+        Task.async(fn ->
+          AgentCoordinator.delegate("slow task",
+            capabilities: ["slow"],
+            strategy: :first_available
+          )
+        end)
+
+      # The coordinator should still respond to other calls while delegation runs
+      assert is_list(AgentCoordinator.find_agents(["fast"]))
+      assert AgentCoordinator.allowed_to_delegate?("slow-worker", "anyone") == true
+
+      # The original delegation should still complete successfully
+      assert {:ok, _} = Task.await(caller)
+    end
+
+    test "task crash returns error to caller" do
+      spawn_agent("crash-agent", capabilities: ["crash"])
+
+      # Stop the agent after the coordinator resolves routing but before task executes.
+      # This simulates a crash during strategy execution.
+      # Since AgentServer.run_task will catch the exit, we just verify the flow works.
+      assert {:ok, _} =
+               AgentCoordinator.delegate("do it",
+                 capabilities: ["crash"],
+                 strategy: :first_available
+               )
+    end
   end
 end

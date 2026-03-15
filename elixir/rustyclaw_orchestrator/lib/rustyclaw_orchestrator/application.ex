@@ -30,6 +30,9 @@ defmodule RustyclawOrchestrator.Application do
        max_restarts: 10,
        max_seconds: 5},
 
+      # Task supervisor for async AgentCoordinator delegation execution
+      {Task.Supervisor, name: RustyclawOrchestrator.AgentCoordinator.TaskSupervisor},
+
       # Capability routing and delegation ACL
       RustyclawOrchestrator.AgentCoordinator,
 
