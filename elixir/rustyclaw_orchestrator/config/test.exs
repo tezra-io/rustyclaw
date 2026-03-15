@@ -10,3 +10,7 @@ config :rustyclaw_orchestrator,
 # Use temp dir for agent definitions in tests (avoids picking up real agent files)
 config :rustyclaw_orchestrator,
   agents_dir: Path.join(System.tmp_dir!(), "rustyclaw_test_agents")
+
+# Use temp dir for synthesized tools in tests
+config :rustyclaw_orchestrator,
+  synthesized_tools_dir: Path.join(System.tmp_dir!(), "rustyclaw_test_synth_tools")

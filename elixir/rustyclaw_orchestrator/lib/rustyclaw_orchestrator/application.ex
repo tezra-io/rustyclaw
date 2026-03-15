@@ -46,6 +46,9 @@ defmodule RustyclawOrchestrator.Application do
       # Task supervisor for sandboxed synthesized tool execution
       RustyclawOrchestrator.ToolSynthesis.Sandbox,
 
+      # Tool synthesis engine — loads persisted tools on startup
+      RustyclawOrchestrator.ToolSynthesis.Synthesizer,
+
       # HTTP bridge to Rust/RustyClaw core
       {RustyclawOrchestrator.RustBridge,
        Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])}
