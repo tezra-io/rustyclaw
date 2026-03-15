@@ -1,6 +1,23 @@
 # Elixir Delegation Design — Moving DelegateTool from Rust to Elixir/OTP
 
 *Branch: `feature/elixir-delegation` | Created: 2026-03-14*
+*Revised: 2026-03-14 — incorporated Codex + Claude Code reviews*
+
+---
+
+## Revision Log
+
+**Rev 2 (2026-03-14):** Major revision based on independent reviews from Codex (gpt-5.3) and Claude Code.
+
+Key changes:
+1. **Switched to one-hop architecture** — Elixir returns routing decision, Rust executes. Eliminates second HTTP hop.
+2. **Credentials stay in Rust** — Elixir sends `agent_name`, Rust resolves provider/api_key internally. Fixes security regression.
+3. **Added Phase 0** — prerequisite work (Elixir HTTP server, AgentDefinition field gaps) called out explicitly.
+4. **Scoped down migration** — `first_available` strategy only for initial rollout. Fanout/sequential deferred.
+5. **Separated existing Elixir bugs** from design changes. Pre-existing issues tracked as regular Linear issues (not feature branch).
+6. **Added cancellation propagation** and timeout alignment requirements.
+
+See reviews: `docs/CODEX_DESIGN_REVIEW.md`, `docs/CLAUDE_CODE_DESIGN_REVIEW.md`
 
 ---
 
@@ -57,7 +74,7 @@ Meanwhile, the Elixir orchestration layer already has:
 
 ---
 
-## 3. Architecture
+## 3. Architecture (Revised — One-Hop Model)
 
 ```
 User Message
@@ -69,66 +86,65 @@ User Message
 │  1. Receives message from channel                       │
 │  2. Runs primary agent loop                             │
 │  3. Primary agent calls "delegate" tool                 │
-│  4. NEW: delegate tool sends HTTP request               │
-│     to Elixir instead of running sub-agent inline       │
+│  4. DelegateTool sends HTTP request to Elixir           │
 └────────────────────┬────────────────────────────────────┘
                      │ HTTP POST /api/delegate
+                     │ {agent_or_capabilities, prompt, context, from_agent}
                      ▼
 ┌─────────────────────────────────────────────────────────┐
 │                  Elixir/OTP Layer                       │
 │                                                         │
 │  5. DelegationRouter receives request                   │
-│  6. AgentCoordinator resolves target agent(s)           │
-│     - Capability matching                               │
+│  6. AgentCoordinator resolves target agent              │
+│     - Capability matching (from definition files)       │
 │     - ACL enforcement                                   │
-│     - Strategy selection (first/sequential/fanout)      │
-│  7. AgentSupervisor spawns AgentServer if not running   │
-│  8. AgentServer receives task                           │
-│     - Validates tool allowlist                          │
-│     - Tracks session in ETS                             │
-│     - Records provenance                                │
-│                                                         │
-│  9. AgentServer calls RustBridge to execute             │
+│     - Spawn AgentServer if not running                  │
+│  7. AgentServer records session in ETS                  │
+│  8. Returns routing decision to Rust:                   │
+│     {agent_name, allowed_tools, provenance}             │
+│     (NO credentials — Rust resolves those)              │
 └────────────────────┬────────────────────────────────────┘
-                     │ HTTP POST /api/agent/run
+                     │ HTTP Response (routing decision)
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│                  Rust Core (Agent Runner)               │
+│                  Rust Core (DelegateTool)               │
 │                                                         │
-│  10. Runs sub-agent's LLM call with:                    │
-│      - Agent-specific provider/model                    │
-│      - Agent-specific system prompt                     │
-│      - Filtered tool set (from allowed_tools)           │
-│      - Security policy applied                          │
-│  11. If agentic: runs tool-call loop                    │
-│  12. Returns result to Elixir                           │
+│  9. Resolves agent config from [agents.*] TOML          │
+│     - Provider, model, api_key from own config          │
+│     - allowed_tools from Elixir's response              │
+│  10. Runs sub-agent loop (same as today):               │
+│      - Creates provider with in-process credentials     │
+│      - Filters tool registry by allowed_tools           │
+│      - Applies SecurityPolicy                           │
+│      - If agentic: runs tool-call loop                  │
+│  11. Returns result to primary agent                    │
+│  12. Async: POST result back to Elixir for tracking     │
 └────────────────────┬────────────────────────────────────┘
-                     │ HTTP Response
+                     │ (async) POST /api/delegate/result
                      ▼
 ┌─────────────────────────────────────────────────────────┐
 │                  Elixir/OTP Layer                       │
 │                                                         │
-│  13. AgentServer receives result                        │
+│  13. AgentServer receives result callback               │
 │      - Updates session status                           │
 │      - Records in history                               │
 │      - Saves snapshot if persistent                     │
-│  14. Returns result to DelegationRouter                 │
-└────────────────────┬────────────────────────────────────┘
-                     │ HTTP Response
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Rust Core (Primary Agent)              │
-│                                                         │
-│  15. DelegateTool receives result                       │
-│  16. Primary agent continues with sub-agent's output    │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Key insight:** Two HTTP hops per delegation:
-1. Rust → Elixir (delegate request)  
-2. Elixir → Rust (execute sub-agent's LLM call)
+**Key insight (Rev 2):** One HTTP hop for routing, execution stays in Rust.
 
-This is intentional. Elixir owns the orchestration decisions (who runs, with what tools, under what constraints). Rust owns the execution (LLM calls, tool runs, security).
+Previous design had two synchronous HTTP hops (Rust→Elixir→Rust). Both reviewers flagged this as overengineered and a security risk (API keys over HTTP). The revised architecture:
+
+1. **Rust → Elixir** (synchronous): "Who should handle this?" Elixir returns routing decision + allowed_tools.
+2. **Rust executes locally**: Uses its own config for credentials, runs the sub-agent loop it already knows how to run.
+3. **Rust → Elixir** (async callback): "Here's what happened." For session tracking/observability. Non-blocking.
+
+**Benefits over two-hop:**
+- Credentials never leave Rust process (no security regression)
+- One fewer synchronous HTTP call per delegation (~50% less latency overhead)
+- Existing `run_tool_call_loop` works unchanged (no need to externalize the 16-parameter function)
+- Elixir still owns all orchestration decisions
 
 ---
 
@@ -250,193 +266,206 @@ This is intentional. Elixir owns the orchestration decisions (who runs, with wha
 
 ## 5. Rust-Side Changes
 
-### 5.1 DelegateTool becomes a thin HTTP client
+### 5.1 DelegateTool becomes routing-aware
 
-The current `DelegateTool` does everything: provider creation, tool filtering, agent loop execution. The new version does one thing: sends an HTTP request to Elixir and returns the result.
+The current `DelegateTool` does everything: agent lookup, provider creation, tool filtering, agent loop execution. The new version splits into two paths based on `delegation_mode`:
 
-**Current behavior (to be replaced):**
+**Current behavior (preserved as fallback):**
 ```
 DelegateTool.execute() →
+  lookup agent from HashMap →
   create_provider() →
   if agentic: run_tool_call_loop() with filtered tools
   else: provider.chat_with_system()
 ```
 
-**New behavior:**
+**New behavior (when delegation_mode = "elixir"):**
 ```
 DelegateTool.execute() →
-  HTTP POST to Elixir /api/delegate {agent, prompt, context, provenance}
-  ← wait for response
-  return result
+  HTTP POST to Elixir /api/delegate {agent, capabilities, prompt, context, from_agent}
+  ← receive routing decision: {resolved_agent_name, allowed_tools, provenance}
+  lookup resolved agent config from own [agents.*] TOML (credentials stay local)
+  create_provider() with in-process credentials
+  filter tool registry by allowed_tools from Elixir
+  run sub-agent loop (same as today)
+  async POST result to Elixir /api/delegate/result for tracking
+  return result to primary agent
 ```
 
-The DelegateTool struct shrinks dramatically:
-- Remove: `parent_tools`, `depth`, `multimodal_config`, `provider_runtime_options`
-- Keep: `security` (still enforce policy on the delegate call itself), `fallback_credential` (passed to Elixir for RustBridge auth)
-- Add: `elixir_bridge_url` (Elixir HTTP endpoint)
+**Struct changes:**
+- Keep: `agents`, `parent_tools`, `security`, `fallback_credential`, `depth`, `provider_runtime_options`, `multimodal_config`
+- Add: `elixir_bridge_url` (Elixir HTTP endpoint), `delegation_mode` (config flag)
+- The struct stays largely the same — it still runs the sub-agent loop, just asks Elixir for routing first
 
-### 5.2 New Rust endpoint: `/api/agent/run`
+### 5.2 No new `/api/agent/run` endpoint needed (Rev 2)
 
-Elixir needs a way to tell Rust "run this agent task with these parameters." This endpoint:
+The original design proposed a Rust endpoint for Elixir to call back into. With the one-hop model, this is **no longer needed**. Rust runs the sub-agent loop itself after getting the routing decision. This eliminates:
+- The need to externalize `run_tool_call_loop` (16-parameter function)
+- API key transmission over HTTP
+- A second synchronous HTTP hop
 
-**Request:**
-```json
-{
-  "agent_name": "researcher",
-  "task": "Research quantum computing",
-  "system_prompt": "You are a research assistant.",
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
-  "api_key": "sk-...",
-  "temperature": 0.3,
-  "allowed_tools": ["web_search", "web_fetch", "file_read"],
-  "agentic": true,
-  "max_iterations": 10,
-  "provenance": { "trace_id": "...", "delegation_depth": 1 }
-}
-```
+The only new Rust HTTP call is an **async result callback** to Elixir (`POST /api/delegate/result`) for session tracking. This is fire-and-forget — if it fails, delegation still succeeds.
 
-**Response:**
-```json
-{
-  "success": true,
-  "output": "Quantum computing uses qubits...",
-  "tool_calls_made": ["web_search", "web_fetch"],
-  "token_usage": { "input": 1500, "output": 800 },
-  "duration_ms": 4500
-}
-```
+### 5.3 Agent config: single source of truth
 
-**Key:** Rust doesn't decide which tools are available — Elixir tells it via `allowed_tools`. Rust filters its registry based on that list and runs the agent loop.
+**Decision (Rev 2):** Keep `[agents.*]` TOML as the single source of truth for execution config (provider, model, api_key, temperature, agentic, max_iterations). Don't duplicate in YAML.
 
-### 5.3 Agent config migration
+Elixir YAML agent definitions add orchestration-only fields:
+- `capabilities`, `delegates_to`, `persistent`, `memory`, `channels`, `schedule`
 
-Current config in `config.toml`:
-```toml
-[agents.researcher]
-provider = "anthropic"
-model = "claude-sonnet-4-20250514"
-system_prompt = "You are a research assistant."
-agentic = true
-allowed_tools = ["web_search", "web_fetch"]
-max_iterations = 10
-```
+The split is clean:
+- **TOML (Rust):** How to run the agent (provider, credentials, tool config)
+- **YAML (Elixir):** How to manage the agent (routing, lifecycle, permissions)
 
-This config needs to be readable by **both** layers:
-- Elixir reads it via AgentDefinition (YAML files in `~/.rustyclaw/agents/`) for orchestration decisions
-- Rust reads `allowed_tools` from the Elixir request to filter the tool registry
-
-**Decision:** Agent definitions move to YAML files (Elixir's format). Rust `[agents.*]` config becomes legacy/deprecated. During migration, support both — Elixir reads YAML, falls back to querying Rust for TOML-defined agents.
+Rust reads TOML. Elixir reads YAML. No duplication, no reconciliation needed.
 
 ---
 
 ## 6. Elixir-Side Changes
 
-### 6.1 New: DelegationRouter (Plug endpoint)
+### 6.0 Phase 0 Prerequisites (NEW — from review)
 
-New HTTP endpoint in the Elixir app that Rust's DelegateTool calls:
+Before any delegation work, the Elixir app needs:
+
+1. **HTTP server scaffold** — Add Bandit + Plug.Router to the supervision tree. The Elixir app currently has NO web server. This is non-trivial: deps, router module, port config, health endpoint.
+
+2. **AgentDefinition field gaps** — Add missing fields to NimbleOptions schema:
+   - `provider` (string, required for Rust config lookup validation)
+   - `agentic` (boolean, default: false — or infer from non-empty `allowed_tools`)
+   - `max_iterations` (integer, default: 10)
+   - Note: `api_key` is NOT added — credentials stay in Rust TOML only
+
+3. **Agent discovery from definitions** — `find_matching_agents` currently only queries running processes. Must also read agent definition files from `~/.rustyclaw/agents/` to support capability routing before agents are spawned.
+
+### 6.1 DelegationRouter (Plug endpoint)
+
+New HTTP endpoint that Rust's DelegateTool calls:
 
 **POST `/api/delegate`**
 ```json
 {
   "agent": "researcher",           // or null if routing by capability
   "capabilities": ["research"],     // used if agent is null
-  "prompt": "Research this topic",
-  "context": "Some prior context",
-  "strategy": "first_available",    // optional, default: first_available
   "from_agent": "primary",          // for ACL enforcement
-  "provenance": { ... },            // trace metadata
-  "timeout_ms": 30000               // optional
+  "provenance": { ... }             // trace metadata
+}
+```
+
+**Response (routing decision — NOT execution result):**
+```json
+{
+  "resolved_agent": "researcher",
+  "allowed_tools": ["web_search", "web_fetch", "file_read"],
+  "provenance": { "trace_id": "...", "delegation_depth": 1 },
+  "session_id": "abc123"
 }
 ```
 
 **Flow:**
 1. Validate request
-2. If `agent` specified → resolve directly
-3. If `capabilities` specified → AgentCoordinator.find_agents()
+2. If `agent` specified → resolve directly (check definition files exist)
+3. If `capabilities` specified → AgentCoordinator.find_agents() (from definitions, not just running processes)
 4. Check ACL (from_agent → target)
-5. Spawn target agent if not running
-6. Execute via chosen strategy
-7. Return result
+5. Spawn AgentServer if not running
+6. Create SubAgentSession in ETS
+7. Return routing decision (agent name + allowed_tools)
 
-### 6.2 AgentServer: Connect to RustBridge for real execution
-
-Currently, `AgentServer.handle_call({:run_task, ...})` returns `{:ok, %{status: :pending_bridge}}`. This needs to actually call RustBridge:
-
+**POST `/api/delegate/result`** (async callback from Rust)
+```json
+{
+  "session_id": "abc123",
+  "success": true,
+  "output": "...",
+  "tool_calls_made": ["web_search"],
+  "duration_ms": 4500
+}
 ```
-handle_call({:run_task, task, provenance}) →
-  1. Check health (reject if unhealthy)
-  2. Check memory limit
-  3. Build RustBridge request from AgentDefinition:
-     - provider, model, system_prompt from definition
-     - allowed_tools from definition
-     - agentic = true if allowed_tools non-empty
-  4. Call RustBridge.run_task(agent_name, task, opts)
-  5. Record result in history
-  6. Update SubAgentSession
-  7. Return result
-```
+- Updates SubAgentSession status
+- Records in AgentServer history
+- Saves snapshot if persistent agent
+- Fire-and-forget from Rust's perspective
 
-### 6.3 AgentCoordinator: Wire up delegation strategies
+### 6.2 AgentServer: Session tracking only (Rev 2)
 
-The strategies exist in code but need to be connected to real RustBridge execution. Specifically:
+In the one-hop model, AgentServer does NOT call RustBridge for execution. Instead it:
+- Tracks session lifecycle (created → running → completed/failed)
+- Records results from async callback
+- Manages health checks and snapshots
+- The `:pending_bridge` placeholder gets replaced with proper session state management
 
-- **fanout**: Use `Task.async_stream` to parallelize RustBridge calls, collect results
-- **sequential**: Try agents in order, short-circuit on first success
-- **first_available**: Pick one, call it (already works)
+### 6.3 AgentCoordinator: first_available only (Rev 2)
 
-### 6.4 New: Idle timeout for ephemeral agents
+**Scoped down for initial rollout.** Only `first_available` strategy.
+
+Fanout and sequential are deferred until the basic path is stable. Rationale:
+- Fanout multiplies failure probability (N agents × HTTP calls)
+- Needs cancellation propagation to avoid orphaned Rust loops
+- Sequential needs clear retry semantics
+- first_available covers 90% of real use cases
+
+### 6.4 Idle timeout for ephemeral agents
 
 AgentServer gets a configurable idle timeout:
-- After completing a task, schedule `:idle_timeout` message
-- On timeout, GenServer terminates normally
-- Supervisor doesn't restart (`:transient` restart strategy — only restarts on abnormal exit)
+- After session completes, schedule `:idle_timeout` via `Process.send_after`
+- Cancel timeout if new task arrives
+- On timeout, GenServer terminates normally (`:normal` exit)
+- Supervisor doesn't restart (`:transient` strategy — only restarts on abnormal exit)
 - Default: 5 minutes idle → terminate
+- Handle edge case: agent exits while waiting for async result callback
 
 ### 6.5 Tool allowlist propagation
 
-When AgentServer builds a RustBridge request, it includes `allowed_tools` from the AgentDefinition. This is the **source of truth** for what tools a sub-agent can use.
+AgentDefinition's `allowed_tools` is the source of truth. Returned in the routing decision for Rust to filter its registry.
 
 Special rules:
-- `delegate` tool is NEVER included (even if listed) — prevents re-entrant delegation that bypasses Elixir
+- `delegate` tool is NEVER included (even if listed) — prevents re-entrant delegation bypassing Elixir
 - If `allowed_tools` is empty → non-agentic mode (single LLM call, no tool loop)
-- Rust-side security policy applies ON TOP of the allowlist
+- Rust-side SecurityPolicy applies ON TOP of the allowlist (defense in depth)
 
 ---
 
-## 7. Migration Plan
+## 7. Migration Plan (Revised)
 
-### Phase 1: Bridge endpoint (non-breaking)
-- Add `/api/agent/run` endpoint to Rust (accepts agent config + task, returns result)
-- Add `/api/delegate` endpoint to Elixir
+### Phase 0: Prerequisites (NEW)
+- Scaffold Bandit + Plug.Router in Elixir app with `/health` endpoint
+- Extend AgentDefinition with `provider`, `agentic`, `max_iterations` fields
+- Fix `find_matching_agents` to read definition files from disk (not just running processes)
+- Fix GenServer blocking anti-patterns in RustBridge and AgentCoordinator (see existing issue tickets)
+- **Test:** Elixir app starts, serves health check, loads agent definitions from YAML files
+- **Estimate:** This is prerequisite work and should be done before feature work begins
+
+### Phase 1: Routing endpoint (non-breaking)
+- Add `/api/delegate` endpoint to Elixir (returns routing decision only)
+- Add `/api/delegate/result` callback endpoint to Elixir (async result tracking)
 - Both are new endpoints — nothing existing changes
-- **Test:** Call both endpoints directly with curl
+- **Test:** Call endpoints directly with curl, verify routing logic
 
-### Phase 2: Wire Elixir delegation path (feature-flagged)
+### Phase 2: Wire DelegateTool to Elixir routing (feature-flagged)
 - Add `delegation_mode` config: `"rust"` (default) or `"elixir"`
-- When `"elixir"`: DelegateTool sends to Elixir instead of running inline
-- When `"rust"`: Current behavior unchanged
-- AgentServer calls RustBridge.run_task for real execution
+- When `"elixir"`: DelegateTool asks Elixir for routing, then executes locally
+- When `"rust"`: Current behavior unchanged (full fallback)
+- DelegateTool uses `allowed_tools` from Elixir response to filter its registry
+- Async result callback after execution
 - **Test:** Run same delegation tasks through both paths, compare results
+- **Scope:** `first_available` strategy only
 
-### Phase 3: Agent definition migration
-- Create YAML agent definition files from existing TOML config
-- Elixir loads from YAML, falls back to TOML query for backward compat
-- **Test:** Define agents in both formats, verify same behavior
+### Phase 3: Agent definition split
+- Create YAML agent definition files for orchestration fields (capabilities, delegates_to, persistent)
+- Keep `[agents.*]` TOML for execution fields (provider, model, api_key, temperature)
+- No dual-format for the same fields — clean separation
+- **Test:** Define agents with YAML + TOML, verify delegation works
 
-### Phase 4: Remove Rust delegation code
-- Once Elixir path is stable, flip default to `"elixir"`
-- Deprecate `[agents.*]` TOML config (keep parsing, emit warning)
-- Remove inline tool filtering from DelegateTool
-- Remove `parent_tools`, `depth`, `multimodal_config` from DelegateTool struct
-- **Test:** Full E2E suite passes with Elixir-only delegation
+### Phase 4: Stabilize and default
+- Once Elixir routing is stable, flip default to `delegation_mode = "elixir"`
+- Keep `"rust"` mode as permanent fallback (not deprecated — useful for single-binary deployments)
+- **Test:** Full E2E suite passes with Elixir routing
 
-### Phase 5: Advanced features (post-migration)
-- Fanout/sequential strategies in real use
+### Phase 5: Advanced features (separate epic — NOT part of this migration)
+- Fanout/sequential strategies (requires cancellation propagation)
 - Persistent agent snapshots across restarts
-- Agent-to-agent async messaging (not just delegate-and-wait)
-- Dynamic agent spawning at runtime (user creates agents on the fly)
-- Resource locking for shared resources (browser sessions, serial ports)
+- Agent-to-agent async messaging
+- Dynamic agent spawning at runtime
+- Resource locking for shared resources
 
 ---
 
@@ -460,9 +489,9 @@ Special rules:
 
 ## 9. What We Lose (Temporarily)
 
-- **Latency:** Two HTTP hops instead of inline function call. Expected overhead: ~5-15ms per delegation (localhost HTTP). Acceptable for most use cases.
-- **Simplicity:** More moving parts (Elixir app must be running alongside Rust). Mitigated by daemon mode starting both.
-- **Single-binary deployment:** Currently RustyClaw is one binary. With Elixir, it's two processes. Mitigated by the daemon orchestrating both.
+- **Latency:** One HTTP hop for routing instead of inline HashMap lookup. Expected overhead: ~2-8ms per delegation (localhost HTTP, no execution in the hop). Much better than the original two-hop design (~5-15ms × 2).
+- **Simplicity:** More moving parts (Elixir app must be running alongside Rust). Mitigated by daemon mode starting both. Mitigated further by `delegation_mode = "rust"` fallback for single-binary deployments.
+- **Single-binary deployment:** Currently RustyClaw is one binary. With Elixir, it's two processes. Fallback mode preserves single-binary option.
 
 ---
 
@@ -470,43 +499,59 @@ Special rules:
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Elixir app crashes, delegation breaks | Medium | High | Feature flag — fall back to Rust inline delegation |
-| HTTP bridge latency too high | Low | Medium | Benchmark. If needed, migrate to Erlang Port (stdin/stdout JSON) |
-| Config format split (TOML vs YAML) | Medium | Medium | Phase 3 migration. Emit warnings on TOML usage. |
-| Fanout strategy overwhelms Rust | Low | Medium | Concurrency limit in AgentCoordinator (max N parallel calls) |
+| Elixir app crashes, delegation breaks | Medium | High | Feature flag — fall back to Rust inline delegation permanently available |
+| HTTP routing latency too high | Low | Low | Only one hop now (routing only, not execution). Benchmark. Erlang Port fallback if needed. |
+| Config split confusion (TOML vs YAML) | Low | Medium | Clean separation: TOML = execution, YAML = orchestration. No field overlap. |
 | Sub-agent tool call escapes allowlist | Low | Critical | Defense in depth: Elixir sends allowlist, Rust filters AND applies SecurityPolicy |
+| Async result callback fails | Medium | Low | Fire-and-forget from Rust. Delegation succeeds regardless. Session tracking may be stale. |
+| Agent discovery misses unspawned agents | High (pre-fix) | High | Phase 0 fix: read definition files from disk, not just running processes |
+| Timeout mismatch (caller vs worker) | Medium | Medium | Phase 0 fix: align all timeouts, define ownership. Rust owns execution timeout, Elixir owns routing timeout. |
 
 ---
 
 ## 11. Open Questions
 
-1. **Erlang Port vs HTTP for RustBridge?** — Start with HTTP (simpler debugging, already implemented). Migrate to Port if latency matters.
+1. **Erlang Port vs HTTP for routing?** — Start with HTTP (simpler debugging). Routing is a lightweight call (JSON in, JSON out). Port migration only if sub-millisecond routing matters.
 
-2. **Agent definition format?** — YAML (Elixir's current format) vs TOML (Rust's format). Recommendation: YAML for new agents, backward-compat TOML parsing with deprecation warning.
+2. **Should the primary agent also run through Elixir?** — Not in this phase. Primary agent stays in Rust's agent loop. Only delegated sub-agents get Elixir routing. This limits blast radius.
 
-3. **Should the primary agent also run through Elixir?** — Not in this phase. Primary agent stays in Rust's agent loop. Only delegated sub-agents go through Elixir. This limits blast radius.
+3. **Sub-agent delegating to another sub-agent?** — Supported via delegation depth tracking in provenance. Sub-agent A's DelegateTool calls Elixir, which routes to sub-agent B. Depth incremented at each hop. Max depth enforced by AgentCoordinator.
 
-4. **Fanout result aggregation?** — When 3 agents return 3 different results, how does the primary agent use them? Options: concatenate, let primary agent choose, structured merge. **Recommendation:** Return all results as a JSON array, let the primary agent's LLM decide how to use them.
+4. ~~**Fanout result aggregation?**~~ — Deferred to Phase 5 (separate epic).
 
-5. **Sub-agent delegating to another sub-agent?** — Supported via delegation depth tracking in provenance. Sub-agent A can call delegate (which goes to Elixir), which spawns sub-agent B. Depth is incremented. Max depth enforced by AgentCoordinator.
+5. ~~**Agent definition format?**~~ — Resolved: TOML for execution (Rust), YAML for orchestration (Elixir). No overlap.
 
 ---
 
 ## 12. Linear Issues for Implementation
 
+### Feature branch issues (feature/elixir-delegation)
+
 | Phase | Issue | Description |
 |-------|-------|-------------|
-| 1 | Rust: `/api/agent/run` endpoint | Accept agent config + task, run filtered agent loop, return result |
-| 1 | Elixir: `/api/delegate` endpoint (DelegationRouter) | Accept delegation request, route to AgentCoordinator |
-| 2 | Elixir: AgentServer real execution via RustBridge | Replace pending_bridge placeholder with actual bridge call |
-| 2 | Rust: DelegateTool HTTP mode | Feature-flagged: send to Elixir instead of inline execution |
+| 0 | Elixir: Scaffold Bandit + Plug.Router | Add HTTP server to Elixir app with /health endpoint |
+| 0 | Elixir: Extend AgentDefinition schema | Add provider, agentic, max_iterations fields |
+| 0 | Elixir: Agent discovery from definition files | find_matching_agents reads YAML files, not just running processes |
+| 1 | Elixir: `/api/delegate` endpoint | Returns routing decision (agent + allowed_tools), not execution result |
+| 1 | Elixir: `/api/delegate/result` callback | Async result tracking from Rust |
+| 2 | Rust: DelegateTool Elixir routing mode | Feature-flagged: ask Elixir for routing, execute locally |
 | 2 | Config: `delegation_mode` flag | "rust" (default) or "elixir" |
-| 3 | Agent definition YAML migration | Create YAML files, backward-compat TOML parsing |
+| 3 | Agent definition YAML/TOML split | YAML for orchestration, TOML for execution |
 | 3 | Elixir: Idle timeout for ephemeral agents | Auto-terminate after configurable idle period |
-| 4 | Rust: Strip inline delegation code | Remove parent_tools, depth, multimodal_config from DelegateTool |
-| 4 | Default flip: delegation_mode = "elixir" | Make Elixir the default path |
-| 5 | Elixir: Fanout strategy with RustBridge | Parallel execution, result aggregation |
-| 5 | Elixir: Dynamic agent spawning (runtime) | Users create agents on the fly |
+| 4 | Default flip: delegation_mode = "elixir" | Make Elixir routing the default |
+
+### Existing Elixir issues (master branch — regular fixes)
+
+These are pre-existing code issues found during design review, NOT part of the delegation feature. Tracked separately:
+
+| Issue | Description | Severity |
+|-------|-------------|----------|
+| GenServer blocking in RustBridge | HTTP + retry sleeps inside handle_call block the process | High |
+| GenServer blocking in AgentCoordinator | Strategy execution inside handle_call serializes all routing | High |
+| Unlinked Task.start in AgentServer | delegate_to_child uses Task.start + GenServer.reply — can strand callers | Medium |
+| Health checks ignore external deps | evaluate_health based on recovery_attempts, not bridge/provider state | Medium |
+| Snapshot restore for non-persistent agents | maybe_restore_snapshot runs unconditionally, can load stale state | Low |
+| AgentServer :pending_bridge placeholder | run_task returns placeholder instead of actual result | Medium |
 
 ---
 
