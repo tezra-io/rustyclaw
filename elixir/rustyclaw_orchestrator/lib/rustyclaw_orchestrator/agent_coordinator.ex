@@ -21,6 +21,8 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
     MessageProvenance
   }
 
+  alias RustyclawOrchestrator.ToolSynthesis.Registry, as: SynthRegistry
+
   require Logger
 
   @call_timeout 30_000
@@ -62,6 +64,48 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
   @spec allowed_to_delegate?(String.t(), String.t()) :: boolean()
   def allowed_to_delegate?(from_agent, to_agent) do
     GenServer.call(__MODULE__, {:check_acl, from_agent, to_agent}, @call_timeout)
+  end
+
+  @doc """
+  Discover synthesized tools available for agent use.
+
+  Returns tools with `:promoted` or `:probation` status — tools that are
+  active and executable. This enables agent-to-agent tool sharing: a tool
+  synthesized by one agent is discoverable by all agents.
+
+  Options:
+  - `:status` — filter by specific status (default: returns both :promoted and :probation)
+  """
+  @spec discover_synth_tools(keyword()) :: [map()]
+  def discover_synth_tools(opts \\ []) do
+    status = Keyword.get(opts, :status)
+
+    tools =
+      if status do
+        SynthRegistry.list(status: status)
+      else
+        promoted = SynthRegistry.list(status: :promoted)
+        probation = SynthRegistry.list(status: :probation)
+        promoted ++ probation
+      end
+
+    Enum.map(tools, fn entry ->
+      %{
+        name: entry.name,
+        description: entry.description,
+        parameters_schema: entry.parameters_schema,
+        status: entry.status,
+        author_agent: entry.author_agent,
+        invocation_count: entry.invocation_count,
+        success_rate: safe_synth_rate(entry)
+      }
+    end)
+  end
+
+  defp safe_synth_rate(%{invocation_count: 0}), do: nil
+
+  defp safe_synth_rate(%{success_count: sc, invocation_count: ic}) do
+    sc / ic
   end
 
   # --- GenServer Callbacks ---

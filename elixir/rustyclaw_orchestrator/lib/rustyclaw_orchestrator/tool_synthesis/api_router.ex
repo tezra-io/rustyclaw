@@ -13,7 +13,13 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
 
   use Plug.Router
 
-  alias RustyclawOrchestrator.ToolSynthesis.{Persistence, Registry, Sandbox, Synthesizer}
+  alias RustyclawOrchestrator.ToolSynthesis.{
+    Persistence,
+    Probation,
+    Registry,
+    Sandbox,
+    Synthesizer
+  }
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
@@ -49,13 +55,20 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
         result = Sandbox.execute(entry.module, params)
         elapsed = System.monotonic_time(:millisecond) - start_time
 
+        {success, crash} =
+          case result do
+            {:ok, _} -> {true, false}
+            {:error, msg} -> {false, String.contains?(msg, ["crashed", "timed out"])}
+          end
+
+        Registry.update_metrics(tool_name, success, elapsed)
+        Probation.record_invocation(tool_name, success, crash: crash, latency_ms: elapsed)
+
         case result do
           {:ok, output} ->
-            Registry.update_metrics(tool_name, true, elapsed)
             json_response(conn, 200, %{ok: true, output: output})
 
           {:error, reason} ->
-            Registry.update_metrics(tool_name, false, elapsed)
             json_response(conn, 200, %{ok: false, error: reason})
         end
       else

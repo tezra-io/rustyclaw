@@ -49,6 +49,9 @@ defmodule RustyclawOrchestrator.Application do
       # Tool synthesis engine — loads persisted tools on startup
       RustyclawOrchestrator.ToolSynthesis.Synthesizer,
 
+      # Tool probation lifecycle state machine
+      RustyclawOrchestrator.ToolSynthesis.Probation,
+
       # HTTP bridge to Rust/RustyClaw core
       {RustyclawOrchestrator.RustBridge,
        Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])},
