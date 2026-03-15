@@ -1,0 +1,19 @@
+# Strict security config for E2E security tests
+[general]
+persona = "restricted-agent"
+
+[providers.test]
+kind = "anthropic"
+
+[tools]
+enabled = ["shell", "read"]
+
+[security]
+approval_mode = "strict"
+blocked_paths = ["/etc", "/root", "/var"]
+scrub_patterns = ["API_KEY", "TOKEN", "SECRET", "PASSWORD"]
+
+[security.policy]
+allow_network = false
+allow_sudo = false
+max_file_size_mb = 10

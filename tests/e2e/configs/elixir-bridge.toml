@@ -1,0 +1,19 @@
+# Config for Elixir bridge E2E tests
+[general]
+persona = "bridge-agent"
+
+[providers.test]
+kind = "anthropic"
+
+[tools]
+enabled = ["shell", "read", "write", "edit", "delegate"]
+
+[bridge]
+enabled = true
+url = "http://127.0.0.1:4000"
+
+[agents]
+dir = "${E2E_WORKSPACE}/agents"
+
+[security]
+approval_mode = "auto"

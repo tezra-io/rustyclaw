@@ -1,0 +1,15 @@
+# Config for multi-agent delegation E2E tests
+[general]
+persona = "coordinator"
+
+[providers.test]
+kind = "anthropic"
+
+[tools]
+enabled = ["shell", "read", "write", "edit", "delegate"]
+
+[agents]
+dir = "${E2E_WORKSPACE}/agents"
+
+[security]
+approval_mode = "auto"

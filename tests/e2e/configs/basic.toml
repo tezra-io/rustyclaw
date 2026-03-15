@@ -1,0 +1,13 @@
+# Minimal config for E2E core tests
+[general]
+persona = "test-agent"
+
+[providers.test]
+kind = "anthropic"
+# key injected via environment
+
+[tools]
+enabled = ["shell", "read", "write", "edit"]
+
+[security]
+approval_mode = "auto"
