@@ -63,6 +63,9 @@ defmodule RustyclawOrchestrator.Application do
 
       # --- Plugin subsystem ---
 
+      # Progress tracking, loop detection, stuck worker detection
+      RustyclawOrchestrator.Plugins.ProgressTracker,
+
       # Plugin pool management, dispatch, rate limits, capability routing
       RustyclawOrchestrator.Plugins.Manager,
 
