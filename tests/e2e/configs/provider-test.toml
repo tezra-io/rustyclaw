@@ -1,0 +1,12 @@
+# Provider-specific test config for E2E provider tests
+[general]
+persona = "provider-test-agent"
+
+[providers.test]
+kind = "anthropic"
+
+[tools]
+enabled = ["shell", "read"]
+
+[security]
+approval_mode = "auto"

@@ -1,0 +1,18 @@
+# Fallback provider config for E2E provider tests
+# Primary provider is invalid; fallback chain should kick in.
+[general]
+persona = "fallback-test-agent"
+
+[providers.test]
+kind = "anthropic"
+
+[tools]
+enabled = ["shell", "read"]
+
+[security]
+approval_mode = "auto"
+
+[reliability]
+provider_retries = 1
+provider_backoff_ms = 500
+fallback_providers = ["anthropic"]
