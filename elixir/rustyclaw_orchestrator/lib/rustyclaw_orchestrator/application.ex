@@ -61,6 +61,21 @@ defmodule RustyclawOrchestrator.Application do
       # Iterative tool improvement with versioning
       RustyclawOrchestrator.ToolSynthesis.Improver,
 
+      # --- Plugin subsystem ---
+
+      # Plugin pool management, dispatch, rate limits, capability routing
+      RustyclawOrchestrator.Plugins.Manager,
+
+      # Task supervisor for plugin Worker task dispatch
+      {Task.Supervisor, name: RustyclawOrchestrator.Plugins.TaskSupervisor},
+
+      # Dynamic supervisor for plugin Worker processes
+      {DynamicSupervisor,
+       name: RustyclawOrchestrator.Plugins.WorkerSupervisor,
+       strategy: :one_for_one,
+       max_restarts: 5,
+       max_seconds: 5},
+
       # HTTP bridge to Rust/RustyClaw core
       {RustyclawOrchestrator.RustBridge,
        Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])},
