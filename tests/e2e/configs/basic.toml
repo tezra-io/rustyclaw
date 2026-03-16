@@ -7,7 +7,7 @@ kind = "anthropic"
 # key injected via environment
 
 [tools]
-enabled = ["shell", "read", "write", "edit"]
+enabled = ["shell", "read", "write", "edit", "web_fetch", "web_search_tool", "http_request"]
 
 [security]
 approval_mode = "auto"
