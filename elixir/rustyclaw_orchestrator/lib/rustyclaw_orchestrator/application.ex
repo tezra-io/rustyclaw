@@ -72,6 +72,9 @@ defmodule RustyclawOrchestrator.Application do
       # Retry scheduling with exponential backoff and fallback routing
       RustyclawOrchestrator.Plugins.RetryScheduler,
 
+      # Dev session orchestration — issue iteration, quality gates, progress
+      RustyclawOrchestrator.Plugins.TaskOrchestrator,
+
       # Task supervisor for plugin Worker task dispatch
       {Task.Supervisor, name: RustyclawOrchestrator.Plugins.TaskSupervisor},
 

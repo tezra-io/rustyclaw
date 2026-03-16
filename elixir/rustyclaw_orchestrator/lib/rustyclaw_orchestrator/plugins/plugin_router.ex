@@ -3,15 +3,18 @@ defmodule RustyclawOrchestrator.Plugins.PluginRouter do
   HTTP API for plugin management and task execution.
 
   Endpoints:
-  - `GET  /api/plugins`                  — list all plugins with status
-  - `POST /api/plugins/exec`             — submit a task for execution
+  - `GET  /api/plugins`                      — list all plugins with status
+  - `POST /api/plugins/exec`                 — submit a task for execution
   - `POST /api/plugins/:name/retry/:task_id` — retry a specific task
-  - `GET  /api/plugins/status`           — active workers and pending retries
+  - `GET  /api/plugins/status`               — active workers and pending retries
+  - `POST /api/plugins/sessions`             — start a dev session
+  - `GET  /api/plugins/sessions/:id`         — session status
+  - `DELETE /api/plugins/sessions/:id`       — cancel a session
   """
 
   use Plug.Router
 
-  alias RustyclawOrchestrator.Plugins.{Manager, RetryScheduler, Worker}
+  alias RustyclawOrchestrator.Plugins.{Manager, RetryScheduler, TaskOrchestrator, Worker}
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
@@ -48,6 +51,55 @@ defmodule RustyclawOrchestrator.Plugins.PluginRouter do
 
       {:error, err} ->
         json_response(conn, 422, %{ok: false, error: inspect(err)})
+    end
+  end
+
+  # --- POST /api/plugins/sessions ---
+
+  post "/api/plugins/sessions" do
+    with {:ok, repo_path} <- require_field(conn.body_params, "repo_path"),
+         {:ok, issues} <- require_field(conn.body_params, "issues") do
+      config = %{
+        repo_path: repo_path,
+        issues: issues,
+        quality_gates: Map.get(conn.body_params, "quality_gates", []),
+        plugin_opts: parse_plugin_opts(conn.body_params)
+      }
+
+      case TaskOrchestrator.start_session(config) do
+        {:ok, session_id} ->
+          json_response(conn, 201, %{ok: true, session_id: session_id})
+
+        {:error, reason} ->
+          json_response(conn, 422, %{ok: false, error: inspect(reason)})
+      end
+    else
+      {:error, {:missing_field, field}} ->
+        json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+    end
+  end
+
+  # --- GET /api/plugins/sessions/:id ---
+
+  get "/api/plugins/sessions/:id" do
+    case TaskOrchestrator.get_status(id) do
+      {:ok, status} ->
+        json_response(conn, 200, %{ok: true, session: status})
+
+      {:error, :not_found} ->
+        json_response(conn, 404, %{ok: false, error: "session not found"})
+    end
+  end
+
+  # --- DELETE /api/plugins/sessions/:id ---
+
+  delete "/api/plugins/sessions/:id" do
+    case TaskOrchestrator.cancel_session(id) do
+      :ok ->
+        json_response(conn, 200, %{ok: true, message: "session cancelled"})
+
+      {:error, :not_found} ->
+        json_response(conn, 404, %{ok: false, error: "session not found"})
     end
   end
 
@@ -157,5 +209,21 @@ defmodule RustyclawOrchestrator.Plugins.PluginRouter do
       "worktree" -> :worktree
       _ -> :lock
     end
+  end
+
+  defp parse_plugin_opts(params) do
+    opts = []
+
+    opts =
+      if params["git_strategy"],
+        do: [{:git_strategy, parse_git_strategy(params)} | opts],
+        else: opts
+
+    opts =
+      if params["max_iterations"],
+        do: [{:max_iterations, params["max_iterations"]} | opts],
+        else: opts
+
+    opts
   end
 end
