@@ -90,7 +90,7 @@ use config::Config;
 // Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
 pub use rustyclaw::{
     ChannelCommands, CronCommands, HardwareCommands, IntegrationCommands, MigrateCommands,
-    PeripheralCommands, ServiceCommands, SkillCommands,
+    PeripheralCommands, ServiceCommands, SkillCommands, SynthCommands,
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -357,6 +357,25 @@ Examples:
     Skills {
         #[command(subcommand)]
         skill_command: SkillCommands,
+    },
+
+    /// Manage synthesized tools (Elixir-side tool synthesis)
+    #[command(long_about = "\
+Manage synthesized tools.
+
+List, inspect, approve, suspend, or delete tools that were \
+dynamically synthesized by the Elixir tool synthesis engine. \
+Requires the Elixir orchestrator to be running.
+
+Examples:
+  rustyclaw synth list
+  rustyclaw synth inspect csv_parser
+  rustyclaw synth approve csv_parser
+  rustyclaw synth suspend csv_parser
+  rustyclaw synth delete csv_parser")]
+    Synth {
+        #[command(subcommand)]
+        synth_command: SynthCommands,
     },
 
     /// Migrate data from other agent runtimes
@@ -770,9 +789,9 @@ async fn main() -> Result<()> {
             bail!("--channels-only does not accept --force");
         }
         let config = if channels_only {
-            onboard::run_channels_repair_wizard().await
+            Box::pin(onboard::run_channels_repair_wizard()).await
         } else if interactive {
-            onboard::run_wizard(force).await
+            Box::pin(onboard::run_wizard(force)).await
         } else {
             onboard::run_quick_setup(
                 api_key.as_deref(),
@@ -809,8 +828,7 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Onboard { .. } => unreachable!(),
-        Commands::Completions { .. } => unreachable!(),
+        Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
 
         Commands::Agent {
             message,
@@ -1050,6 +1068,8 @@ async fn main() -> Result<()> {
 
         Commands::Skills { skill_command } => skills::handle_command(skill_command, &config),
 
+        Commands::Synth { synth_command } => handle_synth_command(synth_command).await,
+
         Commands::Migrate { migrate_command } => {
             migration::handle_command(migrate_command, &config).await
         }
@@ -1080,6 +1100,66 @@ async fn main() -> Result<()> {
         },
 
         Commands::Secrets { secrets_command } => handle_secrets_command(secrets_command),
+    }
+}
+
+async fn handle_synth_command(cmd: SynthCommands) -> Result<()> {
+    use tools::synth_proxy;
+
+    match cmd {
+        SynthCommands::List => {
+            let tools = synth_proxy::list_synth_tools(None).await?;
+            if tools.is_empty() {
+                println!("No synthesized tools.");
+            } else {
+                println!(
+                    "{:<24} {:<12} {:>6} {:>6}  DESCRIPTION",
+                    "NAME", "STATUS", "CALLS", "OK"
+                );
+                println!("{}", "-".repeat(78));
+                for t in &tools {
+                    println!(
+                        "{:<24} {:<12} {:>6} {:>6}  {}",
+                        t.name, t.status, t.invocation_count, t.success_count, t.description
+                    );
+                }
+            }
+            Ok(())
+        }
+        SynthCommands::Inspect { name } => {
+            let tools = synth_proxy::list_synth_tools(None).await?;
+            let tool = tools.iter().find(|t| t.name == name);
+            match tool {
+                Some(t) => {
+                    println!("Name:        {}", t.name);
+                    println!("Status:      {}", t.status);
+                    println!("Description: {}", t.description);
+                    println!("Invocations: {}", t.invocation_count);
+                    println!("Successes:   {}", t.success_count);
+                    println!(
+                        "Schema:      {}",
+                        serde_json::to_string_pretty(&t.parameters_schema)?
+                    );
+                    Ok(())
+                }
+                None => bail!("Tool '{}' not found", name),
+            }
+        }
+        SynthCommands::Approve { name } => {
+            synth_proxy::approve_synth_tool(&name, None).await?;
+            println!("Tool '{}' approved (promoted).", name);
+            Ok(())
+        }
+        SynthCommands::Suspend { name } => {
+            synth_proxy::suspend_synth_tool(&name, None).await?;
+            println!("Tool '{}' suspended.", name);
+            Ok(())
+        }
+        SynthCommands::Delete { name } => {
+            synth_proxy::delete_synth_tool(&name, None).await?;
+            println!("Tool '{}' deleted.", name);
+            Ok(())
+        }
     }
 }
 

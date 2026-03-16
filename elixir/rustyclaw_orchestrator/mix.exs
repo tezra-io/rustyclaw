@@ -26,8 +26,13 @@ defmodule RustyclawOrchestrator.MixProject do
       {:nimble_options, "~> 1.1"},
       {:req, "~> 0.5"},
 
+      # HTTP server
+      {:bandit, "~> 1.6"},
+      {:plug, "~> 1.16"},
+
       # Dev/test
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:bypass, "~> 2.1", only: :test}
     ]
   end
 

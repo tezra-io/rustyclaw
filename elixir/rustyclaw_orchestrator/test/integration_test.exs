@@ -183,9 +183,12 @@ defmodule RustyclawOrchestrator.IntegrationTest do
   # --- 8. Full flow: parse definition → spawn → task → session ---
 
   test "8: end-to-end flow from definition to completed session" do
-    # Clean stale snapshots from previous runs
-    snapshot_path = Path.expand("~/.rustyclaw/agent_snapshots/e2e-agent.snapshot.etf")
-    File.rm(snapshot_path)
+    # Clean stale snapshots from previous runs (use configured snapshot_dir)
+    snapshot_dir =
+      Application.get_env(:rustyclaw_orchestrator, :snapshot_dir, "~/.rustyclaw/agent_snapshots")
+      |> Path.expand()
+
+    File.rm(Path.join(snapshot_dir, "e2e-agent.snapshot.etf"))
 
     md = """
     ---

@@ -98,6 +98,7 @@ fn gateway_config_idempotency_defaults() {
 }
 
 #[test]
+#[allow(clippy::field_reassign_with_default)]
 fn gateway_config_toml_roundtrip() {
     let mut gw = GatewayConfig::default();
     gw.port = 8080;

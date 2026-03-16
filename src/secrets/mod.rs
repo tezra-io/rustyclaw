@@ -49,8 +49,7 @@ impl KeychainStore {
     pub fn delete(key: &str) -> Result<()> {
         let entry = keyring::Entry::new(SERVICE, key)?;
         match entry.delete_credential() {
-            Ok(()) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()), // already absent
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()), // already absent
             Err(e) => Err(anyhow::anyhow!(
                 "Failed to delete secret from keychain: {e}"
             )),

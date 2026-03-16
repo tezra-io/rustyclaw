@@ -1,0 +1,7 @@
+# Provider-specific test config for E2E provider tests
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
+
+[gateway]
+require_pairing = false

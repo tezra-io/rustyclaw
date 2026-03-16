@@ -3,7 +3,8 @@ defmodule RustyclawOrchestrator.RustBridge do
   HTTP bridge to the Rust/RustyClaw core.
 
   GenServer wrapping a Req HTTP client that communicates with the Rust binary
-  over localhost. Provides retry with exponential backoff.
+  over localhost. HTTP calls and retries run in supervised Task workers so the
+  GenServer stays responsive for concurrent callers.
 
   The Rust core exposes endpoints like:
   - POST /api/agent/run — execute an agent task
@@ -18,11 +19,13 @@ defmodule RustyclawOrchestrator.RustBridge do
   @call_timeout 60_000
   @max_retries 3
   @initial_backoff_ms 500
+  @task_supervisor RustyclawOrchestrator.RustBridge.TaskSupervisor
 
   # --- Client API ---
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    {name, init_opts} = Keyword.pop(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, init_opts, name: name)
   end
 
   @doc """
@@ -63,14 +66,15 @@ defmodule RustyclawOrchestrator.RustBridge do
     state = %{
       base_url: base_url,
       max_retries: max_retries,
-      req: build_req(base_url, connect_timeout)
+      req: build_req(base_url, connect_timeout),
+      pending: %{}
     }
 
     {:ok, state}
   end
 
   @impl true
-  def handle_call({:run_task, agent_name, task, opts}, _from, state) do
+  def handle_call({:run_task, agent_name, task, opts}, from, state) do
     provenance = Keyword.get(opts, :provenance)
 
     body =
@@ -82,23 +86,48 @@ defmodule RustyclawOrchestrator.RustBridge do
       }
       |> maybe_add_provenance(provenance)
 
-    result = post_with_retry(state.req, "/api/agent/run", body, 0, state.max_retries)
-    {:reply, result, state}
+    req = state.req
+    max_retries = state.max_retries
+
+    %Task{ref: ref} =
+      Task.Supervisor.async_nolink(@task_supervisor, fn ->
+        post_with_retry(req, "/api/agent/run", body, 0, max_retries)
+      end)
+
+    {:noreply, %{state | pending: Map.put(state.pending, ref, from)}}
   end
 
-  def handle_call(:health_check, _from, state) do
-    result =
-      case Req.get(state.req, url: "/api/health") do
-        {:ok, %Req.Response{status: status}} when status in 200..299 -> :ok
-        {:ok, %Req.Response{status: status}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
+  def handle_call(:health_check, from, state) do
+    req = state.req
 
-    {:reply, result, state}
+    %Task{ref: ref} =
+      Task.Supervisor.async_nolink(@task_supervisor, fn ->
+        case Req.get(req, url: "/api/health") do
+          {:ok, %Req.Response{status: status}} when status in 200..299 -> :ok
+          {:ok, %Req.Response{status: status}} -> {:error, {:http_error, status}}
+          {:error, reason} -> {:error, reason}
+        end
+      end)
+
+    {:noreply, %{state | pending: Map.put(state.pending, ref, from)}}
   end
 
   def handle_call(:base_url, _from, state) do
     {:reply, state.base_url, state}
+  end
+
+  @impl true
+  def handle_info({ref, result}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {from, pending} = Map.pop(state.pending, ref)
+    if from, do: GenServer.reply(from, result)
+    {:noreply, %{state | pending: pending}}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    {from, pending} = Map.pop(state.pending, ref)
+    if from, do: GenServer.reply(from, {:error, {:task_crashed, reason}})
+    {:noreply, %{state | pending: pending}}
   end
 
   # --- Internals ---

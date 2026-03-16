@@ -16,19 +16,15 @@ use serde::{Deserialize, Serialize};
 /// Sentinel fail mode — what happens when the redaction/sanitization engine errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum FailMode {
     /// Fail-open: on error, pass the original message through and log an alert.
     /// Default for most deployments.
+    #[default]
     Open,
     /// Fail-closed: on error, reject the message entirely.
     /// For high-security deployments where leaking a secret is worse than dropping a message.
     Closed,
-}
-
-impl Default for FailMode {
-    fn default() -> Self {
-        Self::Open
-    }
 }
 
 /// Top-level Sentinel configuration (`[security.sentinel]`).
@@ -128,6 +124,7 @@ impl Default for RedactionSchemaConfig {
 /// Inbound sanitization configuration (`[security.sentinel.sanitization]`).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SanitizationSchemaConfig {
     /// Enable inbound sanitization.
     pub enabled: bool,

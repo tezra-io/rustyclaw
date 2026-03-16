@@ -79,7 +79,7 @@ impl SentinelMetrics {
                 .fetch_add(1, Ordering::Relaxed),
             "private_key" => self.redactions_private_key.fetch_add(1, Ordering::Relaxed),
             "entropy" => self.redactions_entropy.fetch_add(1, Ordering::Relaxed),
-            "custom" | _ => self.redactions_custom.fetch_add(1, Ordering::Relaxed),
+            _ => self.redactions_custom.fetch_add(1, Ordering::Relaxed),
         };
 
         tracing::info!(category = category, "sentinel: redacted secret");

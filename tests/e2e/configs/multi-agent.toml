@@ -1,0 +1,32 @@
+# Config for multi-agent delegation E2E tests
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
+
+[gateway]
+require_pairing = false
+
+# Delegate agents for multi-agent testing
+[agents.researcher]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+system_prompt = "You are a research assistant. Answer questions concisely and factually."
+
+[agents.summarizer]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+system_prompt = "You summarize text into 2-3 sentences. Be concise."
+
+[agents.shallow]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+system_prompt = "You are a helpful assistant."
+max_depth = 1
+
+[agents.tooluser]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+system_prompt = "You are a helpful assistant with shell access. When asked to run a command, use the shell tool to execute it and return the output."
+agentic = true
+allowed_tools = ["shell"]
+max_iterations = 5

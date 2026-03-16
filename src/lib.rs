@@ -162,6 +162,33 @@ pub enum SkillCommands {
     },
 }
 
+/// Synthesized tool management subcommands
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SynthCommands {
+    /// List all synthesized tools
+    List,
+    /// Show details of a specific synthesized tool
+    Inspect {
+        /// Tool name
+        name: String,
+    },
+    /// Approve (promote) a synthesized tool
+    Approve {
+        /// Tool name
+        name: String,
+    },
+    /// Suspend a synthesized tool
+    Suspend {
+        /// Tool name
+        name: String,
+    },
+    /// Delete a synthesized tool
+    Delete {
+        /// Tool name
+        name: String,
+    },
+}
+
 /// Migration subcommands
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MigrateCommands {

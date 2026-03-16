@@ -519,6 +519,7 @@ impl Agent {
                     model: self.model_name.clone(),
                     provider,
                     timestamp: chrono::Utc::now().to_rfc3339(),
+                    #[allow(clippy::cast_possible_truncation)]
                     duration_ms: turn_start.elapsed().as_millis() as u64,
                     tool_calls_count: tool_calls,
                     turns,

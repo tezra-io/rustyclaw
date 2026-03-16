@@ -230,7 +230,7 @@ mod tests {
                     _ => panic!("expected Chat message"),
                 }
             }
-            _ => panic!("expected Turn event"),
+            TrajectoryEvent::Finish { .. } => panic!("expected Turn event"),
         }
     }
 

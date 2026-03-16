@@ -84,14 +84,14 @@ pub fn sanitize_with_result<'a>(
     // NFKC normalization.
     let text = if config.normalize_unicode {
         let normalized: String = text.as_ref().nfkc().collect();
-        if normalized != text.as_ref() {
+        if normalized == text.as_ref() {
+            text
+        } else {
             result.nfkc_modified = true;
             if !result.categories.contains(&"nfkc") {
                 result.categories.push("nfkc");
             }
             Cow::Owned(normalized)
-        } else {
-            text
         }
     } else {
         text
@@ -116,7 +116,7 @@ fn sanitize_ascii<'a>(
     _config: &SanitizationConfig,
     result: &mut SanitizationResult,
 ) -> (Cow<'a, str>, SanitizationResult) {
-    let has_control = input.bytes().any(|b| is_ascii_control_to_strip(b));
+    let has_control = input.bytes().any(is_ascii_control_to_strip);
 
     if !has_control {
         return (Cow::Borrowed(input), std::mem::take(result));
