@@ -1,19 +1,7 @@
 # Config for Elixir bridge E2E tests
-[general]
-persona = "bridge-agent"
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
 
-[providers.test]
-kind = "anthropic"
-
-[tools]
-enabled = ["shell", "read", "write", "edit", "delegate"]
-
-[bridge]
-enabled = true
-url = "http://127.0.0.1:4000"
-
-[agents]
-dir = "${E2E_WORKSPACE}/agents"
-
-[security]
-approval_mode = "auto"
+[gateway]
+require_pairing = false

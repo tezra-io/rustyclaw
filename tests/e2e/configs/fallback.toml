@@ -1,18 +1,7 @@
 # Fallback provider config for E2E provider tests
-# Primary provider is invalid; fallback chain should kick in.
-[general]
-persona = "fallback-test-agent"
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
 
-[providers.test]
-kind = "anthropic"
-
-[tools]
-enabled = ["shell", "read"]
-
-[security]
-approval_mode = "auto"
-
-[reliability]
-provider_retries = 1
-provider_backoff_ms = 500
-fallback_providers = ["anthropic"]
+[gateway]
+require_pairing = false

@@ -1,7 +1,7 @@
-# Minimal config for E2E core tests
+# Config for auth E2E tests — pairing ENABLED
 default_provider = "anthropic"
 default_model = "claude-sonnet-4-20250514"
 default_temperature = 0.7
 
 [gateway]
-require_pairing = false
+require_pairing = true

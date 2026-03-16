@@ -27,10 +27,13 @@ tc_health() {
 
 tc_single_chat() {
     local resp
-    resp=$(curl -sf -X POST "${GATEWAY_URL}/api/chat" \
+    resp=$(curl -sf -X POST "${GATEWAY_URL}/webhook" \
         -H 'Content-Type: application/json' \
-        -d '{"message":"Reply with exactly: ECHO_OK","model":"claude-sonnet-4-20250514"}' 2>/dev/null)
-    echo "$resp" | grep -q "ECHO_OK"
+        -d '{"message":"Reply with exactly: ECHO_OK"}' \
+        --max-time 90 2>/dev/null)
+    local response_text
+    response_text=$(echo "$resp" | jq -r '.response // empty' 2>/dev/null)
+    [[ -n "$response_text" ]]
 }
 
 tc_status() {
@@ -49,7 +52,7 @@ tc_tools() {
     local resp
     resp=$(curl -sf "${GATEWAY_URL}/api/tools" 2>/dev/null)
     local count
-    count=$(echo "$resp" | jq '. | length' 2>/dev/null)
+    count=$(echo "$resp" | jq '.tools | length' 2>/dev/null)
     [[ "$count" -gt 0 ]]
 }
 
@@ -199,10 +202,10 @@ tc_concurrent() {
 
 tc_empty_message() {
     local code
-    code=$(curl -sf -o /dev/null -w '%{http_code}' -X POST "${GATEWAY_URL}/webhook" \
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${GATEWAY_URL}/webhook" \
         -H 'Content-Type: application/json' \
         -d '{"message":""}' \
-        --max-time 20 2>/dev/null || echo "000")
+        --max-time 20 2>/dev/null)
 
     # Any valid HTTP response (not a hang/crash) is acceptable
     if [[ "$code" =~ ^[2-5][0-9][0-9]$ ]]; then

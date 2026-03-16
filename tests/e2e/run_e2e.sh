@@ -49,6 +49,11 @@ skip()    { printf "${YELLOW}  ⊘ %s${RESET}\n" "$*"; SKIP_COUNT=$((SKIP_COUNT 
 anomaly() { printf "${YELLOW}  ⚠ %s${RESET}\n" "$*"; ANOMALY_COUNT=$((ANOMALY_COUNT + 1)); TOTAL_COUNT=$((TOTAL_COUNT + 1)); ANOMALY_TESTS+=("$*"); }
 phase()   { printf "\n${CYAN}${BOLD}━━━ Phase: %s ━━━${RESET}\n" "$*"; }
 fatal()   { printf "${RED}FATAL: %s${RESET}\n" "$*" >&2; cleanup; exit 1; }
+# Subshell-safe stubs (exported via declare -f into bash -c test subshells)
+_sub_skip() { echo "SKIP: $*"; }
+_sub_pass() { echo "PASS: $*"; }
+_sub_fail() { echo "FAIL: $*"; }
+
 
 # ── Cleanup ─────────────────────────────────────────────────────
 cleanup() {
@@ -140,42 +145,48 @@ start_gateway() {
         return 1
     fi
 
+    # Prepare config directory (binary expects --config-dir with config.toml inside)
+    local config_dir="$E2E_WORKSPACE/config-${config}"
+    mkdir -p "$config_dir"
+    cp "$config_file" "$config_dir/config.toml"
+
     # Start gateway with test config
-    RUST_LOG=debug "$BINARY" serve \
-        --port "$port" \
-        --config "$config_file" \
-        --workspace "$E2E_WORKSPACE" \
-        --no-pairing \
+    RUST_LOG=debug "$BINARY" gateway \
+        --config-dir "$config_dir" \
+        -p "$port" \
         > "$log_file" 2>&1 &
     GATEWAY_PID=$!
 
-    # Wait for gateway to be ready
+    # Wait for gateway to be ready (extract port from log output)
     local attempts=0
-    local max_attempts=30
-    while ! curl -sf "http://127.0.0.1:${GATEWAY_PORT:-0}/health" >/dev/null 2>&1; do
-        sleep 0.2
+    local max_attempts=40
+    while [[ $attempts -lt $max_attempts ]]; do
+        sleep 0.3
         attempts=$((attempts + 1))
-        if [[ $attempts -ge $max_attempts ]]; then
-            # Try to extract port from log
-            if [[ -f "$log_file" ]]; then
-                local detected_port
-                detected_port=$(grep -oE 'listening on.*:([0-9]+)' "$log_file" | grep -oE '[0-9]+$' | head -1)
-                if [[ -n "$detected_port" ]]; then
-                    GATEWAY_PORT="$detected_port"
-                    export GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}"
-                    if curl -sf "${GATEWAY_URL}/health" >/dev/null 2>&1; then
-                        pass "Gateway listening on ${GATEWAY_URL} (pid $GATEWAY_PID)"
-                        return 0
-                    fi
+        if [[ -f "$log_file" ]]; then
+            local detected_port
+            detected_port=$(grep -oE 'listening on.*:([0-9]+)' "$log_file" | grep -oE '[0-9]+$' | head -1)
+            if [[ -n "$detected_port" ]]; then
+                GATEWAY_PORT="$detected_port"
+                export GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}"
+                if curl -sf "${GATEWAY_URL}/health" >/dev/null 2>&1; then
+                    pass "Gateway listening on ${GATEWAY_URL} (pid $GATEWAY_PID)"
+                    return 0
                 fi
             fi
-            fail "Gateway failed to start within $((max_attempts / 5))s"
+        fi
+        # Check if process died
+        if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+            fail "Gateway process died during startup"
+            if [[ -f "$log_file" ]]; then
+                tail -5 "$log_file" >&2
+            fi
             return 1
         fi
     done
 
-    export GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}"
-    pass "Gateway listening on ${GATEWAY_URL} (pid $GATEWAY_PID)"
+    fail "Gateway failed to start within $((max_attempts * 3 / 10))s"
+    return 1
 }
 
 stop_gateway() {
@@ -186,6 +197,27 @@ stop_gateway() {
     fi
 }
 
+# ── Portable timeout ───────────────────────────────────────────
+# macOS lacks coreutils timeout; use perl fallback
+_timeout() {
+    local secs="$1"; shift
+    if command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$secs" "$@"
+    elif command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+    else
+        # Perl-based timeout fallback for macOS
+        perl -e '
+            alarm shift @ARGV;
+            $SIG{ALRM} = sub { kill 9, $pid; exit 124 };
+            $pid = fork // die;
+            if ($pid == 0) { exec @ARGV; die "exec: $!" }
+            waitpid($pid, 0);
+            exit($? >> 8);
+        ' "$secs" "$@"
+    fi
+}
+
 # ── Test execution ──────────────────────────────────────────────
 # Run a single test case with timeout and logging
 # Usage: run_test "TC-1.1" "description" test_function [timeout_seconds]
@@ -193,14 +225,21 @@ run_test() {
     local tc_id="$1"
     local desc="$2"
     local test_fn="$3"
-    local timeout="${4:-$E2E_DEFAULT_TIMEOUT}"
+    local test_timeout="${4:-$E2E_DEFAULT_TIMEOUT}"
     local log_file="$E2E_WORKSPACE/logs/${tc_id}.log"
 
-    # Run test function with timeout
+    # Run test function in a subshell with timeout
     local result=0
     local start_time=$(date +%s)
 
-    if timeout "$timeout" bash -c "$(declare -f "$test_fn"); $test_fn" > "$log_file" 2>&1; then
+    # Export all variables the test functions need
+    export BINARY CONFIGS_DIR PROJECT_DIR E2E_WORKSPACE GATEWAY_URL GATEWAY_PORT GATEWAY_PID
+
+    if _timeout "$test_timeout" bash -c "$(declare -f _sub_skip _sub_pass _sub_fail "$test_fn" start_gateway_raw start_gateway stop_gateway _mem_store _mem_has_key _mem_delete 2>/dev/null)"'
+skip() { _sub_skip "$@"; }
+pass() { _sub_pass "$@"; }
+fail() { _sub_fail "$@"; }
+'"$test_fn" > "$log_file" 2>&1; then
         result=0
     else
         result=$?
@@ -212,7 +251,7 @@ run_test() {
     if [[ $result -eq 0 ]]; then
         pass "${tc_id}: ${desc} (${duration}s)"
     elif [[ $result -eq 124 ]]; then
-        fail "${tc_id}: ${desc} — TIMEOUT after ${timeout}s"
+        fail "${tc_id}: ${desc} — TIMEOUT after ${test_timeout}s"
     else
         fail "${tc_id}: ${desc} — exit code ${result}"
         # Show last few lines of log
@@ -223,6 +262,41 @@ run_test() {
             done
         fi
     fi
+}
+
+# ── Helper: start a raw gateway (for tests that manage their own) ──
+# Usage: start_gateway_raw <config_toml_path> <log_file>
+# Sets: _GW_PID, _GW_PORT, _GW_URL
+start_gateway_raw() {
+    local config_file="$1"
+    local log_file="$2"
+    local config_dir
+    config_dir=$(mktemp -d "${E2E_WORKSPACE}/config-raw.XXXXXX")
+    cp "$config_file" "$config_dir/config.toml"
+    mkdir -p "$(dirname "$log_file")"
+
+    RUST_LOG=debug "$BINARY" gateway \
+        --config-dir "$config_dir" \
+        -p 0 \
+        > "$log_file" 2>&1 &
+    _GW_PID=$!
+
+    local attempts=0
+    while [[ $attempts -lt 40 ]]; do
+        sleep 0.3
+        attempts=$((attempts + 1))
+        if [[ -f "$log_file" ]]; then
+            _GW_PORT=$(grep -oE 'listening on.*:([0-9]+)' "$log_file" | grep -oE '[0-9]+$' | head -1)
+            if [[ -n "$_GW_PORT" ]]; then
+                _GW_URL="http://127.0.0.1:${_GW_PORT}"
+                return 0
+            fi
+        fi
+        if ! kill -0 "$_GW_PID" 2>/dev/null; then
+            return 1
+        fi
+    done
+    return 1
 }
 
 # ── Test case discovery ─────────────────────────────────────────

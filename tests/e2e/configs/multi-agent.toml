@@ -1,18 +1,12 @@
 # Config for multi-agent delegation E2E tests
-[general]
-persona = "coordinator"
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
 
-[providers.test]
-kind = "anthropic"
-# key injected via ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN env
+[gateway]
+require_pairing = false
 
-[tools]
-enabled = ["shell", "read", "write", "edit", "delegate"]
-
-[security]
-approval_mode = "auto"
-
-# ── Delegate agents ──────────────────────────────────────────────
+# Delegate agents for multi-agent testing
 [agents.researcher]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"

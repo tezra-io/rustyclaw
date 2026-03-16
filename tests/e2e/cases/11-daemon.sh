@@ -81,44 +81,25 @@ tc_daemon_health_time() {
 # Start gateway, send SIGTERM, verify exit code and port release.
 
 tc_daemon_shutdown() {
-    # Create a self-contained config
     local config_file="$E2E_WORKSPACE/config/shutdown-test.toml"
+    mkdir -p "$(dirname "$config_file")"
     cat > "$config_file" << 'TOML'
-[general]
-persona = "test-agent"
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
 
-[providers.test]
-kind = "anthropic"
-
-[tools]
-enabled = ["shell", "read", "write", "edit"]
-
-[security]
-approval_mode = "auto"
+[gateway]
+require_pairing = false
 TOML
 
     local log_file="$E2E_WORKSPACE/logs/gateway-shutdown.log"
-    mkdir -p "$(dirname "$log_file")"
 
-    RUST_LOG=debug "$BINARY" serve \
-        --port 0 \
-        --config "$config_file" \
-        --workspace "$E2E_WORKSPACE" \
-        --no-pairing \
-        > "$log_file" 2>&1 &
-    local gw_pid=$!
-    sleep 2
-
-    local port
-    port=$(grep -oE 'listening on.*:([0-9]+)' "$log_file" | grep -oE '[0-9]+$' | head -1)
-
-    if [[ -z "$port" ]]; then
-        kill "$gw_pid" 2>/dev/null; wait "$gw_pid" 2>/dev/null || true
-        echo "FAIL: Could not detect gateway port"
+    if ! start_gateway_raw "$config_file" "$log_file"; then
+        echo "FAIL: Could not start gateway for shutdown test"
         return 1
     fi
-
-    local gw_url="http://127.0.0.1:${port}"
+    local gw_pid=$_GW_PID
+    local gw_url=$_GW_URL
 
     # Verify running
     local code
@@ -146,7 +127,8 @@ TOML
     local post_code
     post_code=$(curl -sf -o /dev/null -w '%{http_code}' "${gw_url}/health" --max-time 2 2>/dev/null || echo "000")
 
-    if [[ "$post_code" == "000" || "$post_code" == "007" ]]; then
+    # curl returns 000 (or 000000 on some platforms) when connection refused
+    if [[ "$post_code" =~ ^0+$ || "$post_code" == "007" ]]; then
         echo "PASS: Graceful shutdown — exit ${exit_code}, port released"
         return 0
     fi
@@ -197,17 +179,12 @@ tc_daemon_config_reload() {
     local put_code
     put_code=$(curl -sf -o /dev/null -w '%{http_code}' -X PUT "${GATEWAY_URL}/api/config" \
         -H 'Content-Type: application/toml' \
-        -d '[general]
-persona = "test-agent"
+        -d 'default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
 
-[providers.test]
-kind = "anthropic"
-
-[tools]
-enabled = ["shell", "read", "write", "edit"]
-
-[security]
-approval_mode = "auto"' \
+[gateway]
+require_pairing = false' \
         2>/dev/null || echo "000")
 
     # Verify /health still responds

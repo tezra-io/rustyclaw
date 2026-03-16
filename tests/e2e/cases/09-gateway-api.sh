@@ -192,17 +192,12 @@ tc_config_reload() {
     local put_code
     put_code=$(curl -sf -o /dev/null -w '%{http_code}' -X PUT "${GATEWAY_URL}/api/config" \
         -H 'Content-Type: application/toml' \
-        -d '[general]
-persona = "test-agent"
+        -d 'default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+default_temperature = 0.7
 
-[providers.test]
-kind = "anthropic"
-
-[tools]
-enabled = ["shell", "read", "write", "edit"]
-
-[security]
-approval_mode = "auto"' \
+[gateway]
+require_pairing = false' \
         2>/dev/null || echo "000")
 
     if [[ "$put_code" != "200" ]]; then
