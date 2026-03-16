@@ -10,11 +10,21 @@ defmodule RustyclawOrchestrator.Plugins.PluginRouter do
   - `POST /api/plugins/sessions`             — start a dev session
   - `GET  /api/plugins/sessions/:id`         — session status
   - `DELETE /api/plugins/sessions/:id`       — cancel a session
+  - `GET  /api/plugins/queue`               — queue status and contents
+  - `POST /api/plugins/queue/batch`          — submit batch of tasks
+  - `DELETE /api/plugins/queue/:task_id`     — remove task from queue
   """
 
   use Plug.Router
 
-  alias RustyclawOrchestrator.Plugins.{Manager, RetryScheduler, TaskOrchestrator, Worker}
+  alias RustyclawOrchestrator.Plugins.{
+    BatchProcessor,
+    Manager,
+    RetryScheduler,
+    TaskOrchestrator,
+    TaskQueue,
+    Worker
+  }
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
@@ -116,6 +126,46 @@ defmodule RustyclawOrchestrator.Plugins.PluginRouter do
     }
 
     json_response(conn, 200, status)
+  end
+
+  # --- GET /api/plugins/queue ---
+
+  get "/api/plugins/queue" do
+    status = TaskQueue.status()
+    tasks = TaskQueue.list_tasks()
+
+    json_response(conn, 200, %{ok: true, status: status, tasks: tasks})
+  end
+
+  # --- POST /api/plugins/queue/batch ---
+
+  post "/api/plugins/queue/batch" do
+    case require_field(conn.body_params, "tasks") do
+      {:ok, tasks} ->
+        opts = parse_plugin_opts(conn.body_params)
+        batch_id = "batch-#{System.unique_integer([:positive])}"
+
+        spawn(fn ->
+          BatchProcessor.submit_batch(tasks, opts)
+        end)
+
+        json_response(conn, 202, %{ok: true, batch_id: batch_id, task_count: length(tasks)})
+
+      {:error, {:missing_field, field}} ->
+        json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+    end
+  end
+
+  # --- DELETE /api/plugins/queue/:task_id ---
+
+  delete "/api/plugins/queue/:task_id" do
+    case TaskQueue.remove_task(task_id) do
+      :ok ->
+        json_response(conn, 200, %{ok: true, message: "task removed"})
+
+      {:error, :not_found} ->
+        json_response(conn, 404, %{ok: false, error: "task not found in queue"})
+    end
   end
 
   # --- Catch-all ---

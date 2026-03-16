@@ -75,6 +75,9 @@ defmodule RustyclawOrchestrator.Application do
       # Dev session orchestration — issue iteration, quality gates, progress
       RustyclawOrchestrator.Plugins.TaskOrchestrator,
 
+      # Priority queue fed from Linear with auto-assignment
+      {RustyclawOrchestrator.Plugins.TaskQueue, poll_interval_ms: 0},
+
       # Task supervisor for plugin Worker task dispatch
       {Task.Supervisor, name: RustyclawOrchestrator.Plugins.TaskSupervisor},
 
