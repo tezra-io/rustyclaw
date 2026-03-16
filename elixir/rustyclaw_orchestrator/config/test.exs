@@ -17,3 +17,6 @@ config :rustyclaw_orchestrator,
 
 # Use port 0 for synth API in tests (OS assigns a random available port)
 config :rustyclaw_orchestrator, synth_api_port: 0
+
+# Use port 0 for plugin API in tests (OS assigns a random available port)
+config :rustyclaw_orchestrator, plugin_api_port: 0

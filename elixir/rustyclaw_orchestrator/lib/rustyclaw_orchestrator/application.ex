@@ -69,6 +69,9 @@ defmodule RustyclawOrchestrator.Application do
       # Plugin pool management, dispatch, rate limits, capability routing
       RustyclawOrchestrator.Plugins.Manager,
 
+      # Retry scheduling with exponential backoff and fallback routing
+      RustyclawOrchestrator.Plugins.RetryScheduler,
+
       # Task supervisor for plugin Worker task dispatch
       {Task.Supervisor, name: RustyclawOrchestrator.Plugins.TaskSupervisor},
 
@@ -87,7 +90,16 @@ defmodule RustyclawOrchestrator.Application do
       {Bandit,
        plug: RustyclawOrchestrator.ToolSynthesis.ApiRouter,
        port: Application.get_env(:rustyclaw_orchestrator, :synth_api_port, 4001),
-       scheme: :http}
+       scheme: :http},
+
+      # HTTP API for plugin management and task execution
+      Supervisor.child_spec(
+        {Bandit,
+         plug: RustyclawOrchestrator.Plugins.PluginRouter,
+         port: Application.get_env(:rustyclaw_orchestrator, :plugin_api_port, 4002),
+         scheme: :http},
+        id: :plugin_api_bandit
+      )
     ]
 
     opts = [strategy: :one_for_one, name: RustyclawOrchestrator.Supervisor]
