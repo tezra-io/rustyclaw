@@ -45,6 +45,11 @@ pub fn detect_auth_kind(token: &str, explicit: Option<&str>) -> AnthropicAuthKin
         return AnthropicAuthKind::ApiKey;
     }
 
+    // OAuth setup tokens (from Claude Code subscriptions).
+    if trimmed.starts_with("sk-ant-oat01-") {
+        return AnthropicAuthKind::Authorization;
+    }
+
     // Default to API key for backward compatibility unless explicitly configured.
     AnthropicAuthKind::ApiKey
 }
@@ -82,5 +87,11 @@ mod tests {
     fn detect_default_for_api_prefix() {
         let kind = detect_auth_kind("sk-ant-api-123", None);
         assert_eq!(kind, AnthropicAuthKind::ApiKey);
+    }
+
+    #[test]
+    fn detect_setup_token_as_authorization() {
+        let kind = detect_auth_kind("sk-ant-oat01-dFxyz123abc", None);
+        assert_eq!(kind, AnthropicAuthKind::Authorization);
     }
 }
