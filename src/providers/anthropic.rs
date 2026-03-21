@@ -193,13 +193,16 @@ impl AnthropicProvider {
         provider
     }
 
-    /// Resolve the best available credential:
+    /// Resolve the best available credential.
+    /// Returns (credential, from_oauth_bridge) to enable 401 force-refresh.
+    /// Resolution order:
     /// 1. Directly provided credential (from env var or config)
     /// 2. Auth profile from auth-profiles.json (via AuthService)
-    async fn resolve_credential(&self) -> Option<String> {
-        // Direct credential takes priority
-        if self.credential.is_some() {
-            return self.credential.clone();
+    /// 3. Claude Code OAuth bridge (auto-discovery fallback)
+    async fn resolve_credential(&self) -> Option<(String, bool)> {
+        // Direct credential takes priority (ANTHROPIC_API_KEY or config)
+        if let Some(ref cred) = self.credential {
+            return Some((cred.clone(), false));
         }
 
         // Try auth service for managed profiles
@@ -208,15 +211,13 @@ impl AnthropicProvider {
                 .get_provider_bearer_token("anthropic", self.auth_profile_override.as_deref())
                 .await
             {
-                return Some(token);
+                return Some((token, false));
             }
         }
 
-        None
-    }
-
-    fn is_setup_token(token: &str) -> bool {
-        token.starts_with("sk-ant-oat01-")
+        // Auto-discover Claude Code OAuth credentials
+        let token = crate::auth::claude_code_oauth::get_valid_access_token().await?;
+        Some((token, true))
     }
 
     fn apply_auth(
@@ -224,12 +225,12 @@ impl AnthropicProvider {
         request: reqwest::RequestBuilder,
         credential: &str,
     ) -> reqwest::RequestBuilder {
-        if Self::is_setup_token(credential) {
-            request
+        use crate::auth::anthropic_token::{detect_auth_kind, AnthropicAuthKind};
+        match detect_auth_kind(credential, None) {
+            AnthropicAuthKind::Authorization => request
                 .header("Authorization", format!("Bearer {credential}"))
-                .header("anthropic-beta", "oauth-2025-04-20")
-        } else {
-            request.header("x-api-key", credential)
+                .header("anthropic-beta", "oauth-2025-04-20"),
+            AnthropicAuthKind::ApiKey => request.header("x-api-key", credential),
         }
     }
 
@@ -472,13 +473,14 @@ impl Provider for AnthropicProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
-        let credential = self.resolve_credential().await.ok_or_else(|| {
-            anyhow::anyhow!(
-                "Anthropic credentials not set. Set ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, or run `rustyclaw auth login --provider anthropic`."
-            )
-        })?;
+        let (credential, from_oauth_bridge) =
+            self.resolve_credential().await.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Anthropic credentials not set. Set ANTHROPIC_API_KEY, install Claude Code for OAuth auto-discovery, or run `rustyclaw auth login --provider anthropic`."
+                )
+            })?;
 
-        let request = ChatRequest {
+        let chat_req = ChatRequest {
             model: model.to_string(),
             max_tokens: 4096,
             system: system_prompt.map(ToString::to_string),
@@ -494,13 +496,31 @@ impl Provider for AnthropicProvider {
             .post(format!("{}/v1/messages", self.base_url))
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&request);
+            .json(&chat_req);
 
         request = self.apply_auth(request, &credential);
 
         let response = request.send().await?;
 
         if !response.status().is_success() {
+            // On 401 with OAuth bridge credentials, try force-refresh once
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED && from_oauth_bridge {
+                if let Some(new_token) = crate::auth::claude_code_oauth::force_refresh().await {
+                    let mut retry = self
+                        .http_client()
+                        .post(format!("{}/v1/messages", self.base_url))
+                        .header("anthropic-version", "2023-06-01")
+                        .header("content-type", "application/json")
+                        .json(&chat_req);
+                    retry = self.apply_auth(retry, &new_token);
+                    let retry_response = retry.send().await?;
+                    if retry_response.status().is_success() {
+                        let chat_response: ChatResponse = retry_response.json().await?;
+                        return Self::parse_text_response(chat_response);
+                    }
+                    return Err(super::api_error("Anthropic", retry_response).await);
+                }
+            }
             return Err(super::api_error("Anthropic", response).await);
         }
 
@@ -514,11 +534,12 @@ impl Provider for AnthropicProvider {
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<ProviderChatResponse> {
-        let credential = self.resolve_credential().await.ok_or_else(|| {
-            anyhow::anyhow!(
-                "Anthropic credentials not set. Set ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, or run `rustyclaw auth login --provider anthropic`."
-            )
-        })?;
+        let (credential, from_oauth_bridge) =
+            self.resolve_credential().await.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Anthropic credentials not set. Set ANTHROPIC_API_KEY, install Claude Code for OAuth auto-discovery, or run `rustyclaw auth login --provider anthropic`."
+                )
+            })?;
 
         let (system_prompt, mut messages) = Self::convert_messages(request.messages);
 
@@ -545,6 +566,23 @@ impl Provider for AnthropicProvider {
 
         let response = self.apply_auth(req, &credential).send().await?;
         if !response.status().is_success() {
+            // On 401 with OAuth bridge credentials, try force-refresh once
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED && from_oauth_bridge {
+                if let Some(new_token) = crate::auth::claude_code_oauth::force_refresh().await {
+                    let retry = self
+                        .http_client()
+                        .post(format!("{}/v1/messages", self.base_url))
+                        .header("anthropic-version", "2023-06-01")
+                        .header("content-type", "application/json")
+                        .json(&native_request);
+                    let retry_response = self.apply_auth(retry, &new_token).send().await?;
+                    if retry_response.status().is_success() {
+                        let native_response: NativeChatResponse = retry_response.json().await?;
+                        return Ok(Self::parse_native_response(native_response));
+                    }
+                    return Err(super::api_error("Anthropic", retry_response).await);
+                }
+            }
             return Err(super::api_error("Anthropic", response).await);
         }
 
@@ -604,7 +642,7 @@ impl Provider for AnthropicProvider {
     }
 
     async fn warmup(&self) -> anyhow::Result<()> {
-        if let Some(credential) = self.resolve_credential().await {
+        if let Some((credential, _from_oauth_bridge)) = self.resolve_credential().await {
             let mut request = self
                 .http_client()
                 .post(format!("{}/v1/messages", self.base_url))
@@ -675,22 +713,35 @@ mod tests {
 
     #[tokio::test]
     async fn chat_fails_without_key() {
-        let p = AnthropicProvider::new(None);
+        // Use a provider with an invalid credential to ensure it fails at the API level,
+        // not at credential resolution (which now falls through to Claude Code OAuth bridge).
+        let p = AnthropicProvider::new(Some("sk-ant-api03-invalid-test-key"));
         let result = p
             .chat_with_system(None, "hello", "claude-3-opus", 0.7)
             .await;
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("credentials not set"),
-            "Expected key error, got: {err}"
-        );
     }
 
-    #[test]
-    fn setup_token_detection_works() {
-        assert!(AnthropicProvider::is_setup_token("sk-ant-oat01-abcdef"));
-        assert!(!AnthropicProvider::is_setup_token("sk-ant-api-key"));
+    #[tokio::test]
+    async fn resolve_credential_prefers_direct_over_bridge() {
+        let provider = AnthropicProvider::new(Some("sk-ant-api03-test"));
+        let result = provider.resolve_credential().await;
+        assert!(result.is_some());
+        let (cred, from_bridge) = result.unwrap();
+        assert_eq!(cred, "sk-ant-api03-test");
+        assert!(!from_bridge);
+    }
+
+    #[tokio::test]
+    async fn resolve_credential_falls_through_to_bridge() {
+        // Provider with no credential — bridge returns what it can (may be None on CI)
+        let provider = AnthropicProvider::new(None);
+        let result = provider.resolve_credential().await;
+        // On machines with Claude Code: Some((token, true))
+        // On CI without Claude Code: None
+        if let Some((_token, from_bridge)) = result {
+            assert!(from_bridge);
+        }
     }
 
     #[test]
@@ -749,7 +800,7 @@ mod tests {
 
     #[tokio::test]
     async fn chat_with_system_fails_without_key() {
-        let p = AnthropicProvider::new(None);
+        let p = AnthropicProvider::new(Some("sk-ant-api03-invalid-test-key"));
         let result = p
             .chat_with_system(Some("You are RustyClaw"), "hello", "claude-3-opus", 0.7)
             .await;
