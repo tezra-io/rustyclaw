@@ -116,7 +116,7 @@ OS-level sandboxing, deny-by-default policy engine, prompt guard, secret managem
 ### Prerequisites
 
 - Rust 1.87+ (`rustup update stable`)
-- At least one LLM provider API key
+- At least one LLM provider API key (or a Claude Max subscription with Claude Code installed for OAuth auto-discovery)
 
 ### Install from source
 
@@ -129,11 +129,43 @@ cargo install --path .
 ### First run
 
 ```bash
-# Initialize configuration
+# Quick setup — provider + API key + model
 rustyclaw onboard
 
-# Start the gateway
-rustyclaw start
+# Full interactive wizard — provider, channels, security, memory, etc.
+rustyclaw onboard --interactive
+```
+
+### Running
+
+```bash
+# Interactive agent in your terminal
+rustyclaw agent
+
+# Single-shot message
+rustyclaw agent -m "Summarize today's logs"
+
+# HTTP/WebSocket gateway only (pair via POST /pair)
+rustyclaw gateway
+
+# Full autonomous runtime — gateway + all channels + scheduler + heartbeat
+rustyclaw daemon
+```
+
+### Managing channels
+
+```bash
+# Add a channel interactively
+rustyclaw channel add
+
+# List configured channels
+rustyclaw channel list
+
+# Reconfigure channels without re-running full onboard
+rustyclaw onboard --channels-only
+
+# Diagnose channel issues
+rustyclaw channel doctor
 ```
 
 ### Configuration
@@ -141,22 +173,49 @@ rustyclaw start
 RustyClaw reads configuration from `~/.rustyclaw/config.toml`. Key settings:
 
 ```toml
-[provider]
-name = "anthropic"
-api_key = "sk-..."
-model = "claude-sonnet-4-5"
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-6"
+default_temperature = 0.7
 
-[channel.telegram]
-token = "your-bot-token"
+[channels_config.telegram]
+bot_token = "your-bot-token"
+allowed_users = ["your_username"]
+
+[channels_config.signal]
+http_url = "http://127.0.0.1:8686"
+account = "+1234567890"
 
 [memory]
 backend = "sqlite"
 
-[security]
+[gateway]
 require_pairing = true
 ```
 
 See [docs/config-reference.md](docs/config-reference.md) for the full schema.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `rustyclaw onboard` | Quick setup (provider + key) |
+| `rustyclaw onboard --interactive` | Full wizard (channels, security, memory, etc.) |
+| `rustyclaw agent` | Interactive agent chat |
+| `rustyclaw agent -m "..."` | Single-shot message |
+| `rustyclaw gateway` | HTTP/WebSocket gateway |
+| `rustyclaw daemon` | Full runtime (gateway + channels + scheduler) |
+| `rustyclaw channel list` | List configured channels |
+| `rustyclaw channel add` | Add a channel |
+| `rustyclaw status` | System status and config |
+| `rustyclaw doctor` | Run diagnostics |
+| `rustyclaw cron list` | List scheduled tasks |
+| `rustyclaw auth login --provider <name>` | Manage provider auth profiles |
+| `rustyclaw memory list` | List stored memories |
+| `rustyclaw models list` | List available models |
+| `rustyclaw providers` | List supported providers |
+| `rustyclaw estop kill-all` | Emergency stop |
+
+Run `rustyclaw --help` or `rustyclaw <command> --help` for details.
 
 ## Development
 

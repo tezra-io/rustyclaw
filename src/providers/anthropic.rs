@@ -543,10 +543,43 @@ impl Provider for AnthropicProvider {
 
         let (system_prompt, mut messages) = Self::convert_messages(request.messages);
 
-        // Auto-cache last message if conversation is long
-        if Self::should_cache_conversation(request.messages) {
+        // Auto-cache last message if conversation is long.
+        // Skip caching for OAuth bridge credentials — Anthropic rejects
+        // cache_control on the OAuth auth path (causes 400).
+        if !from_oauth_bridge && Self::should_cache_conversation(request.messages) {
             Self::apply_cache_to_last_message(&mut messages);
         }
+
+        // Strip cache_control from system prompt when using OAuth
+        let system_prompt = if from_oauth_bridge {
+            system_prompt.map(|sp| match sp {
+                SystemPrompt::Blocks(blocks) => {
+                    let stripped: Vec<_> = blocks
+                        .into_iter()
+                        .map(|mut b| {
+                            b.cache_control = None;
+                            b
+                        })
+                        .collect();
+                    SystemPrompt::Blocks(stripped)
+                }
+                SystemPrompt::String(_) => sp,
+            })
+        } else {
+            system_prompt
+        };
+
+        // Strip cache_control from tools when using OAuth
+        let tools = if from_oauth_bridge {
+            Self::convert_tools(request.tools).map(|mut tools| {
+                for t in &mut tools {
+                    t.cache_control = None;
+                }
+                tools
+            })
+        } else {
+            Self::convert_tools(request.tools)
+        };
 
         let native_request = NativeChatRequest {
             model: model.to_string(),
@@ -554,7 +587,7 @@ impl Provider for AnthropicProvider {
             system: system_prompt,
             messages,
             temperature,
-            tools: Self::convert_tools(request.tools),
+            tools,
         };
 
         let req = self
