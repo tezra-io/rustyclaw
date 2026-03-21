@@ -15,10 +15,14 @@ This design adds three P0 features to close those gaps:
 2. **Agent-Writable Skills** — Let the agent create and manage its own skill files at runtime
 3. **Memory Injection Scanning** — Validate all memory writes against injection/exfiltration patterns
 
-Plus two P1/P2 features for the future Elixir layer:
+Plus a Phase 2b enhancement to trajectory collection:
 
-4. **Persistent Sub-Agents** (P1) — Long-lived GenServer agents with parent-child messaging
-5. **Agent Dashboard** (P2) — Phoenix LiveView observability
+4. **Hindsight-Guided OPD** (P0, Phase 2b) — Token-level directional advantages from next-state signals, combined with GRPO for dramatically improved training (see `docs/OPD_DESIGN.md`, TEZ-224)
+
+And two P1/P2 features for the future Elixir layer:
+
+5. **Persistent Sub-Agents** (P1) — Long-lived GenServer agents with parent-child messaging
+6. **Agent Dashboard** (P2) — Phoenix LiveView observability
 
 ---
 
@@ -1088,6 +1092,11 @@ Phase 2: Parallel tracks
   └── TEZ-164-165: Memory Injection Scanning
         └── Depends on: TEZ-160 (ContentScanner)
 
+Phase 2b: OPD — Hindsight-Guided On-Policy Distillation (TEZ-224)
+  └── TEZ-224: OPD pipeline (HintExtractor, TokenAdvantageComputer, LogprobProvider)
+        └── Depends on: TEZ-161-163 (Trajectory Collection)
+        └── See: docs/OPD_DESIGN.md for full architecture
+
 Phase 3: Agent-Writable Skills
   └── TEZ-166-169: Skill CRUD tools
         └── Depends on: TEZ-160 (ContentScanner)
@@ -1321,12 +1330,13 @@ The main agent can also list, message, pause, resume, and kill persistent agents
 |---------|-----------|---------------|------------|----------|
 | ContentScanner | 1 | 1 | M | P0 |
 | Trajectory Collection | 4 | 3 | M | P0 |
+| **OPD (Phase 2b)** | **6** | **6** | **M** | **P0** |
 | Memory Injection Scanning | 1 | 3 | S | P0 |
 | Agent-Writable Skills | 4 | 2 | M | P0 |
 | Persistent Sub-Agents | 1 | 3 (Elixir) | L | P0 |
 
-**Total new Rust files:** 10
-**Total modified Rust files:** ~8
-**Estimated LOC:** ~2,000 (Rust core features only)
+**Total new Rust files:** 16 (including OPD)
+**Total modified Rust files:** ~14
+**Estimated LOC:** ~3,500 (Rust core features only, including ~1,500 for OPD)
 
-All P0 features are additive — no existing behavior is modified. The `ContentScanner` is the shared dependency that unblocks both memory scanning and skill CRUD in parallel.
+All P0 features are additive — no existing behavior is modified. The `ContentScanner` is the shared dependency that unblocks both memory scanning and skill CRUD in parallel. OPD (see `docs/OPD_DESIGN.md`) depends on Trajectory Collection and adds token-level training signal via hindsight-guided distillation.
