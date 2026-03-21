@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -113,22 +113,161 @@ fn now_ms() -> f64 {
         .as_millis() as f64
 }
 
-// ── Public API (stubs for now) ──────────────────────────────────────
+// ── Public API ──────────────────────────────────────────────────────
 
 /// Returns a valid Anthropic OAuth access token by reading Claude Code's
 /// credentials and refreshing if expired. Returns None if unavailable.
 pub async fn get_valid_access_token() -> Option<String> {
     let _guard = refresh_lock().lock().await;
-    let (creds, _source) = read_credentials()?;
+    let (mut creds, source) = read_credentials()?;
     let entry = creds.oauth_entry()?.clone();
-    // Stub: return token without refresh (implemented in Task 3)
-    Some(entry.access_token)
+
+    if !entry.is_expired() {
+        return Some(entry.access_token);
+    }
+
+    // Token expired — try refresh
+    match do_refresh(&entry, &mut creds, source).await {
+        Some(new_token) => Some(new_token),
+        None => {
+            tracing::warn!("Claude Code OAuth refresh failed, returning existing token");
+            Some(entry.access_token)
+        }
+    }
 }
 
 /// Force-refresh regardless of expiry (for 401 recovery).
-#[allow(clippy::unused_async)] // stub — async needed when implemented in Task 3
 pub async fn force_refresh() -> Option<String> {
-    None
+    let _guard = refresh_lock().lock().await;
+    let (mut creds, source) = read_credentials()?;
+    let entry = creds.oauth_entry()?.clone();
+
+    match do_refresh(&entry, &mut creds, source).await {
+        Some(new_token) => Some(new_token),
+        None => {
+            tracing::warn!("Claude Code OAuth force-refresh failed");
+            None
+        }
+    }
+}
+
+// ── Refresh implementation ──────────────────────────────────────────
+
+async fn do_refresh(
+    entry: &OAuthEntry,
+    creds: &mut CredentialsFile,
+    source: CredentialSource,
+) -> Option<String> {
+    let refresh_token = entry.refresh_token.as_deref()?;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(REFRESH_TIMEOUT_SECS))
+        .build()
+        .ok()?;
+
+    let payload = serde_json::json!({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    });
+
+    let resp = client
+        .post(REFRESH_ENDPOINT)
+        .header("content-type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        tracing::warn!(
+            status = %status,
+            "Claude Code OAuth refresh request failed: {body}"
+        );
+        return None;
+    }
+
+    let refreshed: RefreshResponse = resp.json().await.ok()?;
+
+    // Update the credential entry
+    if let Some(oauth) = creds.oauth_entry_mut() {
+        oauth.access_token.clone_from(&refreshed.access_token);
+        if let Some(ref new_refresh) = refreshed.refresh_token {
+            oauth.refresh_token = Some(new_refresh.clone());
+        }
+        if let Some(expires_in) = refreshed.expires_in {
+            oauth.expires_at = Some(now_ms() + expires_in * 1000.0);
+        }
+    }
+
+    // Write back to source
+    write_credentials(creds, source);
+
+    tracing::info!("Claude Code OAuth token refreshed successfully");
+    Some(refreshed.access_token)
+}
+
+// ── Write-back ──────────────────────────────────────────────────────
+
+fn write_credentials(creds: &CredentialsFile, source: CredentialSource) {
+    match source {
+        CredentialSource::File => write_credentials_file(creds),
+        CredentialSource::Keychain => {
+            #[cfg(target_os = "macos")]
+            write_keychain(creds);
+            #[cfg(not(target_os = "macos"))]
+            write_credentials_file(creds);
+        }
+    }
+}
+
+fn write_credentials_file(creds: &CredentialsFile) {
+    let Some(path) = credentials_file_path() else {
+        return;
+    };
+    let Ok(data) = serde_json::to_string_pretty(creds) else {
+        return;
+    };
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+        {
+            use std::io::Write;
+            let _ = file.write_all(data.as_bytes());
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = std::fs::write(&path, data);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn write_keychain(creds: &CredentialsFile) {
+    let Ok(data) = serde_json::to_string(creds) else {
+        return;
+    };
+    let _ = std::process::Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-w",
+            &data,
+        ])
+        .output();
 }
 
 // ── Read credentials ────────────────────────────────────────────────
@@ -373,5 +512,13 @@ mod tests {
         let path = path.unwrap();
         assert!(path.to_string_lossy().contains(".claude"));
         assert!(path.to_string_lossy().ends_with(".credentials.json"));
+    }
+
+    #[tokio::test]
+    async fn get_valid_access_token_does_not_panic() {
+        // On machines without Claude Code, returns None
+        // On machines with Claude Code, returns a token
+        // Either way, should not panic
+        let _ = get_valid_access_token().await;
     }
 }
