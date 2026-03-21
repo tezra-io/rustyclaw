@@ -152,6 +152,24 @@ rustyclaw gateway
 rustyclaw daemon
 ```
 
+### Run as a background service
+
+Install RustyClaw as a system service that auto-starts on login and restarts on crash:
+
+```bash
+rustyclaw service install
+rustyclaw service start
+```
+
+Manage the service:
+
+```bash
+rustyclaw service status    # check if running
+rustyclaw service stop      # stop the daemon
+rustyclaw service restart   # restart
+rustyclaw service uninstall # remove from login items
+```
+
 ### Managing channels
 
 ```bash
