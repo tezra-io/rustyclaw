@@ -32,10 +32,10 @@ export default function Sidebar() {
       {/* Logo / Title */}
       <div className="flex items-center gap-2 px-5 py-5 border-b border-gray-800">
         <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm">
-          ZC
+          RC
         </div>
         <span className="text-lg font-semibold text-white tracking-wide">
-          ZeroClaw
+          RustyClaw
         </span>
       </div>
 
