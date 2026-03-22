@@ -148,9 +148,14 @@ rustyclaw agent -m "Summarize today's logs"
 # HTTP/WebSocket gateway only (pair via POST /pair)
 rustyclaw gateway
 
-# Full autonomous runtime — gateway + all channels + scheduler + heartbeat
+# Full autonomous runtime — gateway + channels + scheduler + heartbeat + Elixir orchestrator
 rustyclaw daemon
+
+# Start without Elixir orchestrator (degraded single-agent mode)
+rustyclaw daemon --no-elixir
 ```
+
+The `daemon` command starts **both** the Rust core (gateway, channels, heartbeat, scheduler) and the Elixir/OTP orchestration layer (agent lifecycle, plugins, tool synthesis) as supervised child processes. If Elixir is not installed, the daemon runs in degraded mode automatically with a warning.
 
 ### Run as a background service
 
@@ -221,7 +226,9 @@ See [docs/config-reference.md](docs/config-reference.md) for the full schema.
 | `rustyclaw agent` | Interactive agent chat |
 | `rustyclaw agent -m "..."` | Single-shot message |
 | `rustyclaw gateway` | HTTP/WebSocket gateway |
-| `rustyclaw daemon` | Full runtime (gateway + channels + scheduler) |
+| `rustyclaw daemon` | Full runtime (gateway + channels + scheduler + Elixir) |
+| `rustyclaw daemon --no-elixir` | Full runtime without Elixir orchestrator |
+| `rustyclaw synth list` | List synthesized tools |
 | `rustyclaw channel list` | List configured channels |
 | `rustyclaw channel add` | Add a channel |
 | `rustyclaw status` | System status and config |
@@ -272,8 +279,11 @@ Builds the release binary, boots the gateway on a random port, validates `/healt
 | Component | Status |
 |-----------|--------|
 | Rust core (channels, providers, tools, security, memory, gateway) | Stable |
+| Unified daemon (Rust + Elixir single-command startup) | Stable |
 | Elixir orchestration (agent lifecycle, registry, coordination) | In progress |
 | Rust-Elixir bridge (HTTP) | In progress |
+| Plugin system (Elixir-side plugin management) | In progress |
+| Tool synthesis (dynamic tool generation) | In progress |
 
 ## License
 

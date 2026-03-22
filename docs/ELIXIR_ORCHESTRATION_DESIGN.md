@@ -173,13 +173,27 @@ Before writing any Elixir code, Claude should read and understand these:
 
 ## Implementation Order
 
-1. **TEZ-141**: Scaffold — mix project, supervision tree, deps, CI
-2. **TEZ-142**: AgentDefinition parser + AgentRegistry
-3. **TEZ-143**: AgentServer (GenServer) + AgentSupervisor
-4. **TEZ-144**: SubAgentSession persistence (ETS)
-5. **TEZ-145**: AgentCoordinator (capability routing + delegation ACL)
-6. **TEZ-146**: RustBridge (HTTP first, Port later)
-7. **TEZ-147**: Integration tests + remove dead Rust code
+1. **TEZ-141**: Scaffold — mix project, supervision tree, deps, CI ✅
+2. **TEZ-142**: AgentDefinition parser + AgentRegistry ✅
+3. **TEZ-143**: AgentServer (GenServer) + AgentSupervisor ✅
+4. **TEZ-144**: SubAgentSession persistence (ETS) ✅
+5. **TEZ-145**: AgentCoordinator (capability routing + delegation ACL) ✅
+6. **TEZ-146**: RustBridge (HTTP first, Port later) ✅
+7. **TEZ-147**: Integration tests + remove dead Rust code — In Progress
+8. **TEZ-226**: Unified daemon startup (Rust + Elixir single command) ✅
+
+## Unified Daemon Integration (TEZ-226)
+
+The Rust daemon (`rustyclaw daemon`) now manages the Elixir orchestrator as a supervised child process:
+
+- **Startup**: `rustyclaw daemon` spawns both Rust components and the Elixir orchestrator
+- **Supervision**: Elixir process is monitored with health checks every 15s; auto-restarts with exponential backoff on crash
+- **Degraded mode**: If Elixir is not installed or the orchestrator fails, the daemon continues in single-agent mode
+- **`--no-elixir` flag**: Explicitly skip the orchestrator
+- **Clean shutdown**: Ctrl+C sends SIGTERM to the Elixir process, waits up to 5s, then force-kills
+- **Doctor**: `rustyclaw doctor` checks Elixir version (>= 1.17), OTP version, orchestrator compilation, daemon process status, and BTW bridge connectivity
+- **Onboard**: `rustyclaw onboard` checks for Elixir, compiles the orchestrator, creates default agent definitions
+- **Status**: `rustyclaw status` shows orchestrator process status, BTW bridge reachability
 
 ---
 

@@ -82,6 +82,7 @@ pub fn diagnose(config: &Config) -> Vec<DiagResult> {
     check_config_semantics(config, &mut items);
     check_workspace(config, &mut items);
     check_daemon_state(config, &mut items);
+    check_orchestrator(config, &mut items);
     check_environment(&mut items);
     check_cli_tools(&mut items);
 
@@ -895,6 +896,156 @@ fn check_daemon_state(config: &Config, items: &mut Vec<DiagItem>) {
             items.push(DiagItem::warn(
                 cat,
                 format!("{channel_count} channels, {stale} stale"),
+            ));
+        }
+    }
+}
+
+// ── Elixir orchestrator checks ────────────────────────────────────
+
+fn check_orchestrator(_config: &Config, items: &mut Vec<DiagItem>) {
+    let cat = "orchestrator";
+
+    // Check Elixir installation
+    match crate::daemon::elixir::ElixirOrchestrator::check_elixir_installed() {
+        Ok(version) => {
+            items.push(DiagItem::ok(cat, format!("Elixir {version} installed")));
+        }
+        Err(e) => {
+            items.push(DiagItem::warn(
+                cat,
+                format!(
+                    "Elixir not available: {e} — orchestrator features disabled. \
+                     Install Elixir >= 1.17 for multi-agent support."
+                ),
+            ));
+            return;
+        }
+    }
+
+    // Check OTP version
+    match crate::daemon::elixir::ElixirOrchestrator::check_otp_version() {
+        Ok(otp_version) => {
+            items.push(DiagItem::ok(cat, format!("OTP {otp_version} installed")));
+        }
+        Err(e) => {
+            items.push(DiagItem::warn(
+                cat,
+                format!("could not determine OTP version: {e}"),
+            ));
+        }
+    }
+
+    // Check orchestrator project exists
+    let orch = crate::daemon::elixir::ElixirOrchestrator::new(0);
+    let project_dir = orch.project_dir();
+    if project_dir.join("mix.exs").exists() {
+        items.push(DiagItem::ok(
+            cat,
+            format!("orchestrator project: {}", project_dir.display()),
+        ));
+    } else {
+        items.push(DiagItem::warn(
+            cat,
+            format!(
+                "orchestrator project not found at {} — multi-agent features unavailable",
+                project_dir.display()
+            ),
+        ));
+        return;
+    }
+
+    // Check if deps are compiled
+    if project_dir.join("_build").exists() {
+        items.push(DiagItem::ok(cat, "orchestrator deps compiled"));
+    } else {
+        items.push(DiagItem::warn(
+            cat,
+            "orchestrator not compiled — run `rustyclaw onboard` or `cd elixir/rustyclaw_orchestrator && mix deps.get && mix compile`",
+        ));
+    }
+
+    // Check daemon state for elixir component
+    check_orchestrator_daemon_state(items);
+
+    // Check BTW bridge connectivity (synth API port)
+    check_orchestrator_bridge(items);
+}
+
+fn check_orchestrator_daemon_state(items: &mut Vec<DiagItem>) {
+    let cat = "orchestrator";
+
+    let snapshot = crate::health::snapshot_json();
+    if let Some(components) = snapshot
+        .get("components")
+        .and_then(serde_json::Value::as_object)
+    {
+        if let Some(elixir) = components.get("elixir") {
+            let status = elixir
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+
+            match status {
+                "ok" => {
+                    items.push(DiagItem::ok(cat, "orchestrator process running"));
+                }
+                "error" => {
+                    let error = elixir
+                        .get("last_error")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown error");
+                    items.push(DiagItem::error(
+                        cat,
+                        format!("orchestrator process error: {error}"),
+                    ));
+                }
+                _ => {
+                    items.push(DiagItem::warn(
+                        cat,
+                        format!("orchestrator status: {status}"),
+                    ));
+                }
+            }
+        } else {
+            // Daemon might not be running, or elixir not tracked yet
+            items.push(DiagItem::warn(
+                cat,
+                "orchestrator not tracked in daemon state (daemon may not be running)",
+            ));
+        }
+    }
+}
+
+fn check_orchestrator_bridge(items: &mut Vec<DiagItem>) {
+    let cat = "orchestrator";
+
+    // Quick synchronous check: try connecting to the synth API port
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 4001));
+    match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)) {
+        Ok(_) => {
+            items.push(DiagItem::ok(
+                cat,
+                "BTW bridge reachable (synth API port 4001)",
+            ));
+        }
+        Err(_) => {
+            items.push(DiagItem::warn(
+                cat,
+                "BTW bridge unreachable (synth API port 4001 not responding) — orchestrator may not be running",
+            ));
+        }
+    }
+
+    let addr_plugin = std::net::SocketAddr::from(([127, 0, 0, 1], 4002));
+    match std::net::TcpStream::connect_timeout(&addr_plugin, std::time::Duration::from_secs(2)) {
+        Ok(_) => {
+            items.push(DiagItem::ok(cat, "plugin API reachable (port 4002)"));
+        }
+        Err(_) => {
+            items.push(DiagItem::warn(
+                cat,
+                "plugin API unreachable (port 4002 not responding)",
             ));
         }
     }

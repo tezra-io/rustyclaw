@@ -1,14 +1,21 @@
+pub mod elixir;
+
 use crate::config::Config;
 use anyhow::Result;
 use chrono::Utc;
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 
 const STATUS_FLUSH_SECONDS: u64 = 5;
+const ELIXIR_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(15);
+const ELIXIR_RESTART_BACKOFF: Duration = Duration::from_secs(10);
+const ELIXIR_MAX_RESTART_BACKOFF: Duration = Duration::from_secs(120);
 
-pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
+pub async fn run(config: Config, host: String, port: u16, enable_elixir: bool) -> Result<()> {
     let initial_backoff = config.reliability.channel_initial_backoff_secs.max(1);
     let max_backoff = config
         .reliability
@@ -87,13 +94,68 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         tracing::info!("Cron disabled; scheduler supervisor not started");
     }
 
-    println!("🧠 RustyClaw daemon started");
-    println!("   Gateway:  http://{host}:{port}");
-    println!("   Components: gateway, channels, heartbeat, scheduler");
-    println!("   Ctrl+C to stop");
+    // Elixir orchestrator subprocess
+    let orchestrator = Arc::new(Mutex::new(elixir::ElixirOrchestrator::new(port)));
+    if enable_elixir {
+        handles.push(spawn_elixir_supervisor(orchestrator.clone()));
+    } else {
+        // Don't mark elixir as "ok" when disabled — it's not running.
+        // Just log the status and set the disabled flag on the orchestrator.
+        tracing::info!("Elixir orchestrator disabled (--no-elixir); running in degraded mode");
+        orchestrator.lock().await.set_disabled();
+    }
+
+    let elixir_status = if enable_elixir {
+        "enabled"
+    } else {
+        "disabled (--no-elixir)"
+    };
+
+    println!();
+    println!("  ┌──────────────────────────────────────────────────┐");
+    println!(
+        "  │          🧠 RustyClaw Daemon — v{}{}│",
+        env!("CARGO_PKG_VERSION"),
+        " ".repeat(24_usize.saturating_sub(env!("CARGO_PKG_VERSION").len()))
+    );
+    println!("  ├──────────────────────────────────────────────────┤");
+    println!("  │  Services                                       │");
+    println!(
+        "  │    Rust Core:    ✅ running (PID {:<16})│",
+        std::process::id()
+    );
+    println!("  │    Gateway:      http://{host}:{port:<24}│");
+    println!("  │    Elixir OTP:   {:<31}│", elixir_status);
+    println!(
+        "  │    BTW Bridge:   {:<31}│",
+        if enable_elixir {
+            "localhost:4001-4002"
+        } else {
+            "n/a (elixir disabled)"
+        }
+    );
+    println!("  ├──────────────────────────────────────────────────┤");
+    println!("  │  Components                                     │");
+    print_component_line("Gateway", true);
+    print_component_line("Channels", has_supervised_channels(&config));
+    print_component_line("Heartbeat", config.heartbeat.enabled);
+    print_component_line("Scheduler", config.cron.enabled);
+    print_component_line("Elixir", enable_elixir);
+    println!("  ├──────────────────────────────────────────────────┤");
+    println!("  │  Ctrl+C to stop                                 │");
+    println!("  └──────────────────────────────────────────────────┘");
+    println!();
 
     tokio::signal::ctrl_c().await?;
+    println!();
+    println!("  Shutting down...");
     crate::health::mark_component_error("daemon", "shutdown requested");
+
+    // Stop Elixir orchestrator gracefully first
+    {
+        let mut orch = orchestrator.lock().await;
+        orch.stop().await;
+    }
 
     for handle in &handles {
         handle.abort();
@@ -316,6 +378,86 @@ fn validate_heartbeat_channel_config(config: &Config, channel: &str) -> Result<(
     }
 
     Ok(())
+}
+
+fn print_component_line(name: &str, active: bool) {
+    let status = if active { "✅ active" } else { "⬚ inactive" };
+    println!("  │    {:<14}{:<32}│", name, status);
+}
+
+fn spawn_elixir_supervisor(orchestrator: Arc<Mutex<elixir::ElixirOrchestrator>>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut backoff = ELIXIR_RESTART_BACKOFF;
+
+        loop {
+            let started_at;
+            {
+                let mut orch = orchestrator.lock().await;
+                match orch.start().await {
+                    Ok(instant) => {
+                        crate::health::mark_component_ok("elixir");
+                        tracing::info!("Elixir orchestrator started");
+                        backoff = ELIXIR_RESTART_BACKOFF;
+                        started_at = instant;
+                    }
+                    Err(e) => {
+                        let msg = format!("Elixir orchestrator failed to start: {e}");
+                        crate::health::mark_component_error("elixir", &msg);
+                        tracing::warn!("{msg}");
+                        tracing::warn!(
+                            "Daemon running in degraded mode (no orchestrator). \
+                             Will retry in {}s",
+                            backoff.as_secs()
+                        );
+                        drop(orch);
+                        tokio::time::sleep(backoff).await;
+                        backoff = backoff.saturating_mul(2).min(ELIXIR_MAX_RESTART_BACKOFF);
+                        continue;
+                    }
+                }
+            }
+
+            // Health-check loop while running.
+            // Skip health-check failures during ELIXIR_STARTUP_GRACE period
+            // after start to allow the orchestrator time to initialize.
+            let startup_grace = elixir::startup_grace_duration();
+            let mut health_interval = tokio::time::interval(ELIXIR_HEALTH_CHECK_INTERVAL);
+            loop {
+                health_interval.tick().await;
+                let mut orch = orchestrator.lock().await;
+                if !orch.is_alive() {
+                    crate::health::mark_component_error(
+                        "elixir",
+                        "orchestrator process exited unexpectedly",
+                    );
+                    crate::health::bump_component_restart("elixir");
+                    tracing::warn!(
+                        "Elixir orchestrator exited unexpectedly; restarting in {}s",
+                        backoff.as_secs()
+                    );
+                    break;
+                }
+                if orch.health_check().await {
+                    crate::health::mark_component_ok("elixir");
+                } else {
+                    let within_grace = started_at.elapsed() < startup_grace;
+                    if within_grace {
+                        tracing::debug!(
+                            "Elixir health check failed during startup grace period; ignoring"
+                        );
+                    } else {
+                        crate::health::mark_component_error(
+                            "elixir",
+                            "orchestrator health check failed",
+                        );
+                    }
+                }
+            }
+
+            tokio::time::sleep(backoff).await;
+            backoff = backoff.saturating_mul(2).min(ELIXIR_MAX_RESTART_BACKOFF);
+        }
+    })
 }
 
 fn has_supervised_channels(config: &Config) -> bool {

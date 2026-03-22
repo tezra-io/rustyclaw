@@ -221,14 +221,19 @@ Examples:
         host: Option<String>,
     },
 
-    /// Start long-running autonomous runtime (gateway + channels + heartbeat + scheduler)
+    /// Start long-running autonomous runtime (gateway + channels + heartbeat + scheduler + Elixir orchestrator)
     #[command(long_about = "\
 Start the long-running autonomous daemon.
 
 Launches the full RustyClaw runtime: gateway server, all configured \
-channels (Telegram, Discord, Slack, etc.), heartbeat monitor, and \
-the cron scheduler. This is the recommended way to run RustyClaw in \
-production or as an always-on assistant.
+channels (Telegram, Discord, Slack, etc.), heartbeat monitor, cron \
+scheduler, and the Elixir/OTP orchestration layer (multi-agent \
+lifecycle, plugins, tool synthesis). This is the recommended way to \
+run RustyClaw in production or as an always-on assistant.
+
+If Elixir is not installed or the orchestrator fails to start, the \
+daemon runs in degraded mode (single-agent only) with a warning. \
+Use --no-elixir to explicitly skip the orchestrator.
 
 Use 'rustyclaw service install' to register the daemon as an OS \
 service (systemd/launchd) for auto-start on boot.
@@ -236,7 +241,8 @@ service (systemd/launchd) for auto-start on boot.
 Examples:
   rustyclaw daemon                   # use config defaults
   rustyclaw daemon -p 9090           # gateway on port 9090
-  rustyclaw daemon --host 127.0.0.1  # localhost only")]
+  rustyclaw daemon --host 127.0.0.1  # localhost only
+  rustyclaw daemon --no-elixir       # skip Elixir orchestrator")]
     Daemon {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -245,6 +251,10 @@ Examples:
         /// Host to bind to; defaults to config gateway.host
         #[arg(long)]
         host: Option<String>,
+
+        /// Skip starting the Elixir orchestrator (degraded mode)
+        #[arg(long)]
+        no_elixir: bool,
     },
 
     /// Manage OS service lifecycle (launchd/systemd user service)
@@ -859,7 +869,11 @@ async fn main() -> Result<()> {
             gateway::run_gateway(&host, port, config).await
         }
 
-        Commands::Daemon { port, host } => {
+        Commands::Daemon {
+            port,
+            host,
+            no_elixir,
+        } => {
             let port = port.unwrap_or(config.gateway.port);
             let host = host.unwrap_or_else(|| config.gateway.host.clone());
             if port == 0 {
@@ -867,7 +881,7 @@ async fn main() -> Result<()> {
             } else {
                 info!("🧠 Starting RustyClaw Daemon on {host}:{port}");
             }
-            daemon::run(config, host, port).await
+            daemon::run(config, host, port, !no_elixir).await
         }
 
         Commands::Status => {
@@ -960,6 +974,55 @@ async fn main() -> Result<()> {
                 }
             );
             println!("  Boards:    {}", config.peripherals.boards.len());
+
+            // Elixir orchestrator status
+            println!();
+            println!("Orchestrator:");
+            match daemon::elixir::ElixirOrchestrator::check_elixir_installed() {
+                Ok(version) => println!("  Elixir:    ✅ v{version}"),
+                Err(_) => println!("  Elixir:    ❌ not installed"),
+            }
+            match daemon::elixir::ElixirOrchestrator::check_otp_version() {
+                Ok(otp) => println!("  OTP:       ✅ v{otp}"),
+                Err(_) => println!("  OTP:       ❌ unknown"),
+            }
+
+            // Check daemon health snapshot for elixir component
+            let health = crate::health::snapshot_json();
+            let elixir_status = health
+                .get("components")
+                .and_then(|c| c.get("elixir"))
+                .and_then(|e| e.get("status"))
+                .and_then(serde_json::Value::as_str);
+            match elixir_status {
+                Some("ok") => println!("  Process:   ✅ running"),
+                Some("error") => {
+                    let error = health
+                        .get("components")
+                        .and_then(|c| c.get("elixir"))
+                        .and_then(|e| e.get("last_error"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown");
+                    println!("  Process:   ❌ {error}");
+                }
+                _ => println!("  Process:   ⚠️  not tracked (daemon may not be running)"),
+            }
+
+            // BTW bridge connectivity (intentionally blocking — one-shot CLI command)
+            let synth_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 4001));
+            let bridge_ok = std::net::TcpStream::connect_timeout(
+                &synth_addr,
+                std::time::Duration::from_secs(1),
+            )
+            .is_ok();
+            println!(
+                "  BTW bridge: {}",
+                if bridge_ok {
+                    "✅ reachable"
+                } else {
+                    "❌ unreachable"
+                }
+            );
 
             Ok(())
         }

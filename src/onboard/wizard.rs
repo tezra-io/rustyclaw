@@ -597,6 +597,9 @@ async fn run_quick_setup_with_home(
         style("✓").green().bold(),
         style("disabled (sovereign mode)").dim()
     );
+    // Elixir orchestrator setup (best-effort)
+    setup_elixir_orchestrator().await;
+
     println!();
     println!(
         "  {} {}",
@@ -640,6 +643,148 @@ async fn run_quick_setup_with_home(
     println!();
 
     Ok(config)
+}
+
+/// Best-effort Elixir orchestrator setup during onboarding.
+/// Checks for Elixir, compiles the orchestrator, and reports status.
+/// Non-fatal: if anything fails, print a warning and continue.
+async fn setup_elixir_orchestrator() {
+    // Check Elixir installation (blocking shell command — run off async runtime)
+    let elixir_check = tokio::task::spawn_blocking(
+        crate::daemon::elixir::ElixirOrchestrator::check_elixir_installed,
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok());
+    match elixir_check {
+        Some(version) => {
+            println!(
+                "  {} Elixir:     {} (multi-agent support available)",
+                style("✓").green().bold(),
+                style(format!("v{version}")).green()
+            );
+        }
+        None => {
+            println!(
+                "  {} Elixir:     {} (install Elixir >= 1.17 for multi-agent orchestration)",
+                style("⚠").yellow().bold(),
+                style("not installed").yellow()
+            );
+            return;
+        }
+    }
+
+    // Check OTP (blocking shell command — run off async runtime)
+    let otp_result =
+        tokio::task::spawn_blocking(crate::daemon::elixir::ElixirOrchestrator::check_otp_version)
+            .await
+            .ok()
+            .and_then(|r| r.ok());
+    if let Some(otp) = otp_result {
+        println!(
+            "  {} OTP:        {}",
+            style("✓").green().bold(),
+            style(format!("v{otp}")).green()
+        );
+    }
+
+    // Locate and compile orchestrator
+    let orch = crate::daemon::elixir::ElixirOrchestrator::new(0);
+    let project_dir = orch.project_dir().to_path_buf();
+    if !project_dir.join("mix.exs").exists() {
+        println!(
+            "  {} Orchestrator: {}",
+            style("⚠").yellow().bold(),
+            style("project not found (expected at elixir/rustyclaw_orchestrator/)").yellow()
+        );
+        return;
+    }
+
+    // Run mix deps.get + compile if needed (via spawn_blocking to avoid blocking async runtime)
+    if !project_dir.join("_build").exists() {
+        println!(
+            "  {} Orchestrator: compiling Elixir dependencies...",
+            style("…").cyan().bold()
+        );
+
+        let pd = project_dir.clone();
+        let deps_ok = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("mix")
+                .arg("deps.get")
+                .current_dir(&pd)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+        .await
+        .unwrap_or(false);
+
+        if !deps_ok {
+            println!(
+                "  {} Orchestrator: {}",
+                style("⚠").yellow().bold(),
+                style("mix deps.get failed — run manually").yellow()
+            );
+            return;
+        }
+
+        let pd = project_dir.clone();
+        let compile_ok = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("mix")
+                .arg("compile")
+                .current_dir(&pd)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+        .await
+        .unwrap_or(false);
+
+        if !compile_ok {
+            println!(
+                "  {} Orchestrator: {}",
+                style("⚠").yellow().bold(),
+                style("mix compile failed — run manually").yellow()
+            );
+            return;
+        }
+    }
+
+    println!(
+        "  {} Orchestrator: {}",
+        style("✓").green().bold(),
+        style("compiled and ready").green()
+    );
+
+    // Setup default agent definitions directory
+    let agents_dir = directories::UserDirs::new()
+        .map(|u| u.home_dir().join(".rustyclaw").join("agents"))
+        .unwrap_or_default();
+
+    if !agents_dir.exists() {
+        if let Err(e) = fs::create_dir_all(&agents_dir).await {
+            tracing::debug!("Could not create agents dir: {e}");
+        } else {
+            // Write example agent definition
+            let example_agent = r#"---
+name: assistant
+model: anthropic/claude-sonnet-4-5
+capabilities:
+  - general
+  - coding
+persistent: false
+---
+
+A general-purpose assistant agent for RustyClaw.
+"#;
+            let example_path = agents_dir.join("assistant.md");
+            if !example_path.exists() {
+                let _ = fs::write(&example_path, example_agent).await;
+            }
+        }
+    }
 }
 
 fn canonical_provider_name(provider_name: &str) -> &str {
