@@ -5632,6 +5632,54 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
         println!("  {}", style(format!("  {prefix} {filename}")).dim());
     }
 
+    // ── Install embedded self-knowledge skill ────────────────────
+    install_embedded_self_skill(workspace_dir).await?;
+
+    Ok(())
+}
+
+/// Embedded self-knowledge skill content (compiled into the binary).
+const SELF_SKILL_CONTENT: &str = include_str!("../../skills/rustyclaw-self/SKILL.md");
+
+/// Version tag extracted from the embedded skill content (first `**Version:**` line).
+fn embedded_self_skill_version() -> &'static str {
+    // The SKILL.md contains `**Version:** X.Y.Z` near the top.
+    // Extract it at runtime from the embedded string.
+    for line in SELF_SKILL_CONTENT.lines() {
+        if let Some(rest) = line.strip_prefix("**Version:**") {
+            return rest.trim();
+        }
+    }
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Install or update the embedded rustyclaw-self skill into the workspace.
+/// Writes on first install or when the embedded version differs from the installed one.
+async fn install_embedded_self_skill(workspace_dir: &Path) -> Result<()> {
+    let skill_dir = workspace_dir.join("skills/rustyclaw-self");
+    let skill_path = skill_dir.join("SKILL.md");
+
+    let should_write = if skill_path.exists() {
+        // Check if installed version differs from embedded version
+        match fs::read_to_string(&skill_path).await {
+            Ok(existing) => {
+                let installed_version = existing
+                    .lines()
+                    .find_map(|line| line.strip_prefix("**Version:**").map(|v| v.trim()))
+                    .unwrap_or("0.0.0");
+                installed_version != embedded_self_skill_version()
+            }
+            Err(_) => true,
+        }
+    } else {
+        true
+    };
+
+    if should_write {
+        fs::create_dir_all(&skill_dir).await?;
+        fs::write(&skill_path, SELF_SKILL_CONTENT).await?;
+    }
+
     Ok(())
 }
 
