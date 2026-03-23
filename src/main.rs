@@ -162,6 +162,12 @@ enum Commands {
         /// Memory backend (sqlite, lucid, markdown, none) - used in quick mode, default: sqlite
         #[arg(long)]
         memory: Option<String>,
+        /// Run end-to-end verification after setup (default: true, use --no-verify to disable)
+        #[arg(long, default_value_t = true, overrides_with = "_no_verify")]
+        verify: bool,
+        /// Disable end-to-end verification after setup
+        #[arg(long = "no-verify", id = "_no_verify", hide = true)]
+        no_verify: bool,
     },
 
     /// Start the AI agent loop
@@ -777,6 +783,8 @@ async fn main() -> Result<()> {
         provider,
         model,
         memory,
+        verify,
+        no_verify,
     } = &cli.command
     {
         let interactive = *interactive;
@@ -786,6 +794,7 @@ async fn main() -> Result<()> {
         let provider = provider.clone();
         let model = model.clone();
         let memory = memory.clone();
+        let do_verify = *verify && !*no_verify;
 
         if interactive && channels_only {
             bail!("Use either --interactive or --channels-only, not both");
@@ -803,12 +812,13 @@ async fn main() -> Result<()> {
         } else if interactive {
             Box::pin(onboard::run_wizard(force)).await
         } else {
-            onboard::run_quick_setup(
+            onboard::run_quick_setup_ext(
                 api_key.as_deref(),
                 provider.as_deref(),
                 model.as_deref(),
                 memory.as_deref(),
                 force,
+                do_verify,
             )
             .await
         }?;

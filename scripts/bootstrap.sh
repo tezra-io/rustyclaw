@@ -473,6 +473,7 @@ install_rust_toolchain() {
 
 run_guided_installer() {
   local os_name="$1"
+  local advanced_mode=false
   local provider_input=""
   local model_input=""
   local api_key_input=""
@@ -488,16 +489,14 @@ run_guided_installer() {
   echo "Answer a few questions, then the installer will run automatically."
   echo
 
+  # ── System dependencies (Linux only) ────────────────────────
   if [[ "$os_name" == "Linux" ]]; then
     if prompt_yes_no "Install Linux build dependencies (toolchain/pkg-config/git/curl)?" "yes"; then
       INSTALL_SYSTEM_DEPS=true
     fi
-  else
-    if prompt_yes_no "Install system dependencies for $os_name?" "no"; then
-      INSTALL_SYSTEM_DEPS=true
-    fi
   fi
 
+  # ── Rust toolchain ──────────────────────────────────────────
   if have_cmd cargo && have_cmd rustc; then
     info "Detected Rust toolchain: $(rustc --version)"
   else
@@ -506,18 +505,35 @@ run_guided_installer() {
     fi
   fi
 
-  if prompt_yes_no "Run a separate prebuild before install?" "yes"; then
+  # ── Build and install (single question for non-advanced users) ─
+  if prompt_yes_no "Build and install ZeroClaw?" "yes"; then
     SKIP_BUILD=false
-  else
-    SKIP_BUILD=true
-  fi
-
-  if prompt_yes_no "Install zeroclaw into cargo bin now?" "yes"; then
     SKIP_INSTALL=false
   else
+    SKIP_BUILD=true
     SKIP_INSTALL=true
   fi
 
+  # ── Advanced build options (hidden behind a prompt) ──────────
+  if [[ "$SKIP_BUILD" == false ]] || [[ "$SKIP_INSTALL" == false ]]; then
+    if prompt_yes_no "Show advanced build options?" "no"; then
+      advanced_mode=true
+
+      if prompt_yes_no "Run a separate prebuild step before install (cargo build --release)?" "yes"; then
+        SKIP_BUILD=false
+      else
+        SKIP_BUILD=true
+      fi
+
+      if prompt_yes_no "Install zeroclaw into cargo bin?" "yes"; then
+        SKIP_INSTALL=false
+      else
+        SKIP_INSTALL=true
+      fi
+    fi
+  fi
+
+  # ── Onboarding ───────────────────────────────────────────────
   if prompt_yes_no "Run onboarding after install?" "no"; then
     RUN_ONBOARD=true
     if prompt_yes_no "Use interactive onboarding?" "yes"; then
@@ -572,6 +588,9 @@ run_guided_installer() {
   echo "    install-rust: $(bool_to_word "$INSTALL_RUST")"
   echo "    build-first: $(bool_to_word "$build_first")"
   echo "    install-binary: $(bool_to_word "$install_binary")"
+  if [[ "$advanced_mode" == true ]]; then
+    echo "    (advanced build options shown)"
+  fi
   echo "    onboard: $(bool_to_word "$RUN_ONBOARD")"
   if [[ "$RUN_ONBOARD" == true ]]; then
     echo "    interactive-onboard: $(bool_to_word "$INTERACTIVE_ONBOARD")"
