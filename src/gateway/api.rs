@@ -568,7 +568,10 @@ pub struct ChannelSendBody {
     pub text: String,
     pub channel: String,
     pub chat_id: Option<String>,
-    pub reply_to_message_id: Option<serde_json::Value>,
+    /// Original message ID to quote-reply to. Serialized as `reply_to_message_id`
+    /// in the JSON body for compatibility with Elixir BtwServer.
+    #[serde(rename = "reply_to_message_id")]
+    pub quote_message_id: Option<serde_json::Value>,
     pub btw: Option<bool>,
 }
 
@@ -591,7 +594,15 @@ pub async fn handle_api_channel_send(
             .into_response();
     }
 
-    let message = crate::channels::SendMessage::new(&body.text, &recipient);
+    // Extract quote_reply_id from the JSON value (supports both string and integer)
+    let quote_id = body.quote_message_id.as_ref().and_then(|v| match v {
+        serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    });
+
+    let message =
+        crate::channels::SendMessage::new(&body.text, &recipient).with_quote_reply(quote_id);
 
     // Route to the appropriate channel (using shared instances from AppState)
     let result = match body.channel.as_str() {

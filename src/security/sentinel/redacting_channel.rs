@@ -63,6 +63,7 @@ impl<C: Channel> RedactingChannel<C> {
             recipient: message.recipient.clone(),
             subject: redacted_subject,
             thread_ts: message.thread_ts.clone(),
+            quote_reply_id: message.quote_reply_id.clone(),
         }
     }
 }

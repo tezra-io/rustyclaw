@@ -22,6 +22,8 @@ pub struct SendMessage {
     pub subject: Option<String>,
     /// Platform thread identifier for threaded replies (e.g. Slack `thread_ts`).
     pub thread_ts: Option<String>,
+    /// Original message ID to quote-reply to (e.g. Telegram `reply_parameters`).
+    pub quote_reply_id: Option<String>,
 }
 
 impl SendMessage {
@@ -32,6 +34,7 @@ impl SendMessage {
             recipient: recipient.into(),
             subject: None,
             thread_ts: None,
+            quote_reply_id: None,
         }
     }
 
@@ -46,12 +49,19 @@ impl SendMessage {
             recipient: recipient.into(),
             subject: Some(subject.into()),
             thread_ts: None,
+            quote_reply_id: None,
         }
     }
 
     /// Set the thread identifier for threaded replies.
     pub fn in_thread(mut self, thread_ts: Option<String>) -> Self {
         self.thread_ts = thread_ts;
+        self
+    }
+
+    /// Set the message ID to quote-reply to (e.g. Telegram `reply_parameters`).
+    pub fn with_quote_reply(mut self, message_id: Option<String>) -> Self {
+        self.quote_reply_id = message_id;
         self
     }
 }

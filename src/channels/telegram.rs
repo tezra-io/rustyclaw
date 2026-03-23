@@ -1517,6 +1517,7 @@ Allowlist Telegram username (without '@') or numeric user ID.",
         message: &str,
         chat_id: &str,
         thread_id: Option<&str>,
+        reply_to_message_id: Option<&str>,
     ) -> anyhow::Result<()> {
         let chunks = split_message_for_telegram(message);
 
@@ -1542,6 +1543,15 @@ Allowlist Telegram username (without '@') or numeric user ID.",
             // Add message_thread_id for forum topic support
             if let Some(tid) = thread_id {
                 markdown_body["message_thread_id"] = serde_json::Value::String(tid.to_string());
+            }
+
+            // Quote-reply on the first chunk only (Telegram reply_parameters)
+            if index == 0 {
+                if let Some(reply_id) = reply_to_message_id {
+                    if let Ok(id) = reply_id.parse::<i64>() {
+                        markdown_body["reply_parameters"] = serde_json::json!({"message_id": id});
+                    }
+                }
             }
 
             let markdown_resp = self
@@ -1574,6 +1584,16 @@ Allowlist Telegram username (without '@') or numeric user ID.",
             if let Some(tid) = thread_id {
                 plain_body["message_thread_id"] = serde_json::Value::String(tid.to_string());
             }
+
+            // Quote-reply on the first chunk only (plain fallback)
+            if index == 0 {
+                if let Some(reply_id) = reply_to_message_id {
+                    if let Ok(id) = reply_id.parse::<i64>() {
+                        plain_body["reply_parameters"] = serde_json::json!({"message_id": id});
+                    }
+                }
+            }
+
             let plain_resp = self
                 .http_client()
                 .post(self.api_url("sendMessage"))
@@ -1688,7 +1708,7 @@ Allowlist Telegram username (without '@') or numeric user ID.",
                     TelegramAttachmentKind::Voice => "Voice",
                 };
                 let fallback_text = format!("{kind_label}: {target}");
-                self.send_text_chunks(&fallback_text, chat_id, thread_id)
+                self.send_text_chunks(&fallback_text, chat_id, thread_id, None)
                     .await?;
             }
 
@@ -2301,7 +2321,7 @@ impl Channel for TelegramChannel {
 
             // Send text without markers
             if !text_without_markers.is_empty() {
-                self.send_text_chunks(&text_without_markers, &chat_id, thread_id.as_deref())
+                self.send_text_chunks(&text_without_markers, &chat_id, thread_id.as_deref(), None)
                     .await?;
             }
 
@@ -2330,13 +2350,13 @@ impl Channel for TelegramChannel {
 
             // Fall back to chunked send
             return self
-                .send_text_chunks(text, &chat_id, thread_id.as_deref())
+                .send_text_chunks(text, &chat_id, thread_id.as_deref(), None)
                 .await;
         }
 
         let Some(id) = msg_id else {
             return self
-                .send_text_chunks(text, &chat_id, thread_id.as_deref())
+                .send_text_chunks(text, &chat_id, thread_id.as_deref(), None)
                 .await;
         };
 
@@ -2379,7 +2399,7 @@ impl Channel for TelegramChannel {
 
         // Edit failed entirely — fall back to new message
         tracing::warn!("Telegram finalize_draft edit failed; falling back to sendMessage");
-        self.send_text_chunks(text, &chat_id, thread_id.as_deref())
+        self.send_text_chunks(text, &chat_id, thread_id.as_deref(), None)
             .await
     }
 
@@ -2424,11 +2444,13 @@ impl Channel for TelegramChannel {
             None => (message.recipient.as_str(), None),
         };
 
+        let reply_to = message.quote_reply_id.as_deref();
+
         let (text_without_markers, attachments) = parse_attachment_markers(&content);
 
         if !attachments.is_empty() {
             if !text_without_markers.is_empty() {
-                self.send_text_chunks(&text_without_markers, chat_id, thread_id)
+                self.send_text_chunks(&text_without_markers, chat_id, thread_id, reply_to)
                     .await?;
             }
 
@@ -2445,7 +2467,8 @@ impl Channel for TelegramChannel {
             return Ok(());
         }
 
-        self.send_text_chunks(&content, chat_id, thread_id).await
+        self.send_text_chunks(&content, chat_id, thread_id, reply_to)
+            .await
     }
 
     async fn listen(&self, tx: tokio::sync::mpsc::Sender<ChannelMessage>) -> anyhow::Result<()> {
