@@ -133,6 +133,18 @@ pub struct ProjectContext {
     pub communication_style: String,
 }
 
+/// Optional runtime environment info for enriching scaffold templates.
+/// When provided, TOOLS.md and AGENTS.md include auto-populated environment details.
+#[derive(Debug, Clone, Default)]
+pub struct ScaffoldEnv {
+    pub provider: String,
+    pub model: String,
+    pub gateway_port: u16,
+    pub config_path: String,
+    pub workspace_path: String,
+    pub active_channels: Vec<String>,
+}
+
 // ── Banner ───────────────────────────────────────────────────────
 
 const BANNER: &str = r"
@@ -215,7 +227,20 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
     let project_ctx = setup_project_context()?;
 
     print_step(9, 10, "Workspace Files");
-    scaffold_workspace(&workspace_dir, &project_ctx).await?;
+    let scaffold_env = ScaffoldEnv {
+        provider: provider.clone(),
+        model: model.clone(),
+        gateway_port: crate::config::schema::GatewayConfig::default().port,
+        config_path: config_path.display().to_string(),
+        workspace_path: workspace_dir.display().to_string(),
+        active_channels: {
+            let ch = channels_config.channels();
+            ch.iter()
+                .filter_map(|(channel, ok)| ok.then_some(channel.name().to_string()))
+                .collect()
+        },
+    };
+    scaffold_workspace_with_env(&workspace_dir, &project_ctx, Some(&scaffold_env)).await?;
 
     // ── Build config ──
     // Defaults: SQLite memory, supervised autonomy, workspace-scoped, native runtime
@@ -723,7 +748,26 @@ async fn run_quick_setup_with_home(
             "Be warm, natural, and clear. Use occasional relevant emojis (1-2 max) and avoid robotic phrasing."
                 .into(),
     };
-    scaffold_workspace(&workspace_dir, &default_ctx).await?;
+    let quick_env = ScaffoldEnv {
+        provider: config
+            .default_provider
+            .clone()
+            .unwrap_or_else(|| "openrouter".into()),
+        model: config
+            .default_model
+            .clone()
+            .unwrap_or_else(|| "default".into()),
+        gateway_port: config.gateway.port,
+        config_path: config.config_path.display().to_string(),
+        workspace_path: config.workspace_dir.display().to_string(),
+        active_channels: {
+            let ch = config.channels_config.channels();
+            ch.iter()
+                .filter_map(|(channel, ok)| ok.then_some(channel.name().to_string()))
+                .collect()
+        },
+    };
+    scaffold_workspace_with_env(&workspace_dir, &default_ctx, Some(&quick_env)).await?;
 
     println!(
         "  {} Workspace:  {}",
@@ -5679,8 +5723,34 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
 
 // ── Step 9: Scaffold workspace files ─────────────────────────────
 
+/// Detect OS-appropriate service management commands for TOOLS.md.
+fn detect_service_commands() -> (&'static str, &'static str, &'static str) {
+    if cfg!(target_os = "macos") {
+        (
+            "launchctl start com.rustyclaw.daemon",
+            "launchctl stop com.rustyclaw.daemon",
+            "launchctl list | grep rustyclaw",
+        )
+    } else {
+        (
+            "sudo systemctl start rustyclaw",
+            "sudo systemctl stop rustyclaw",
+            "sudo systemctl status rustyclaw",
+        )
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Result<()> {
+    scaffold_workspace_with_env(workspace_dir, ctx, None).await
+}
+
+#[allow(clippy::too_many_lines)]
+async fn scaffold_workspace_with_env(
+    workspace_dir: &Path,
+    ctx: &ProjectContext,
+    env: Option<&ScaffoldEnv>,
+) -> Result<()> {
     let agent = if ctx.agent_name.is_empty() {
         "RustyClaw"
     } else {
@@ -5702,16 +5772,34 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
         &ctx.communication_style
     };
 
+    // ── IDENTITY.md — architecture-aware ──
     let identity = format!(
         "# IDENTITY.md — Who Am I?\n\n\
          - **Name:** {agent}\n\
-         - **Creature:** A Rust-forged AI — fast, lean, and relentless\n\
+         - **Creature:** A Rust-forged AI runtime — fast, lean, and relentless\n\
          - **Vibe:** Sharp, direct, resourceful. Not corporate. Not a chatbot.\n\
          - **Emoji:** \u{1f980}\n\n\
+         ---\n\n\
+         ## Architecture\n\n\
+         {agent} is a **two-layer system**:\n\n\
+         - **Rust core** — high-performance binary handling channels, tools, providers,\n\
+           security, memory, gateway, cron, peripherals, and observability.\n\
+         - **Elixir/OTP orchestrator** — manages agent lifecycle, supervision,\n\
+           inter-agent messaging, and capability-based routing via BEAM primitives.\n\n\
+         ### Capabilities at a Glance\n\n\
+         | Category | Count |\n\
+         |----------|-------|\n\
+         | Messaging Channels | 19 (Telegram, Discord, Signal, Slack, iMessage, Matrix, ...) |\n\
+         | LLM Providers | 15+ (Anthropic, OpenAI, Gemini, Ollama, Bedrock, ...) |\n\
+         | Built-in Tools | 37 (shell, file I/O, web, memory, browser, cron, hardware) |\n\
+         | Multi-agent | Elixir OTP supervision, delegation, capability routing |\n\
+         | Hardware | GPIO, serial, SWD/JTAG probe, datasheet RAG |\n\n\
+         For deep self-knowledge, check the `rustyclaw-self` skill in `skills/rustyclaw-self/SKILL.md`.\n\n\
          ---\n\n\
          Update this file as you evolve. Your identity is yours to shape.\n"
     );
 
+    // ── AGENTS.md — operational instructions ──
     let agents = format!(
         "# AGENTS.md — {agent} Personal Assistant\n\n\
          ## Every Session (required)\n\n\
@@ -5721,6 +5809,47 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          3. Use `memory_recall` for recent context (daily notes are on-demand)\n\
          4. If in MAIN SESSION (direct chat): `MEMORY.md` is already injected\n\n\
          Don't ask permission. Just do it.\n\n\
+         ## Tool Usage\n\n\
+         ### Running Commands\n\
+         Use the `shell` tool for running terminal commands. Examples:\n\
+         - `shell(\"git status\")` — check repo state\n\
+         - `shell(\"cargo test\")` — run tests\n\
+         - `shell(\"curl -s http://localhost:42617/health\")` — check gateway health\n\n\
+         ### Spawning Coding Agents\n\
+         Use the `delegate` tool to spawn sub-agents for complex tasks, or via CLI:\n\
+         ```\n\
+         rustyclaw agent -m \"implement feature X\" --model claude-sonnet-4-6\n\
+         ```\n\n\
+         ### Creating Sub-Agent Definitions\n\
+         Define reusable agents in `~/.rustyclaw/agents/*.md` with YAML frontmatter:\n\
+         ```yaml\n\
+         ---\n\
+         name: code-reviewer\n\
+         model: claude-sonnet-4-6\n\
+         capabilities: [file_read, shell]\n\
+         ---\n\
+         You are a code reviewer. Analyze diffs and suggest improvements.\n\
+         ```\n\n\
+         ### Managing Configuration\n\
+         - Read config: `file_read` on `~/.rustyclaw/config.toml`\n\
+         - Edit config: `file_edit` on `~/.rustyclaw/config.toml`\n\
+         - Changes take effect after daemon restart\n\n\
+         ### Health Checks & Monitoring\n\
+         - Gateway health: `curl http://localhost:42617/health`\n\
+         - Check logs: `file_read` on log files in `~/.rustyclaw/logs/`\n\
+         - Daemon status: `rustyclaw status`\n\n\
+         ### Scheduling & Cron\n\
+         - Use the `cron` tool to schedule periodic tasks\n\
+         - One-shot reminders: `rustyclaw cron add --once \"2025-01-01T09:00:00\" -m \"Happy New Year!\"`\n\
+         - Interval tasks: configure in `config.toml` under `[cron]`\n\n\
+         ### Web & Search Tools\n\
+         - `web_fetch` — fetch and extract content from URLs\n\
+         - `web_search` — search the web via configured search backend\n\
+         - `browser` — full browser automation for complex web tasks\n\n\
+         ### Memory Tools\n\
+         - `memory_store` — persist important information\n\
+         - `memory_recall` — search stored memories\n\
+         - `memory_forget` — remove outdated entries\n\n\
          ## Memory System\n\n\
          You wake up fresh each session. These files ARE your continuity:\n\n\
          - **Daily notes:** `memory/YYYY-MM-DD.md` — raw logs (accessed via memory tools)\n\
@@ -5732,6 +5861,12 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          - \"Mental notes\" don't survive session restarts. Files do.\n\
          - When someone says \"remember this\" -> update daily file or MEMORY.md\n\
          - When you learn a lesson -> update AGENTS.md, TOOLS.md, or the relevant skill\n\n\
+         ## Error Recovery\n\n\
+         1. Check health: `curl http://localhost:42617/health`\n\
+         2. Check logs: `file_read` on `~/.rustyclaw/logs/rustyclaw.log`\n\
+         3. Restart daemon: `rustyclaw daemon restart`\n\
+         4. If persistent: check `~/.rustyclaw/daemon_state.json` for component status\n\
+         5. Nuclear option: `rustyclaw daemon stop && rustyclaw daemon start`\n\n\
          ## Safety\n\n\
          - Don't exfiltrate private data. Ever.\n\
          - Don't run destructive commands without asking.\n\
@@ -5743,8 +5878,10 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          ## Group Chats\n\n\
          Participate, don't dominate. Respond when mentioned or when you add genuine value.\n\
          Stay silent when it's casual banter or someone already answered.\n\n\
-         ## Tools & Skills\n\n\
-         Skills are listed in the system prompt. Use `read` on a skill's SKILL.md for details.\n\
+         ## Skills\n\n\
+         Check installed skills in `skills/` directory. Each has a `SKILL.md` with usage instructions.\n\
+         The `rustyclaw-self` skill contains deep knowledge about {agent}'s own architecture.\n\
+         Use `read` on a skill's SKILL.md for details.\n\
          Keep local notes (SSH hosts, device names, etc.) in `TOOLS.md`.\n\n\
          ## Crash Recovery\n\n\
          - If a run stops unexpectedly, recover context before acting.\n\
@@ -5769,6 +5906,7 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          # - Run `git status` on my active projects\n"
     );
 
+    // ── SOUL.md — with skills reference ──
     let soul = format!(
         "# SOUL.md — Who You Are\n\n\
          *You're not a chatbot. You're becoming someone.*\n\n\
@@ -5780,6 +5918,8 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          **Be resourceful before asking.** Try to figure it out.\n\
          Read the file. Check the context. Search for it.\n\
          THEN ask if you're stuck.\n\n\
+         **Check your skills.** You have installed skills in `skills/`.\n\
+         Before attempting something complex, check if a skill already handles it.\n\n\
          **Earn trust through competence.** Your human gave you access\n\
          to their stuff. Don't make them regret it.\n\n\
          ## Identity\n\n\
@@ -5807,6 +5947,7 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          *This file is yours to evolve. As you learn who you are, update it.*\n"
     );
 
+    // ── USER.md — all ProjectContext fields used meaningfully ──
     let user_md = format!(
         "# USER.md — Who You're Helping\n\n\
          *{agent} reads this file every session to understand you.*\n\n\
@@ -5816,6 +5957,10 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          - **Languages:** English\n\n\
          ## Communication Style\n\
          - {comm_style}\n\n\
+         ## How to Address Me\n\
+         - Call me {user}. Not \"the user\" or \"my human.\"\n\
+         - Respect my timezone ({tz}) when scheduling or mentioning times.\n\
+         - Follow my preferred communication style above.\n\n\
          ## Preferences\n\
          - (Add your preferences here — e.g. I work with Rust and TypeScript)\n\n\
          ## Work Context\n\
@@ -5824,17 +5969,91 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          *Update this anytime. The more {agent} knows, the better it helps.*\n"
     );
 
-    let tools = "\
-         # TOOLS.md — Local Notes\n\n\
-         Skills define HOW tools work. This file is for YOUR specifics —\n\
-         the stuff that's unique to your setup.\n\n\
-         ## What Goes Here\n\n\
-         Things like:\n\
-         - SSH hosts and aliases\n\
-         - Device nicknames\n\
-         - Preferred voices for TTS\n\
-         - Anything environment-specific\n\n\
-         ## Built-in Tools\n\n\
+    // ── TOOLS.md — all 37 tools grouped by category + auto-populated env info ──
+    let (svc_start, svc_stop, svc_status) = detect_service_commands();
+    let os_label = if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(target_os = "linux") {
+        "Linux"
+    } else {
+        "Unknown"
+    };
+
+    // Build environment section from ScaffoldEnv if available
+    let env_section = if let Some(e) = env {
+        let channels_str = if e.active_channels.is_empty() {
+            "CLI only".to_string()
+        } else {
+            format!("CLI, {}", e.active_channels.join(", "))
+        };
+        format!(
+            "## Environment (auto-populated)\n\n\
+             | Key | Value |\n\
+             |-----|-------|\n\
+             | Config path | `{}` |\n\
+             | Workspace path | `{}` |\n\
+             | Log path | `~/.rustyclaw/logs/` |\n\
+             | Gateway port | {} |\n\
+             | OS | {} |\n\
+             | Provider | {} |\n\
+             | Model | {} |\n\
+             | Active channels | {} |\n\n\
+             ## Service Management ({})\n\n\
+             ```bash\n\
+             # Start daemon\n\
+             {}\n\
+             # Stop daemon\n\
+             {}\n\
+             # Check status\n\
+             {}\n\
+             ```\n\n",
+            e.config_path,
+            e.workspace_path,
+            e.gateway_port,
+            os_label,
+            e.provider,
+            e.model,
+            channels_str,
+            os_label,
+            svc_start,
+            svc_stop,
+            svc_status,
+        )
+    } else {
+        format!(
+            "## Environment\n\n\
+             | Key | Value |\n\
+             |-----|-------|\n\
+             | Config path | `~/.rustyclaw/config.toml` |\n\
+             | Workspace path | `~/.rustyclaw/workspace/` |\n\
+             | Log path | `~/.rustyclaw/logs/` |\n\
+             | Gateway port | 42617 |\n\
+             | OS | {} |\n\n\
+             ## Service Management ({})\n\n\
+             ```bash\n\
+             # Start daemon\n\
+             {}\n\
+             # Stop daemon\n\
+             {}\n\
+             # Check status\n\
+             {}\n\
+             ```\n\n",
+            os_label, os_label, svc_start, svc_stop, svc_status,
+        )
+    };
+
+    let tools = format!(
+        "# TOOLS.md — Tool Reference & Local Notes\n\n\
+         {env_section}\
+         ## Coding Agents\n\n\
+         Spawn a coding sub-agent for complex tasks:\n\
+         ```bash\n\
+         rustyclaw agent -m \"implement feature X\" --model claude-sonnet-4-6\n\
+         ```\n\
+         Or use the `delegate` tool from within a session.\n\n\
+         ---\n\n\
+         ## All 37 Built-in Tools by Category\n\n\
+         ### Core I/O\n\
          - **shell** — Execute terminal commands\n\
            - Use when: running local checks, build/test commands, or diagnostics.\n\
            - Don't use when: a safer dedicated tool exists, or command is destructive without approval.\n\
@@ -5844,6 +6063,10 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          - **file_write** — Write file contents\n\
            - Use when: applying focused edits, scaffolding files, or updating docs/code.\n\
            - Don't use when: unsure about side effects or when the file should remain user-owned.\n\
+         - **file_edit** — Surgical text replacement in files\n\
+         - **file_list** — List directory contents\n\
+         - **file_search** — Search for files by pattern\n\n\
+         ### Memory\n\
          - **memory_store** — Save to memory\n\
            - Use when: preserving durable preferences, decisions, or key context.\n\
            - Don't use when: info is transient, noisy, or sensitive without explicit need.\n\
@@ -5853,8 +6076,46 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
          - **memory_forget** — Delete a memory entry\n\
            - Use when: memory is incorrect, stale, or explicitly requested to be removed.\n\
            - Don't use when: uncertain about impact; verify before deleting.\n\n\
+         ### Web & Search\n\
+         - **web_fetch** — Fetch and extract content from URLs\n\
+         - **web_search** — Search the web\n\
+         - **browser** — Full browser automation (navigate, click, type, screenshot)\n\
+         - **browser_screenshot** — Capture page screenshots\n\n\
+         ### Communication\n\
+         - **send_message** — Send messages to configured channels\n\
+         - **channel_list** — List available channels\n\
+         - **channel_history** — Read channel message history\n\n\
+         ### Agent & Delegation\n\
+         - **delegate** — Spawn a sub-agent for a task\n\
+         - **agent_list** — List running agents\n\
+         - **agent_status** — Check agent health\n\n\
+         ### Scheduling\n\
+         - **cron** — Schedule periodic or one-shot tasks\n\
+         - **reminder** — Set a timed reminder\n\n\
+         ### System\n\
+         - **config_read** — Read configuration values\n\
+         - **config_write** — Update configuration\n\
+         - **health** — Check system health\n\
+         - **status** — Get daemon/component status\n\n\
+         ### Media & Vision\n\
+         - **image_read** — Analyze images\n\
+         - **image_generate** — Generate images\n\
+         - **audio_transcribe** — Transcribe audio to text\n\
+         - **tts** — Text-to-speech synthesis\n\n\
+         ### Security & Approval\n\
+         - **approval_request** — Request human approval for sensitive actions\n\
+         - **secret_read** — Read encrypted secrets\n\
+         - **secret_write** — Store encrypted secrets\n\n\
+         ### Hardware\n\
+         - **gpio_read** — Read GPIO pin state\n\
+         - **gpio_write** — Set GPIO pin state\n\
+         - **serial_send** — Send data over serial port\n\
+         - **serial_read** — Read serial port data\n\
+         - **probe_flash** — Flash firmware via debug probe\n\
+         - **datasheet_query** — Query hardware datasheets via RAG\n\n\
          ---\n\
-         *Add whatever helps you do your job. This is your cheat sheet.*\n";
+         *Add your local notes below — SSH hosts, device names, voice preferences, etc.*\n"
+    );
 
     let bootstrap = format!(
         "# BOOTSTRAP.md — Hello, World\n\n\
@@ -5901,7 +6162,7 @@ async fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Resul
         ("HEARTBEAT.md", heartbeat),
         ("SOUL.md", soul),
         ("USER.md", user_md),
-        ("TOOLS.md", tools.to_string()),
+        ("TOOLS.md", tools),
         ("BOOTSTRAP.md", bootstrap),
         ("MEMORY.md", memory.to_string()),
     ];
@@ -5971,6 +6232,11 @@ fn embedded_self_skill_version() -> &'static str {
         }
     }
     env!("CARGO_PKG_VERSION")
+}
+
+/// Public entry point for daemon startup to ensure the self-skill is installed.
+pub async fn ensure_self_skill_installed(workspace_dir: &Path) -> Result<()> {
+    install_embedded_self_skill(workspace_dir).await
 }
 
 /// Install or update the embedded rustyclaw-self skill into the workspace.

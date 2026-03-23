@@ -24,6 +24,12 @@ pub async fn run(config: Config, host: String, port: u16, enable_elixir: bool) -
 
     crate::health::mark_component_ok("daemon");
 
+    // Ensure the embedded self-knowledge skill is installed/up-to-date
+    if let Err(e) = crate::onboard::wizard::ensure_self_skill_installed(&config.workspace_dir).await
+    {
+        tracing::warn!(error = %e, "Failed to auto-install rustyclaw-self skill");
+    }
+
     if config.heartbeat.enabled {
         let _ =
             crate::heartbeat::engine::HeartbeatEngine::ensure_heartbeat_file(&config.workspace_dir)
