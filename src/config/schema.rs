@@ -3641,23 +3641,23 @@ fn default_config_and_workspace_dirs() -> Result<(PathBuf, PathBuf)> {
 const ACTIVE_WORKSPACE_STATE_FILE: &str = "active_workspace.toml";
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ActiveWorkspaceState {
-    config_dir: String,
+pub(crate) struct ActiveWorkspaceState {
+    pub(crate) config_dir: String,
 }
 
-fn default_config_dir() -> Result<PathBuf> {
+pub(crate) fn default_config_dir() -> Result<PathBuf> {
     let home = UserDirs::new()
         .map(|u| u.home_dir().to_path_buf())
         .context("Could not find home directory")?;
     Ok(home.join(".rustyclaw"))
 }
 
-fn active_workspace_state_path(default_dir: &Path) -> PathBuf {
+pub(crate) fn active_workspace_state_path(default_dir: &Path) -> PathBuf {
     default_dir.join(ACTIVE_WORKSPACE_STATE_FILE)
 }
 
 /// Returns `true` if `path` lives under the OS temp directory.
-fn is_temp_directory(path: &Path) -> bool {
+pub(crate) fn is_temp_directory(path: &Path) -> bool {
     let temp = std::env::temp_dir();
     // Canonicalize when possible to handle symlinks (macOS /var → /private/var)
     let canon_temp = temp.canonicalize().unwrap_or_else(|_| temp.clone());
@@ -3710,6 +3710,44 @@ async fn load_persisted_workspace_dirs(
     } else {
         default_config_dir.join(parsed_dir)
     };
+
+    // Validate: directory must still exist
+    if !config_dir.exists() {
+        tracing::warn!(
+            path = %config_dir.display(),
+            "Active workspace marker points to non-existent directory; removing stale marker"
+        );
+        if let Err(e) = std::fs::remove_file(&state_path) {
+            tracing::error!(path = %state_path.display(), error = %e, "Failed to remove stale marker");
+        }
+        return Ok(None);
+    }
+
+    // Validate: config.toml must exist inside the directory
+    if !config_dir.join("config.toml").exists() {
+        tracing::warn!(
+            path = %config_dir.display(),
+            "Active workspace marker directory has no config.toml; removing stale marker"
+        );
+        if let Err(e) = std::fs::remove_file(&state_path) {
+            tracing::error!(path = %state_path.display(), error = %e, "Failed to remove stale marker");
+        }
+        return Ok(None);
+    }
+
+    // Validate: must not be a temp directory (skipped in tests to allow TempDir usage)
+    #[cfg(not(test))]
+    if is_temp_directory(&config_dir) {
+        tracing::warn!(
+            path = %config_dir.display(),
+            "Active workspace marker points to a temp directory; removing stale marker"
+        );
+        if let Err(e) = std::fs::remove_file(&state_path) {
+            tracing::error!(path = %state_path.display(), error = %e, "Failed to remove stale marker");
+        }
+        return Ok(None);
+    }
+
     Ok(Some((config_dir.clone(), config_dir.join("workspace"))))
 }
 
@@ -6684,7 +6722,13 @@ requires_openai_auth = true
         let state_path = default_config_dir.join(ACTIVE_WORKSPACE_STATE_FILE);
 
         std::env::remove_var("RUSTYCLAW_WORKSPACE");
-        fs::create_dir_all(&default_config_dir).await.unwrap();
+        fs::create_dir_all(&marker_config_dir).await.unwrap();
+        fs::write(
+            marker_config_dir.join("config.toml"),
+            "default_temperature = 0.7\n",
+        )
+        .await
+        .unwrap();
         let state = ActiveWorkspaceState {
             config_dir: marker_config_dir.to_string_lossy().into_owned(),
         };
@@ -7642,5 +7686,76 @@ require_otp_to_resume = true
             .validate()
             .expect_err("expected ttl validation failure");
         assert!(err.to_string().contains("token_ttl_secs"));
+    }
+
+    // ── load_persisted_workspace_dirs validation tests ────────────
+
+    #[test]
+    async fn load_persisted_rejects_stale_directory() {
+        let tmp = TempDir::new().unwrap();
+        let default_dir = tmp.path().join("default");
+        fs::create_dir_all(&default_dir).await.unwrap();
+
+        // Write marker pointing to a directory that doesn't exist
+        let gone_dir = tmp.path().join("gone");
+        let marker_path = active_workspace_state_path(&default_dir);
+        let state = ActiveWorkspaceState {
+            config_dir: gone_dir.to_string_lossy().into_owned(),
+        };
+        fs::write(&marker_path, toml::to_string_pretty(&state).unwrap())
+            .await
+            .unwrap();
+
+        let result = load_persisted_workspace_dirs(&default_dir).await.unwrap();
+        assert!(result.is_none(), "stale directory should be rejected");
+        assert!(!marker_path.exists(), "stale marker should be auto-cleaned");
+    }
+
+    #[test]
+    async fn load_persisted_rejects_missing_config_toml() {
+        let tmp = TempDir::new().unwrap();
+        let default_dir = tmp.path().join("default");
+        fs::create_dir_all(&default_dir).await.unwrap();
+
+        // Create the target directory but don't put config.toml in it
+        let no_config_dir = tmp.path().join("no-config");
+        fs::create_dir_all(&no_config_dir).await.unwrap();
+
+        let marker_path = active_workspace_state_path(&default_dir);
+        let state = ActiveWorkspaceState {
+            config_dir: no_config_dir.to_string_lossy().into_owned(),
+        };
+        fs::write(&marker_path, toml::to_string_pretty(&state).unwrap())
+            .await
+            .unwrap();
+
+        let result = load_persisted_workspace_dirs(&default_dir).await.unwrap();
+        assert!(
+            result.is_none(),
+            "directory without config.toml should be rejected"
+        );
+        assert!(
+            !marker_path.exists(),
+            "marker should be auto-cleaned when config.toml missing"
+        );
+    }
+
+    #[test]
+    async fn is_temp_directory_detects_os_temp() {
+        let tmp = TempDir::new().unwrap(); // lives under OS temp dir
+        assert!(
+            is_temp_directory(tmp.path()),
+            "TempDir path should be detected as temp"
+        );
+    }
+
+    #[test]
+    async fn is_temp_directory_rejects_non_temp() {
+        // A path outside the OS temp directory should not be classified as temp
+        let path = PathBuf::from("/usr/local/share/rustyclaw-test");
+        assert!(
+            !is_temp_directory(&path),
+            "non-temp path should not be detected as temp"
+        );
     }
 }

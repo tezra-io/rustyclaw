@@ -61,7 +61,11 @@ pub async fn run(config: Config, host: String, port: u16, enable_elixir: bool) -
             ));
         } else {
             crate::health::mark_component_ok("channels");
-            tracing::info!("No real-time channels configured; channel supervisor disabled");
+            tracing::warn!(
+                config_path = %config.config_path.display(),
+                "No channels configured — the daemon will run without messaging. \
+                 Run `rustyclaw onboard` or add a channel to config.toml."
+            );
         }
     }
 

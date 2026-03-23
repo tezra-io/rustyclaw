@@ -79,6 +79,7 @@ impl DiagItem {
 pub fn diagnose(config: &Config) -> Vec<DiagResult> {
     let mut items: Vec<DiagItem> = Vec::new();
 
+    check_active_workspace(&mut items);
     check_config_semantics(config, &mut items);
     check_workspace(config, &mut items);
     check_daemon_state(config, &mut items);
@@ -413,6 +414,114 @@ pub fn run_traces(
     println!();
     println!("Use `rustyclaw doctor traces --id <trace-id>` to inspect a full event payload.");
     Ok(())
+}
+
+// ── Active workspace marker validation ───────────────────────────
+
+fn check_active_workspace(items: &mut Vec<DiagItem>) {
+    let cat = "active-workspace";
+
+    let default_dir = match crate::config::schema::default_config_dir() {
+        Ok(dir) => dir,
+        Err(_) => {
+            items.push(DiagItem::warn(
+                cat,
+                "could not determine default config directory",
+            ));
+            return;
+        }
+    };
+
+    let marker_path = crate::config::schema::active_workspace_state_path(&default_dir);
+    if !marker_path.exists() {
+        items.push(DiagItem::ok(
+            cat,
+            "no active workspace marker (using defaults)",
+        ));
+        return;
+    }
+
+    let contents = match std::fs::read_to_string(&marker_path) {
+        Ok(c) => c,
+        Err(e) => {
+            items.push(DiagItem::error(
+                cat,
+                format!("cannot read marker {}: {e}", marker_path.display()),
+            ));
+            return;
+        }
+    };
+
+    let state: crate::config::schema::ActiveWorkspaceState = match toml::from_str(&contents) {
+        Ok(s) => s,
+        Err(e) => {
+            items.push(DiagItem::error(
+                cat,
+                format!("cannot parse marker {}: {e}", marker_path.display()),
+            ));
+            return;
+        }
+    };
+
+    let config_dir_str = state.config_dir.trim().to_string();
+    if config_dir_str.is_empty() {
+        items.push(DiagItem::error(
+            cat,
+            format!(
+                "marker {} has empty config_dir entry",
+                marker_path.display()
+            ),
+        ));
+        return;
+    }
+
+    let config_dir = std::path::PathBuf::from(&config_dir_str);
+    let config_dir = if config_dir.is_absolute() {
+        config_dir
+    } else {
+        default_dir.join(config_dir)
+    };
+
+    // Check 1: directory exists
+    if !config_dir.exists() {
+        items.push(DiagItem::error(
+            cat,
+            format!(
+                "marker points to non-existent directory: {}",
+                config_dir.display()
+            ),
+        ));
+        return;
+    }
+
+    // Check 2: config.toml exists
+    if !config_dir.join("config.toml").exists() {
+        items.push(DiagItem::error(
+            cat,
+            format!(
+                "marker directory has no config.toml: {}",
+                config_dir.display()
+            ),
+        ));
+        return;
+    }
+
+    // Check 3: not a temp directory
+    if crate::config::schema::is_temp_directory(&config_dir) {
+        items.push(DiagItem::warn(
+            cat,
+            format!(
+                "marker points to a temp directory: {}",
+                config_dir.display()
+            ),
+        ));
+        return;
+    }
+
+    items.push(DiagItem::ok(
+        cat,
+        format!("active workspace: {}", config_dir.display()),
+    ));
 }
 
 // ── Config semantic validation ───────────────────────────────────
