@@ -152,9 +152,9 @@ defmodule RustyclawOrchestrator.BtwServer do
 
     reply_payload = %{
       text: response_text,
-      channel: Map.get(channel_info, :channel),
-      reply_to_message_id: Map.get(channel_info, :reply_to_message_id),
-      chat_id: Map.get(channel_info, :chat_id),
+      channel: Map.get(channel_info, "channel"),
+      reply_to_message_id: Map.get(channel_info, "reply_to_message_id"),
+      chat_id: Map.get(channel_info, "chat_id"),
       btw: true
     }
 
@@ -164,9 +164,23 @@ defmodule RustyclawOrchestrator.BtwServer do
       quote_reply: reply_payload.reply_to_message_id != nil
     )
 
-    # Response delivery will be routed through RustBridge channel send in TEZ-146.
-    # For now, log the payload and return it for testing.
-    {:ok, reply_payload}
+    case RustBridge.send_to_channel(reply_payload) do
+      {:ok, _resp} ->
+        Logger.info("BTW response delivered",
+          agent: state.agent_name,
+          channel: reply_payload.channel
+        )
+
+        {:ok, reply_payload}
+
+      {:error, reason} ->
+        Logger.error("BTW response delivery failed",
+          agent: state.agent_name,
+          reason: inspect(reason)
+        )
+
+        {:error, {:delivery_failed, reason}}
+    end
   end
 
   defp format_response({:ok, %{} = body}) do

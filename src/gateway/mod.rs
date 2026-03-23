@@ -13,7 +13,8 @@ pub mod static_files;
 pub mod ws;
 
 use crate::channels::{
-    Channel, LinqChannel, NextcloudTalkChannel, SendMessage, WatiChannel, WhatsAppChannel,
+    Channel, LinqChannel, NextcloudTalkChannel, SendMessage, TelegramChannel, WatiChannel,
+    WhatsAppChannel,
 };
 use crate::config::Config;
 use crate::cost::CostTracker;
@@ -292,6 +293,7 @@ pub struct AppState {
     pub trust_forwarded_headers: bool,
     pub rate_limiter: Arc<GatewayRateLimiter>,
     pub idempotency_store: Arc<IdempotencyStore>,
+    pub telegram: Option<Arc<TelegramChannel>>,
     pub whatsapp: Option<Arc<WhatsAppChannel>>,
     /// `WhatsApp` app secret for webhook signature verification (`X-Hub-Signature-256`)
     pub whatsapp_app_secret: Option<Arc<str>>,
@@ -419,6 +421,20 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
                 (!trimmed_secret.is_empty())
                     .then(|| Arc::<str>::from(hash_webhook_secret(trimmed_secret)))
             })
+        });
+
+    // Telegram channel (if configured) — shared for bridge send API
+    let telegram_channel: Option<Arc<TelegramChannel>> = config
+        .channels_config
+        .telegram
+        .as_ref()
+        .filter(|tg| !tg.bot_token.is_empty())
+        .map(|tg| {
+            Arc::new(TelegramChannel::new(
+                tg.bot_token.clone(),
+                tg.allowed_users.clone(),
+                tg.mention_only,
+            ))
         });
 
     // WhatsApp channel (if configured)
@@ -634,6 +650,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         trust_forwarded_headers: config.gateway.trust_forwarded_headers,
         rate_limiter,
         idempotency_store,
+        telegram: telegram_channel,
         whatsapp: whatsapp_channel,
         whatsapp_app_secret,
         linq: linq_channel,
@@ -651,6 +668,14 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     let config_put_router = Router::new()
         .route("/api/config", put(api::handle_api_config_put))
         .layer(RequestBodyLimitLayer::new(1_048_576));
+
+    // Bridge endpoint needs longer timeout (5 min) for LLM calls with tool use
+    let bridge_router = Router::new()
+        .route("/api/agent/run", post(api::handle_api_agent_run))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(300),
+        ));
 
     // Build router with middleware
     let app = Router::new()
@@ -683,6 +708,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/api/cost", get(api::handle_api_cost))
         .route("/api/cli-tools", get(api::handle_api_cli_tools))
         .route("/api/health", get(api::handle_api_health))
+        // ── Bridge endpoint (channel send, short timeout is fine) ──
+        .route("/api/channel/send", post(api::handle_api_channel_send))
         // ── SSE event stream ──
         .route("/api/events", get(sse::handle_sse_events))
         // ── WebSocket agent chat ──
@@ -691,6 +718,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/_app/{*path}", get(static_files::handle_static))
         // ── Config PUT with larger body limit ──
         .merge(config_put_router)
+        // ── Bridge agent/run with longer timeout ──
+        .merge(bridge_router)
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(MAX_BODY_SIZE))
         .layer(TimeoutLayer::with_status_code(
@@ -1589,6 +1618,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -1638,6 +1668,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -2004,6 +2035,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -2068,6 +2100,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -2144,6 +2177,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -2192,6 +2226,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -2245,6 +2280,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -2303,6 +2339,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,
@@ -2357,6 +2394,7 @@ mod tests {
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
             whatsapp: None,
             whatsapp_app_secret: None,
             linq: None,

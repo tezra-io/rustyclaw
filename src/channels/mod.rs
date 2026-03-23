@@ -84,7 +84,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio_util::sync::CancellationToken;
 
@@ -111,6 +111,14 @@ const CHANNEL_MESSAGE_TIMEOUT_SCALE_CAP: u64 = 4;
 const CHANNEL_PARALLELISM_PER_CHANNEL: usize = 4;
 const CHANNEL_MIN_IN_FLIGHT_MESSAGES: usize = 8;
 const CHANNEL_MAX_IN_FLIGHT_MESSAGES: usize = 64;
+
+/// Shared HTTP client for Elixir orchestrator bridge calls.
+static ELIXIR_BRIDGE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap_or_default()
+});
 const CHANNEL_TYPING_REFRESH_INTERVAL_SECS: u64 = 4;
 const CHANNEL_HEALTH_HEARTBEAT_SECS: u64 = 30;
 const MODEL_CACHE_FILE: &str = "models_cache.json";
@@ -1503,6 +1511,70 @@ fn spawn_scoped_typing_task(
     handle
 }
 
+/// Check if the Elixir orchestrator is healthy and forward a /btw message to it.
+/// Returns `true` if the message was successfully forwarded (caller should return early).
+async fn try_forward_to_elixir(msg: &traits::ChannelMessage, channel: &dyn Channel) -> bool {
+    const ELIXIR_BASE: &str = "http://127.0.0.1:4001";
+
+    // Quick health check — don't block long if Elixir is down
+    let client = &*ELIXIR_BRIDGE_CLIENT;
+
+    let health_ok = client
+        .get(format!("{ELIXIR_BASE}/health"))
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success());
+
+    if !health_ok {
+        tracing::debug!("Elixir orchestrator not healthy, falling back to local agent");
+        return false;
+    }
+
+    let channel_info = serde_json::json!({
+        "channel": msg.channel,
+        "chat_id": msg.reply_target,
+        "reply_to_message_id": msg.id,
+    });
+
+    let payload = serde_json::json!({
+        "agent_name": "default",
+        "message": msg.content,
+        "channel_info": channel_info,
+    });
+
+    let mut request = client
+        .post(format!("{ELIXIR_BASE}/api/messages/inbound"))
+        .json(&payload);
+
+    if let Ok(secret) = std::env::var("RUSTYCLAW_BRIDGE_SECRET") {
+        request = request.header("x-bridge-secret", secret);
+    }
+
+    match request.send().await {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::info!(
+                channel = %msg.channel,
+                sender = %msg.sender,
+                "Forwarded /btw message to Elixir orchestrator"
+            );
+            // Send typing indicator while Elixir processes in the background
+            let _ = channel.start_typing(&msg.reply_target).await;
+            true
+        }
+        Ok(resp) => {
+            tracing::warn!(
+                status = %resp.status(),
+                "Elixir orchestrator rejected /btw message, falling back"
+            );
+            false
+        }
+        Err(e) => {
+            tracing::warn!(%e, "Failed to forward /btw message to Elixir, falling back");
+            false
+        }
+    }
+}
+
 async fn process_channel_message(
     ctx: Arc<ChannelRuntimeContext>,
     msg: traits::ChannelMessage,
@@ -1535,7 +1607,7 @@ async fn process_channel_message(
     );
 
     // ── Hook: on_message_received (modifying) ────────────
-    let msg = if let Some(hooks) = &ctx.hooks {
+    let mut msg = if let Some(hooks) = &ctx.hooks {
         match hooks.run_on_message_received(msg).await {
             crate::hooks::HookResult::Cancel(reason) => {
                 tracing::info!(%reason, "incoming message dropped by hook");
@@ -1553,6 +1625,18 @@ async fn process_channel_message(
     }
     if handle_runtime_command_if_needed(ctx.as_ref(), &msg, target_channel.as_ref()).await {
         return;
+    }
+
+    // ── Elixir orchestrator routing for /btw messages ──
+    if msg.content.to_ascii_lowercase().starts_with("/btw ") {
+        if let Some(channel) = target_channel.as_ref() {
+            if try_forward_to_elixir(&msg, channel.as_ref()).await {
+                return;
+            }
+        }
+        // Elixir not healthy — strip /btw prefix and note the fallback
+        let stripped = msg.content["/btw ".len()..].to_string();
+        msg.content = format!("[btw-fallback: orchestrator unavailable] {stripped}");
     }
 
     let history_key = conversation_history_key(&msg);

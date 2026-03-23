@@ -17,6 +17,7 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   @default_base_url "http://localhost:4200"
   @call_timeout 60_000
+  @run_task_timeout 360_000
   @max_retries 3
   @initial_backoff_ms 500
   @task_supervisor RustyclawOrchestrator.RustBridge.TaskSupervisor
@@ -39,8 +40,18 @@ defmodule RustyclawOrchestrator.RustBridge do
     GenServer.call(
       __MODULE__,
       {:run_task, agent_name, task, opts},
-      @call_timeout
+      @run_task_timeout
     )
+  end
+
+  @doc """
+  Send a message to a channel via the Rust core.
+
+  Used by BtwServer to deliver responses back to the originating channel.
+  """
+  @spec send_to_channel(map()) :: {:ok, map()} | {:error, term()}
+  def send_to_channel(payload) when is_map(payload) do
+    GenServer.call(__MODULE__, {:send_to_channel, payload}, @call_timeout)
   end
 
   @doc "Check if the Rust core is reachable."
@@ -97,6 +108,20 @@ defmodule RustyclawOrchestrator.RustBridge do
     {:noreply, %{state | pending: Map.put(state.pending, ref, from)}}
   end
 
+  @impl true
+  def handle_call({:send_to_channel, payload}, from, state) do
+    req = state.req
+    max_retries = state.max_retries
+
+    %Task{ref: ref} =
+      Task.Supervisor.async_nolink(@task_supervisor, fn ->
+        post_with_retry(req, "/api/channel/send", payload, 0, max_retries)
+      end)
+
+    {:noreply, %{state | pending: Map.put(state.pending, ref, from)}}
+  end
+
+  @impl true
   def handle_call(:health_check, from, state) do
     req = state.req
 
@@ -112,6 +137,7 @@ defmodule RustyclawOrchestrator.RustBridge do
     {:noreply, %{state | pending: Map.put(state.pending, ref, from)}}
   end
 
+  @impl true
   def handle_call(:base_url, _from, state) do
     {:reply, state.base_url, state}
   end

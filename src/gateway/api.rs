@@ -3,6 +3,7 @@
 //! All `/api/*` routes require bearer token authentication (PairingGuard).
 
 use super::AppState;
+use crate::channels::Channel;
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
@@ -516,6 +517,109 @@ pub async fn handle_api_health(
 
     let snapshot = crate::health::snapshot();
     Json(serde_json::json!({"health": snapshot})).into_response()
+}
+
+// ── Bridge endpoints (Elixir orchestrator ↔ Rust core) ──────────
+
+#[derive(Deserialize)]
+pub struct AgentRunBody {
+    pub agent: Option<String>,
+    pub task: String,
+    pub model: Option<String>,
+    pub temperature: Option<f64>,
+}
+
+/// POST /api/agent/run — execute an agent task (called by Elixir RustBridge)
+pub async fn handle_api_agent_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AgentRunBody>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let config = state.config.lock().clone();
+
+    // Apply optional overrides from the request
+    let mut effective_config = config;
+    if let Some(ref model) = body.model {
+        effective_config.default_model = Some(model.clone());
+    }
+    if let Some(temp) = body.temperature {
+        effective_config.default_temperature = temp;
+    }
+
+    match crate::agent::process_message(effective_config, &body.task).await {
+        Ok(response) => Json(serde_json::json!({"response": response})).into_response(),
+        Err(e) => {
+            let safe_err = crate::providers::sanitize_api_error(&e.to_string());
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": safe_err})),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ChannelSendBody {
+    pub text: String,
+    pub channel: String,
+    pub chat_id: Option<String>,
+    pub reply_to_message_id: Option<serde_json::Value>,
+    pub btw: Option<bool>,
+}
+
+/// POST /api/channel/send — send a message to a channel (called by Elixir BtwServer)
+pub async fn handle_api_channel_send(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ChannelSendBody>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let recipient = body.chat_id.unwrap_or_default();
+    if recipient.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "chat_id is required"})),
+        )
+            .into_response();
+    }
+
+    let message = crate::channels::SendMessage::new(&body.text, &recipient);
+
+    // Route to the appropriate channel (using shared instances from AppState)
+    let result = match body.channel.as_str() {
+        "telegram" => {
+            if let Some(ref tg) = state.telegram {
+                tg.send(&message).await
+            } else {
+                Err(anyhow::anyhow!("Telegram channel not configured"))
+            }
+        }
+        "whatsapp" => {
+            if let Some(ref wa) = state.whatsapp {
+                wa.send(&message).await
+            } else {
+                Err(anyhow::anyhow!("WhatsApp channel not configured"))
+            }
+        }
+        other => Err(anyhow::anyhow!("Unsupported channel for send: {other}")),
+    };
+
+    match result {
+        Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": e.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

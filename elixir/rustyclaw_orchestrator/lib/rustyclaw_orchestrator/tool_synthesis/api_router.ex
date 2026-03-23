@@ -215,6 +215,37 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
     end
   end
 
+  # --- POST /api/messages/inbound (Rust → Elixir bridge) ---
+
+  post "/api/messages/inbound" do
+    case require_bridge_secret(conn) do
+      :ok ->
+        agent_name = Map.get(conn.body_params, "agent_name", "default")
+        message = Map.get(conn.body_params, "message", "")
+        channel_info = Map.get(conn.body_params, "channel_info", %{})
+
+        if message == "" do
+          json_response(conn, 400, %{ok: false, error: "message is required"})
+        else
+          opts = [channel_info: channel_info]
+
+          case RustyclawOrchestrator.BtwRouter.route(agent_name, message, opts) do
+            {:btw, pid} ->
+              json_response(conn, 200, %{ok: true, routed: "btw", pid: inspect(pid)})
+
+            {:main, :ok} ->
+              json_response(conn, 200, %{ok: true, routed: "main"})
+
+            {:error, reason} ->
+              json_response(conn, 500, %{ok: false, error: inspect(reason)})
+          end
+        end
+
+      {:error, conn} ->
+        conn
+    end
+  end
+
   # --- Catch-all ---
 
   match _ do
@@ -240,6 +271,26 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
     case Map.fetch(params, json_key) do
       {:ok, value} -> Keyword.put(opts, opt_key, value)
       :error -> opts
+    end
+  end
+
+  defp require_bridge_secret(conn) do
+    expected = System.get_env("RUSTYCLAW_BRIDGE_SECRET") || ""
+
+    if expected == "" do
+      # No secret configured — reject all bridge calls as a safety default
+      {:error, json_response(conn, 403, %{ok: false, error: "bridge secret not configured"})}
+    else
+      provided =
+        conn
+        |> Plug.Conn.get_req_header("x-bridge-secret")
+        |> List.first("")
+
+      if Plug.Crypto.secure_compare(provided, expected) do
+        :ok
+      else
+        {:error, json_response(conn, 401, %{ok: false, error: "unauthorized"})}
+      end
     end
   end
 end

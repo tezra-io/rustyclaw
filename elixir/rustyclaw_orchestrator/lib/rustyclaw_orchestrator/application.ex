@@ -92,11 +92,12 @@ defmodule RustyclawOrchestrator.Application do
       {RustyclawOrchestrator.RustBridge,
        Application.get_env(:rustyclaw_orchestrator, :rust_bridge, [])},
 
-      # HTTP API for tool synthesis (Bandit + Plug)
+      # HTTP API for tool synthesis (Bandit + Plug) — loopback only
       {Bandit,
        plug: RustyclawOrchestrator.ToolSynthesis.ApiRouter,
        port: Application.get_env(:rustyclaw_orchestrator, :synth_api_port, 4001),
-       scheme: :http},
+       scheme: :http,
+       ip: {127, 0, 0, 1}},
 
       # HTTP API for plugin management and task execution
       Supervisor.child_spec(
