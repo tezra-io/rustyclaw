@@ -29,6 +29,12 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
   plug(:dispatch)
 
+  # --- GET /health ---
+
+  get "/health" do
+    send_resp(conn, 200, Jason.encode!(%{status: "ok"}))
+  end
+
   # --- GET /api/synth/tools ---
 
   get "/api/synth/tools" do
