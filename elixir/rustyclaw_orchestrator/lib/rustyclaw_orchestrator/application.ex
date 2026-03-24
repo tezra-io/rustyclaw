@@ -99,12 +99,13 @@ defmodule RustyclawOrchestrator.Application do
        scheme: :http,
        ip: {127, 0, 0, 1}},
 
-      # HTTP API for plugin management and task execution
+      # HTTP API for plugin management and task execution — loopback only
       Supervisor.child_spec(
         {Bandit,
          plug: RustyclawOrchestrator.Plugins.PluginRouter,
          port: Application.get_env(:rustyclaw_orchestrator, :plugin_api_port, 4002),
-         scheme: :http},
+         scheme: :http,
+         ip: {127, 0, 0, 1}},
         id: :plugin_api_bandit
       )
     ]

@@ -44,6 +44,8 @@ pub struct ElixirOrchestrator {
     status: OrchestratorStatus,
     rust_bridge_port: u16,
     bridge_socket_path: Option<PathBuf>,
+    synth_port: u16,
+    plugin_port: u16,
 }
 
 impl ElixirOrchestrator {
@@ -121,6 +123,15 @@ impl ElixirOrchestrator {
 
     /// Create a new orchestrator manager. Does not start the process.
     pub fn new(rust_bridge_port: u16, bridge_socket_path: Option<PathBuf>) -> Self {
+        let synth_port = std::env::var("RUSTYCLAW_ELIXIR_SYNTH_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(ELIXIR_SYNTH_API_PORT);
+        let plugin_port = std::env::var("RUSTYCLAW_ELIXIR_PLUGIN_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(ELIXIR_PLUGIN_API_PORT);
+
         let project_dir = Self::resolve_project_dir().unwrap_or_default();
         Self {
             child: None,
@@ -128,7 +139,19 @@ impl ElixirOrchestrator {
             status: OrchestratorStatus::Stopped,
             rust_bridge_port,
             bridge_socket_path,
+            synth_port,
+            plugin_port,
         }
+    }
+
+    /// Port the Elixir synth API listens on.
+    pub fn synth_port(&self) -> u16 {
+        self.synth_port
+    }
+
+    /// Port the Elixir plugin API listens on.
+    pub fn plugin_port(&self) -> u16 {
+        self.plugin_port
     }
 
     /// Attempt to start the Elixir orchestrator as a child process.
@@ -203,6 +226,8 @@ impl ElixirOrchestrator {
             .arg("run")
             .current_dir(&self.project_dir)
             .env("RUSTYCLAW_BRIDGE_PORT", self.rust_bridge_port.to_string())
+            .env("RUSTYCLAW_ELIXIR_SYNTH_PORT", self.synth_port.to_string())
+            .env("RUSTYCLAW_ELIXIR_PLUGIN_PORT", self.plugin_port.to_string())
             .env("MIX_ENV", "prod")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -274,7 +299,7 @@ impl ElixirOrchestrator {
             return false;
         };
 
-        let url = format!("http://127.0.0.1:{ELIXIR_SYNTH_API_PORT}/health");
+        let url = format!("http://127.0.0.1:{}/health", self.synth_port);
         match client.get(&url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 self.status = OrchestratorStatus::Running;
@@ -336,6 +361,22 @@ pub fn startup_grace_duration() -> Duration {
     ELIXIR_STARTUP_GRACE
 }
 
+/// Resolve the synth API port from env or default.
+pub fn resolve_synth_port() -> u16 {
+    std::env::var("RUSTYCLAW_ELIXIR_SYNTH_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(ELIXIR_SYNTH_API_PORT)
+}
+
+/// Resolve the plugin API port from env or default.
+pub fn resolve_plugin_port() -> u16 {
+    std::env::var("RUSTYCLAW_ELIXIR_PLUGIN_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(ELIXIR_PLUGIN_API_PORT)
+}
+
 /// Check if the Elixir orchestrator is reachable via its HTTP APIs.
 /// This is a standalone check that doesn't require a running ElixirOrchestrator instance.
 pub async fn probe_orchestrator_health() -> Result<serde_json::Value> {
@@ -344,7 +385,10 @@ pub async fn probe_orchestrator_health() -> Result<serde_json::Value> {
         .build()
         .context("Failed to build HTTP client")?;
 
-    let synth_url = format!("http://127.0.0.1:{ELIXIR_SYNTH_API_PORT}/health");
+    let synth_port = resolve_synth_port();
+    let plugin_port = resolve_plugin_port();
+
+    let synth_url = format!("http://127.0.0.1:{synth_port}/health");
     let synth_ok = client
         .get(&synth_url)
         .send()
@@ -352,7 +396,7 @@ pub async fn probe_orchestrator_health() -> Result<serde_json::Value> {
         .map(|r| r.status().is_success())
         .unwrap_or(false);
 
-    let plugin_url = format!("http://127.0.0.1:{ELIXIR_PLUGIN_API_PORT}/health");
+    let plugin_url = format!("http://127.0.0.1:{plugin_port}/health");
     let plugin_ok = client
         .get(&plugin_url)
         .send()
@@ -363,8 +407,8 @@ pub async fn probe_orchestrator_health() -> Result<serde_json::Value> {
     Ok(serde_json::json!({
         "synth_api": if synth_ok { "ok" } else { "unreachable" },
         "plugin_api": if plugin_ok { "ok" } else { "unreachable" },
-        "synth_api_port": ELIXIR_SYNTH_API_PORT,
-        "plugin_api_port": ELIXIR_PLUGIN_API_PORT,
+        "synth_api_port": synth_port,
+        "plugin_api_port": plugin_port,
     }))
 }
 
@@ -378,10 +422,11 @@ pub async fn query_orchestrator_stats() -> OrchestratorStats {
         Err(_) => return OrchestratorStats::default(),
     };
 
+    let synth_port = resolve_synth_port();
+    let plugin_port = resolve_plugin_port();
+
     let agents = client
-        .get(format!(
-            "http://127.0.0.1:{ELIXIR_SYNTH_API_PORT}/api/agents"
-        ))
+        .get(format!("http://127.0.0.1:{synth_port}/api/agents"))
         .send()
         .await
         .ok()
@@ -394,9 +439,7 @@ pub async fn query_orchestrator_stats() -> OrchestratorStats {
         });
 
     let synth_tools = client
-        .get(format!(
-            "http://127.0.0.1:{ELIXIR_SYNTH_API_PORT}/api/tools"
-        ))
+        .get(format!("http://127.0.0.1:{synth_port}/api/tools"))
         .send()
         .await
         .ok()
@@ -409,9 +452,7 @@ pub async fn query_orchestrator_stats() -> OrchestratorStats {
         });
 
     let plugins = client
-        .get(format!(
-            "http://127.0.0.1:{ELIXIR_PLUGIN_API_PORT}/api/plugins"
-        ))
+        .get(format!("http://127.0.0.1:{plugin_port}/api/plugins"))
         .send()
         .await
         .ok()

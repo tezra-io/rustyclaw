@@ -5,8 +5,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-/// Default Elixir synth API base URL.
-const DEFAULT_ELIXIR_URL: &str = "http://localhost:4001";
+/// Resolve the default Elixir synth API base URL from env or fallback.
+fn default_elixir_url() -> String {
+    let port = crate::daemon::elixir::resolve_synth_port();
+    format!("http://127.0.0.1:{port}")
+}
 /// TTL for the cached tool list (60 seconds).
 const CACHE_TTL: Duration = Duration::from_secs(60);
 /// HTTP timeout for execute calls (slightly above Elixir's 30s sandbox timeout).
@@ -122,7 +125,9 @@ pub struct SynthToolCache {
 impl SynthToolCache {
     pub fn new(elixir_url: Option<&str>) -> Self {
         Self {
-            elixir_url: elixir_url.unwrap_or(DEFAULT_ELIXIR_URL).to_string(),
+            elixir_url: elixir_url
+                .map(String::from)
+                .unwrap_or_else(default_elixir_url),
             client: reqwest::Client::new(),
             cache: RwLock::new(None),
         }
@@ -197,7 +202,8 @@ impl SynthToolCache {
 
 /// Convenience: fetch tool list for CLI display.
 pub async fn list_synth_tools(elixir_url: Option<&str>) -> anyhow::Result<Vec<SynthToolInfo>> {
-    let url = elixir_url.unwrap_or(DEFAULT_ELIXIR_URL);
+    let default = default_elixir_url();
+    let url = elixir_url.unwrap_or(&default);
     let client = reqwest::Client::new();
     let resp = client
         .get(format!("{url}/api/synth/tools"))
@@ -210,7 +216,8 @@ pub async fn list_synth_tools(elixir_url: Option<&str>) -> anyhow::Result<Vec<Sy
 
 /// Convenience: approve a tool via CLI.
 pub async fn approve_synth_tool(name: &str, elixir_url: Option<&str>) -> anyhow::Result<()> {
-    let url = elixir_url.unwrap_or(DEFAULT_ELIXIR_URL);
+    let default = default_elixir_url();
+    let url = elixir_url.unwrap_or(&default);
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{url}/api/synth/approve"))
@@ -223,7 +230,8 @@ pub async fn approve_synth_tool(name: &str, elixir_url: Option<&str>) -> anyhow:
 
 /// Convenience: suspend a tool via CLI.
 pub async fn suspend_synth_tool(name: &str, elixir_url: Option<&str>) -> anyhow::Result<()> {
-    let url = elixir_url.unwrap_or(DEFAULT_ELIXIR_URL);
+    let default = default_elixir_url();
+    let url = elixir_url.unwrap_or(&default);
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{url}/api/synth/suspend"))
@@ -236,7 +244,8 @@ pub async fn suspend_synth_tool(name: &str, elixir_url: Option<&str>) -> anyhow:
 
 /// Convenience: delete a tool via CLI.
 pub async fn delete_synth_tool(name: &str, elixir_url: Option<&str>) -> anyhow::Result<()> {
-    let url = elixir_url.unwrap_or(DEFAULT_ELIXIR_URL);
+    let default = default_elixir_url();
+    let url = elixir_url.unwrap_or(&default);
     let client = reqwest::Client::new();
     let resp = client
         .delete(format!("{url}/api/synth/tools/{name}"))

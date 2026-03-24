@@ -1514,13 +1514,14 @@ fn spawn_scoped_typing_task(
 /// Check if the Elixir orchestrator is healthy and forward a /btw message to it.
 /// Returns `true` if the message was successfully forwarded (caller should return early).
 async fn try_forward_to_elixir(msg: &traits::ChannelMessage, channel: &dyn Channel) -> bool {
-    const ELIXIR_BASE: &str = "http://127.0.0.1:4001";
+    let synth_port = crate::daemon::elixir::resolve_synth_port();
+    let elixir_base = format!("http://127.0.0.1:{synth_port}");
 
     // Quick health check — don't block long if Elixir is down
     let client = &*ELIXIR_BRIDGE_CLIENT;
 
     let health_ok = client
-        .get(format!("{ELIXIR_BASE}/health"))
+        .get(format!("{elixir_base}/health"))
         .send()
         .await
         .is_ok_and(|r| r.status().is_success());
@@ -1543,7 +1544,7 @@ async fn try_forward_to_elixir(msg: &traits::ChannelMessage, channel: &dyn Chann
     });
 
     let mut request = client
-        .post(format!("{ELIXIR_BASE}/api/messages/inbound"))
+        .post(format!("{elixir_base}/api/messages/inbound"))
         .json(&payload);
 
     if let Ok(secret) = std::env::var("RUSTYCLAW_BRIDGE_SECRET") {

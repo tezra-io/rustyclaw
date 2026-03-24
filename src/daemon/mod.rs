@@ -147,9 +147,13 @@ pub async fn run(config: Config, host: String, port: u16, enable_elixir: bool) -
     println!(
         "  │    BTW Bridge:   {:<31}│",
         if enable_elixir {
-            "localhost:4001-4002"
+            format!(
+                "localhost:{}-{}",
+                elixir::resolve_synth_port(),
+                elixir::resolve_plugin_port()
+            )
         } else {
-            "n/a (elixir disabled)"
+            "n/a (elixir disabled)".to_string()
         }
     );
     println!("  ├──────────────────────────────────────────────────┤");
