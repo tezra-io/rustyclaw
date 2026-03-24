@@ -480,6 +480,11 @@ pub struct SkillsConfig {
     /// Default: `false` (opt-in).
     #[serde(default)]
     pub agent_writable: bool,
+    /// Directories whose skills are trusted and exempt from script-file blocking.
+    /// Paths may use `~` for the home directory (expanded at load time).
+    /// Example: `["~/.agents/skills", "~/.openclaw/skills"]`
+    #[serde(default)]
+    pub trusted_paths: Vec<String>,
 }
 
 /// Multimodal (image) handling configuration (`[multimodal]` section).
