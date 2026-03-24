@@ -398,6 +398,28 @@ fn install_macos(config: &Config) -> Result<()> {
     let stdout = logs_dir.join("daemon.stdout.log");
     let stderr = logs_dir.join("daemon.stderr.log");
 
+    // Create a wrapper script that sources ~/.secrets before launching the daemon.
+    // This ensures launchd picks up API keys without hardcoding them in the plist.
+    let wrapper_dir = config
+        .config_path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let wrapper_path = wrapper_dir.join("daemon-wrapper.sh");
+    let wrapper_content = format!(
+        "#!/bin/bash\n\
+         # Auto-generated wrapper for launchd — sources API keys before starting daemon.\n\
+         # Regenerate with: rustyclaw service install\n\
+         [ -f \"$HOME/.secrets\" ] && source \"$HOME/.secrets\"\n\
+         exec {exe} daemon\n",
+        exe = exe.display()
+    );
+    fs::write(&wrapper_path, &wrapper_content)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))?;
+    }
+
     let plist = format!(
         r#"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
@@ -407,8 +429,8 @@ fn install_macos(config: &Config) -> Result<()> {
   <string>{label}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{exe}</string>
-    <string>daemon</string>
+    <string>/bin/bash</string>
+    <string>{wrapper}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -422,13 +444,15 @@ fn install_macos(config: &Config) -> Result<()> {
 </plist>
 "#,
         label = SERVICE_LABEL,
-        exe = xml_escape(&exe.display().to_string()),
+        wrapper = xml_escape(&wrapper_path.display().to_string()),
         stdout = xml_escape(&stdout.display().to_string()),
         stderr = xml_escape(&stderr.display().to_string())
     );
 
     fs::write(&file, plist)?;
     println!("✅ Installed launchd service: {}", file.display());
+    println!("   Wrapper: {}", wrapper_path.display());
+    println!("   API keys sourced from: ~/.secrets");
     println!("   Start with: rustyclaw service start");
     Ok(())
 }
