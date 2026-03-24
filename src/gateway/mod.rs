@@ -710,13 +710,23 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/api/config", put(api::handle_api_config_put))
         .layer(RequestBodyLimitLayer::new(1_048_576));
 
-    // Bridge endpoint needs longer timeout (5 min) for LLM calls with tool use
+    // Channel send needs a short timeout (15s) — it's just a Telegram API call
+    let channel_send_router = Router::new()
+        .route("/api/channel/send", post(api::handle_api_channel_send))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(15),
+        ));
+
+    // Bridge router: agent/run (300s for LLM calls) + channel/send (15s), 1MB body limit
     let bridge_router = Router::new()
         .route("/api/agent/run", post(api::handle_api_agent_run))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(300),
-        ));
+        ))
+        .merge(channel_send_router)
+        .layer(RequestBodyLimitLayer::new(1_048_576));
 
     // Build router with middleware
     let app = Router::new()
@@ -749,8 +759,6 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/api/cost", get(api::handle_api_cost))
         .route("/api/cli-tools", get(api::handle_api_cli_tools))
         .route("/api/health", get(api::handle_api_health))
-        // ── Bridge endpoint (channel send, short timeout is fine) ──
-        .route("/api/channel/send", post(api::handle_api_channel_send))
         // ── SSE event stream ──
         .route("/api/events", get(sse::handle_sse_events))
         // ── WebSocket agent chat ──
