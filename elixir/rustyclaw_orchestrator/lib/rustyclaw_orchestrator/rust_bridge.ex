@@ -13,9 +13,12 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   use GenServer
 
+  require Logger
+
   alias RustyclawOrchestrator.MessageProvenance
 
-  @default_base_url "http://localhost:4200"
+  @default_base_url "http://localhost:42617"
+  @startup_health_timeout 5_000
   @call_timeout 60_000
   @run_task_timeout 360_000
   @max_retries 3
@@ -70,9 +73,11 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   @impl true
   def init(opts) do
-    base_url = Keyword.get(opts, :base_url, @default_base_url)
+    base_url = resolve_base_url(opts)
     max_retries = Keyword.get(opts, :max_retries, @max_retries)
     connect_timeout = Keyword.get(opts, :connect_timeout, 5_000)
+
+    Logger.info("RustBridge starting — base_url=#{base_url}")
 
     state = %{
       base_url: base_url,
@@ -81,7 +86,27 @@ defmodule RustyclawOrchestrator.RustBridge do
       pending: %{}
     }
 
+    # Fire-and-forget startup health check so we don't block the supervisor.
+    # Skip in test — Bypass mocks don't expect unsolicited requests.
+    unless Keyword.get(opts, :skip_health_check, false) do
+      send(self(), :startup_health_check)
+    end
+
     {:ok, state}
+  end
+
+  # Resolve base URL: explicit opt → Application config → env var → default
+  defp resolve_base_url(opts) do
+    cond do
+      url = Keyword.get(opts, :base_url) ->
+        url
+
+      config = Application.get_env(:rustyclaw_orchestrator, :rust_bridge) ->
+        Keyword.get(config, :base_url, @default_base_url)
+
+      true ->
+        @default_base_url
+    end
   end
 
   @impl true
@@ -140,6 +165,28 @@ defmodule RustyclawOrchestrator.RustBridge do
   @impl true
   def handle_call(:base_url, _from, state) do
     {:reply, state.base_url, state}
+  end
+
+  @impl true
+  def handle_info(:startup_health_check, state) do
+    case Req.get(state.req, url: "/api/health", receive_timeout: @startup_health_timeout) do
+      {:ok, %Req.Response{status: status}} when status in 200..299 ->
+        Logger.info("RustBridge connected to Rust core at #{state.base_url}")
+
+      {:ok, %Req.Response{status: status}} ->
+        Logger.error(
+          "RustBridge health check failed — Rust core at #{state.base_url} returned HTTP #{status}. " <>
+            "Check that the gateway is running and the port matches."
+        )
+
+      {:error, reason} ->
+        Logger.error(
+          "RustBridge cannot reach Rust core at #{state.base_url}: #{inspect(reason)}. " <>
+            "Ensure the gateway is running. Set RUSTYCLAW_BRIDGE_PORT if using a non-default port."
+        )
+    end
+
+    {:noreply, state}
   end
 
   @impl true
