@@ -1634,9 +1634,10 @@ async fn process_channel_message(
                 return;
             }
         }
-        // Elixir not healthy — strip /btw prefix and note the fallback
+        // Elixir not healthy — strip /btw prefix and process normally
         let stripped = msg.content["/btw ".len()..].to_string();
-        msg.content = format!("[btw-fallback: orchestrator unavailable] {stripped}");
+        tracing::info!("Elixir orchestrator unavailable for /btw, processing locally");
+        msg.content = stripped;
     }
 
     let history_key = conversation_history_key(&msg);
