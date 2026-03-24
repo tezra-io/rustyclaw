@@ -105,7 +105,15 @@ pub async fn run(config: Config, host: String, port: u16, enable_elixir: bool) -
     }
 
     // Elixir orchestrator subprocess
-    let orchestrator = Arc::new(Mutex::new(elixir::ElixirOrchestrator::new(port)));
+    #[cfg(unix)]
+    let bridge_socket = Some(crate::gateway::bridge::bridge_socket_path(&config));
+    #[cfg(not(unix))]
+    let bridge_socket: Option<std::path::PathBuf> = None;
+
+    let orchestrator = Arc::new(Mutex::new(elixir::ElixirOrchestrator::new(
+        port,
+        bridge_socket.clone(),
+    )));
     if enable_elixir {
         handles.push(spawn_elixir_supervisor(orchestrator.clone()));
     } else {
@@ -165,6 +173,12 @@ pub async fn run(config: Config, host: String, port: u16, enable_elixir: bool) -
     {
         let mut orch = orchestrator.lock().await;
         orch.stop().await;
+    }
+
+    // Clean up the bridge socket file
+    #[cfg(unix)]
+    if let Some(ref socket_path) = bridge_socket {
+        crate::gateway::bridge::cleanup_socket(socket_path).await;
     }
 
     for handle in &handles {

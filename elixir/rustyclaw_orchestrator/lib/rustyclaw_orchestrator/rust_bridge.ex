@@ -73,16 +73,22 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   @impl true
   def init(opts) do
-    base_url = resolve_base_url(opts)
+    {base_url, unix_socket} = resolve_connection(opts)
     max_retries = Keyword.get(opts, :max_retries, @max_retries)
     connect_timeout = Keyword.get(opts, :connect_timeout, 5_000)
 
-    Logger.info("RustBridge starting — base_url=#{base_url}")
+    transport =
+      if unix_socket,
+        do: "UDS (#{unix_socket})",
+        else: "TCP (#{base_url})"
+
+    Logger.info("RustBridge starting — #{transport}")
 
     state = %{
       base_url: base_url,
+      unix_socket: unix_socket,
       max_retries: max_retries,
-      req: build_req(base_url, connect_timeout),
+      req: build_req(base_url, connect_timeout, unix_socket),
       pending: %{}
     }
 
@@ -95,17 +101,26 @@ defmodule RustyclawOrchestrator.RustBridge do
     {:ok, state}
   end
 
-  # Resolve base URL: explicit opt → Application config → env var → default
-  defp resolve_base_url(opts) do
+  # Resolve connection params: explicit opts → Application config → defaults.
+  # Returns {base_url, unix_socket | nil}.
+  defp resolve_connection(opts) do
+    explicit_socket = Keyword.get(opts, :unix_socket)
+    explicit_url = Keyword.get(opts, :base_url)
+
     cond do
-      url = Keyword.get(opts, :base_url) ->
-        url
+      explicit_socket ->
+        {explicit_url || "http://localhost", explicit_socket}
+
+      explicit_url ->
+        {explicit_url, nil}
 
       config = Application.get_env(:rustyclaw_orchestrator, :rust_bridge) ->
-        Keyword.get(config, :base_url, @default_base_url)
+        url = Keyword.get(config, :base_url, @default_base_url)
+        socket = Keyword.get(config, :unix_socket)
+        {url, socket}
 
       true ->
-        @default_base_url
+        {@default_base_url, nil}
     end
   end
 
@@ -169,20 +184,22 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   @impl true
   def handle_info(:startup_health_check, state) do
+    target = connection_label(state)
+
     case Req.get(state.req, url: "/api/health", receive_timeout: @startup_health_timeout) do
       {:ok, %Req.Response{status: status}} when status in 200..299 ->
-        Logger.info("RustBridge connected to Rust core at #{state.base_url}")
+        Logger.info("RustBridge connected to Rust core via #{target}")
 
       {:ok, %Req.Response{status: status}} ->
         Logger.error(
-          "RustBridge health check failed — Rust core at #{state.base_url} returned HTTP #{status}. " <>
-            "Check that the gateway is running and the port matches."
+          "RustBridge health check failed — Rust core at #{target} returned HTTP #{status}. " <>
+            "Check that the gateway is running."
         )
 
       {:error, reason} ->
         Logger.error(
-          "RustBridge cannot reach Rust core at #{state.base_url}: #{inspect(reason)}. " <>
-            "Ensure the gateway is running. Set RUSTYCLAW_BRIDGE_PORT if using a non-default port."
+          "RustBridge cannot reach Rust core at #{target}: #{inspect(reason)}. " <>
+            "Ensure the gateway is running."
         )
     end
 
@@ -205,15 +222,24 @@ defmodule RustyclawOrchestrator.RustBridge do
 
   # --- Internals ---
 
-  defp build_req(base_url, connect_timeout) do
-    Req.new(
+  defp build_req(base_url, connect_timeout, unix_socket) do
+    base_opts = [
       base_url: base_url,
       headers: [{"content-type", "application/json"}],
       receive_timeout: 30_000,
       connect_options: [timeout: connect_timeout],
       # Disable Req's built-in retry — we handle retries ourselves
       retry: false
-    )
+    ]
+
+    opts =
+      if unix_socket do
+        Keyword.put(base_opts, :unix_socket, unix_socket)
+      else
+        base_opts
+      end
+
+    Req.new(opts)
   end
 
   defp post_with_retry(_req, _path, _body, attempt, max_retries) when attempt >= max_retries do
@@ -251,4 +277,7 @@ defmodule RustyclawOrchestrator.RustBridge do
   end
 
   defp maybe_add_provenance(body, _), do: body
+
+  defp connection_label(%{unix_socket: socket}) when is_binary(socket), do: "UDS (#{socket})"
+  defp connection_label(%{base_url: url}), do: url
 end

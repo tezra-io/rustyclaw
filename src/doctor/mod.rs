@@ -1046,7 +1046,7 @@ fn check_orchestrator(_config: &Config, items: &mut Vec<DiagItem>) {
     }
 
     // Check orchestrator project exists
-    let orch = crate::daemon::elixir::ElixirOrchestrator::new(0);
+    let orch = crate::daemon::elixir::ElixirOrchestrator::new(0, None);
     let project_dir = orch.project_dir();
     if project_dir.join("mix.exs").exists() {
         items.push(DiagItem::ok(

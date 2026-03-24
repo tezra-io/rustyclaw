@@ -8,6 +8,7 @@
 //! - Header sanitization (handled by axum/hyper)
 
 pub mod api;
+pub mod bridge;
 pub mod sse;
 pub mod static_files;
 pub mod ws;
@@ -663,6 +664,46 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         cost_tracker,
         event_tx,
     };
+
+    // ── UDS bridge listener (Unix only) ─────────────────────────
+    // Serves bridge routes on a Unix socket with no bearer auth required.
+    // Filesystem permissions (0600) enforce same-UID access.
+    #[cfg(unix)]
+    {
+        let socket_path = bridge::bridge_socket_path(&config);
+        match bridge::create_uds_listener(&socket_path).await {
+            Ok(uds_listener) => {
+                let bridge_app = Router::new()
+                    .route("/api/agent/run", post(api::handle_bridge_agent_run))
+                    .route("/api/channel/send", post(api::handle_bridge_channel_send))
+                    .route("/api/health", get(api::handle_bridge_health))
+                    .with_state(state.clone())
+                    .layer(RequestBodyLimitLayer::new(bridge::BRIDGE_BODY_SIZE))
+                    .layer(TimeoutLayer::with_status_code(
+                        StatusCode::REQUEST_TIMEOUT,
+                        Duration::from_secs(bridge::BRIDGE_TIMEOUT_SECS),
+                    ));
+
+                tracing::info!(
+                    path = %socket_path.display(),
+                    "UDS bridge listener started"
+                );
+
+                tokio::spawn(async move {
+                    if let Err(e) = axum::serve(uds_listener, bridge_app.into_make_service()).await
+                    {
+                        tracing::error!("UDS bridge server exited: {e}");
+                    }
+                });
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to start UDS bridge listener: {e}. \
+                     Bridge will use TCP with bearer auth only."
+                );
+            }
+        }
+    }
 
     // Config PUT needs larger body limit (1MB)
     let config_put_router = Router::new()

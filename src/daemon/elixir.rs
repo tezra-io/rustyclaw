@@ -43,6 +43,7 @@ pub struct ElixirOrchestrator {
     project_dir: PathBuf,
     status: OrchestratorStatus,
     rust_bridge_port: u16,
+    bridge_socket_path: Option<PathBuf>,
 }
 
 impl ElixirOrchestrator {
@@ -119,13 +120,14 @@ impl ElixirOrchestrator {
     }
 
     /// Create a new orchestrator manager. Does not start the process.
-    pub fn new(rust_bridge_port: u16) -> Self {
+    pub fn new(rust_bridge_port: u16, bridge_socket_path: Option<PathBuf>) -> Self {
         let project_dir = Self::resolve_project_dir().unwrap_or_default();
         Self {
             child: None,
             project_dir,
             status: OrchestratorStatus::Stopped,
             rust_bridge_port,
+            bridge_socket_path,
         }
     }
 
@@ -194,8 +196,8 @@ impl ElixirOrchestrator {
         }
 
         // Start the Elixir application
-        let mut child = Command::new("elixir")
-            .arg("--no-halt")
+        let mut cmd = Command::new("elixir");
+        cmd.arg("--no-halt")
             .arg("-S")
             .arg("mix")
             .arg("run")
@@ -204,7 +206,13 @@ impl ElixirOrchestrator {
             .env("MIX_ENV", "prod")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+
+        if let Some(ref socket_path) = self.bridge_socket_path {
+            cmd.env("RUSTYCLAW_BRIDGE_SOCKET", socket_path.as_os_str());
+        }
+
+        let mut child = cmd
             .spawn()
             .context("Failed to spawn Elixir orchestrator process")?;
 
@@ -459,7 +467,7 @@ mod tests {
 
     #[test]
     fn orchestrator_new_sets_stopped() {
-        let orch = ElixirOrchestrator::new(4200);
+        let orch = ElixirOrchestrator::new(4200, None);
         assert_eq!(*orch.status(), OrchestratorStatus::Stopped);
     }
 

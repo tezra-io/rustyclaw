@@ -964,7 +964,7 @@ async fn setup_elixir_orchestrator() {
     }
 
     // Locate and compile orchestrator
-    let orch = crate::daemon::elixir::ElixirOrchestrator::new(0);
+    let orch = crate::daemon::elixir::ElixirOrchestrator::new(0, None);
     let project_dir = orch.project_dir().to_path_buf();
     if !project_dir.join("mix.exs").exists() {
         println!(

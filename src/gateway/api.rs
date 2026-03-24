@@ -577,9 +577,20 @@ pub async fn handle_api_agent_run(
         return e.into_response();
     }
 
+    Box::pin(agent_run_inner(&state, body)).await
+}
+
+/// POST /api/agent/run — UDS bridge variant (no auth — filesystem permissions enforce access).
+pub async fn handle_bridge_agent_run(
+    State(state): State<AppState>,
+    Json(body): Json<AgentRunBody>,
+) -> impl IntoResponse {
+    Box::pin(agent_run_inner(&state, body)).await
+}
+
+async fn agent_run_inner(state: &AppState, body: AgentRunBody) -> axum::response::Response {
     let config = state.config.lock().clone();
 
-    // Apply optional overrides from the request
     let mut effective_config = config;
     if let Some(ref model) = body.model {
         effective_config.default_model = Some(model.clone());
@@ -624,6 +635,18 @@ pub async fn handle_api_channel_send(
         return e.into_response();
     }
 
+    channel_send_inner(&state, body).await
+}
+
+/// POST /api/channel/send — UDS bridge variant (no auth).
+pub async fn handle_bridge_channel_send(
+    State(state): State<AppState>,
+    Json(body): Json<ChannelSendBody>,
+) -> impl IntoResponse {
+    channel_send_inner(&state, body).await
+}
+
+async fn channel_send_inner(state: &AppState, body: ChannelSendBody) -> axum::response::Response {
     let recipient = body.chat_id.unwrap_or_default();
     if recipient.is_empty() {
         return (
@@ -633,7 +656,6 @@ pub async fn handle_api_channel_send(
             .into_response();
     }
 
-    // Extract quote_reply_id from the JSON value (supports both string and integer)
     let quote_id = body.quote_message_id.as_ref().and_then(|v| match v {
         serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
         serde_json::Value::Number(n) => Some(n.to_string()),
@@ -643,7 +665,6 @@ pub async fn handle_api_channel_send(
     let message =
         crate::channels::SendMessage::new(&body.text, &recipient).with_quote_reply(quote_id);
 
-    // Route to the appropriate channel (using shared instances from AppState)
     let result = match body.channel.as_str() {
         "telegram" => {
             if let Some(ref tg) = state.telegram {
@@ -670,6 +691,25 @@ pub async fn handle_api_channel_send(
         )
             .into_response(),
     }
+}
+
+/// GET /api/health — UDS bridge health check (no auth).
+pub async fn handle_bridge_health() -> impl IntoResponse {
+    let snapshot = crate::health::snapshot();
+    let all_ok = snapshot.components.values().all(|c| c.status == "ok");
+    let status = if all_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        Json(serde_json::json!({
+            "status": if all_ok { "ok" } else { "degraded" },
+            "components": snapshot.components,
+        })),
+    )
+        .into_response()
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
