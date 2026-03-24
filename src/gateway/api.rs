@@ -1,15 +1,18 @@
 //! REST API handlers for the web dashboard.
 //!
 //! All `/api/*` routes require bearer token authentication (PairingGuard).
+//! Bridge endpoints (`/api/agent/run`, `/api/channel/send`) also accept
+//! unauthenticated requests from loopback addresses (127.0.0.1 / ::1).
 
 use super::AppState;
 use crate::channels::Channel;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{ConnectInfo, Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
 };
 use serde::Deserialize;
+use std::net::SocketAddr;
 
 const MASKED_SECRET: &str = "***MASKED***";
 
@@ -43,6 +46,40 @@ fn require_auth(
             })),
         ))
     }
+}
+
+// ── Loopback auth bypass (for Elixir bridge endpoints) ──────────
+
+/// Returns `true` when the peer address is a loopback IP (127.0.0.1 or ::1).
+fn is_loopback(addr: &SocketAddr) -> bool {
+    addr.ip().is_loopback()
+}
+
+/// Like [`require_auth`], but skips bearer-token validation when the request
+/// originates from a loopback address. Used only for internal bridge endpoints
+/// that the co-located Elixir orchestrator calls.
+///
+/// When `trust_forwarded_headers` is enabled (reverse proxy deployment), the
+/// real client IP is resolved from `X-Forwarded-For` / `X-Real-IP` before
+/// checking loopback — a proxied remote request won't accidentally bypass auth
+/// just because the proxy itself connects from 127.0.0.1.
+pub(crate) fn require_auth_or_loopback(
+    state: &AppState,
+    headers: &HeaderMap,
+    peer_addr: &SocketAddr,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    // Resolve the effective client IP: forwarded header (when trusted) → raw peer.
+    let effective_ip = if state.trust_forwarded_headers {
+        super::forwarded_client_ip(headers).unwrap_or_else(|| peer_addr.ip())
+    } else {
+        peer_addr.ip()
+    };
+
+    if effective_ip.is_loopback() {
+        tracing::debug!(peer = %peer_addr, effective = %effective_ip, "bridge auth: loopback bypass");
+        return Ok(());
+    }
+    require_auth(state, headers)
 }
 
 // ── Query parameters ─────────────────────────────────────────────
@@ -532,10 +569,11 @@ pub struct AgentRunBody {
 /// POST /api/agent/run — execute an agent task (called by Elixir RustBridge)
 pub async fn handle_api_agent_run(
     State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<AgentRunBody>,
 ) -> impl IntoResponse {
-    if let Err(e) = require_auth(&state, &headers) {
+    if let Err(e) = require_auth_or_loopback(&state, &headers, &peer_addr) {
         return e.into_response();
     }
 
@@ -578,10 +616,11 @@ pub struct ChannelSendBody {
 /// POST /api/channel/send — send a message to a channel (called by Elixir BtwServer)
 pub async fn handle_api_channel_send(
     State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<ChannelSendBody>,
 ) -> impl IntoResponse {
-    if let Err(e) = require_auth(&state, &headers) {
+    if let Err(e) = require_auth_or_loopback(&state, &headers, &peer_addr) {
         return e.into_response();
     }
 
@@ -1507,5 +1546,31 @@ mod tests {
             .embedding_routes
             .iter()
             .all(|route| route.api_key.as_deref() != Some(MASKED_SECRET)));
+    }
+
+    // ── Loopback auth bypass tests ─────────────────────────────────
+
+    #[test]
+    fn is_loopback_ipv4() {
+        let addr: SocketAddr = "127.0.0.1:9999".parse().unwrap();
+        assert!(is_loopback(&addr));
+    }
+
+    #[test]
+    fn is_loopback_ipv6() {
+        let addr: SocketAddr = "[::1]:9999".parse().unwrap();
+        assert!(is_loopback(&addr));
+    }
+
+    #[test]
+    fn is_loopback_remote_ipv4() {
+        let addr: SocketAddr = "192.168.1.50:9999".parse().unwrap();
+        assert!(!is_loopback(&addr));
+    }
+
+    #[test]
+    fn is_loopback_remote_ipv6() {
+        let addr: SocketAddr = "[2001:db8::1]:9999".parse().unwrap();
+        assert!(!is_loopback(&addr));
     }
 }

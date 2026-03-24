@@ -239,7 +239,7 @@ fn parse_client_ip(value: &str) -> Option<IpAddr> {
     value.parse::<IpAddr>().ok()
 }
 
-fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
+pub(crate) fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
     if let Some(xff) = headers.get("X-Forwarded-For").and_then(|v| v.to_str().ok()) {
         for candidate in xff.split(',') {
             if let Some(ip) = parse_client_ip(candidate) {
@@ -2811,5 +2811,102 @@ mod tests {
 
         // Should be allowed again
         assert!(limiter.allow("burst-ip"));
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // Loopback Auth Bypass Tests (TEZ-234)
+    // ══════════════════════════════════════════════════════════
+
+    /// Build an AppState with pairing **enabled** and no tokens —
+    /// every unauthenticated request will be rejected unless the
+    /// loopback bypass kicks in.
+    fn test_state_with_pairing() -> AppState {
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider::default());
+        let memory: Arc<dyn Memory> = Arc::new(MockMemory);
+        AppState {
+            config: Arc::new(Mutex::new(Config::default())),
+            provider,
+            model: "test-model".into(),
+            temperature: 0.0,
+            mem: memory,
+            auto_save: false,
+            webhook_secret_hash: None,
+            pairing: Arc::new(PairingGuard::new(true, &[])),
+            trust_forwarded_headers: false,
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            telegram: None,
+            whatsapp: None,
+            whatsapp_app_secret: None,
+            linq: None,
+            linq_signing_secret: None,
+            nextcloud_talk: None,
+            nextcloud_talk_webhook_secret: None,
+            wati: None,
+            observer: Arc::new(crate::observability::NoopObserver),
+            tools_registry: Arc::new(Vec::new()),
+            cost_tracker: None,
+            event_tx: tokio::sync::broadcast::channel(16).0,
+        }
+    }
+
+    #[test]
+    fn loopback_bypass_allows_ipv4_localhost() {
+        let state = test_state_with_pairing();
+        let headers = HeaderMap::new();
+        let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        assert!(api::require_auth_or_loopback(&state, &headers, &addr).is_ok());
+    }
+
+    #[test]
+    fn loopback_bypass_allows_ipv6_localhost() {
+        let state = test_state_with_pairing();
+        let headers = HeaderMap::new();
+        let addr: SocketAddr = "[::1]:12345".parse().unwrap();
+        assert!(api::require_auth_or_loopback(&state, &headers, &addr).is_ok());
+    }
+
+    #[test]
+    fn loopback_bypass_rejects_remote_without_token() {
+        let state = test_state_with_pairing();
+        let headers = HeaderMap::new();
+        let addr: SocketAddr = "10.0.0.5:12345".parse().unwrap();
+        assert!(api::require_auth_or_loopback(&state, &headers, &addr).is_err());
+    }
+
+    #[test]
+    fn loopback_bypass_not_needed_when_pairing_disabled() {
+        let mut state = test_state_with_pairing();
+        // Override pairing to disabled
+        state.pairing = Arc::new(PairingGuard::new(false, &[]));
+        let headers = HeaderMap::new();
+        let remote: SocketAddr = "192.168.1.50:9999".parse().unwrap();
+        // Even a remote addr passes when pairing is disabled
+        assert!(api::require_auth_or_loopback(&state, &headers, &remote).is_ok());
+    }
+
+    #[test]
+    fn loopback_bypass_respects_forwarded_headers() {
+        // Simulate reverse proxy: peer is loopback but X-Forwarded-For reveals remote client
+        let mut state = test_state_with_pairing();
+        state.trust_forwarded_headers = true;
+
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Forwarded-For", "203.0.113.50".parse().unwrap());
+        let proxy_addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        // Remote client behind proxy → must NOT bypass auth
+        assert!(api::require_auth_or_loopback(&state, &headers, &proxy_addr).is_err());
+    }
+
+    #[test]
+    fn loopback_bypass_allows_true_local_behind_proxy() {
+        // Elixir on the same box, forwarded header also says loopback
+        let mut state = test_state_with_pairing();
+        state.trust_forwarded_headers = true;
+
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Forwarded-For", "127.0.0.1".parse().unwrap());
+        let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        assert!(api::require_auth_or_loopback(&state, &headers, &addr).is_ok());
     }
 }
