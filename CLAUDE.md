@@ -266,6 +266,7 @@ When uncertain, classify as higher risk.
 ## 11) Key Reference Docs
 
 - `docs/ELIXIR_ORCHESTRATION_DESIGN.md` — orchestration architecture and implementation plan
+- `docs/session-bridge-design.md` — session bridge (Telegram ↔ Claude Code) design and integration points
 - `docs/commands-reference.md` — CLI commands
 - `docs/providers-reference.md` — LLM provider configuration
 - `docs/channels-reference.md` — channel setup
