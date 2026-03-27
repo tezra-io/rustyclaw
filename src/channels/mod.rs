@@ -3374,7 +3374,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         .is_some_and(|tg| tg.interrupt_on_new_message);
 
     let runtime_ctx = Arc::new(ChannelRuntimeContext {
-        channels_by_name,
+        channels_by_name: channels_by_name.clone(),
         provider: Arc::clone(&provider),
         default_provider: Arc::new(provider_name),
         memory: Arc::clone(&mem),
@@ -3401,6 +3401,32 @@ pub async fn start_channels(config: Config) -> Result<()> {
             let mut runner = crate::hooks::HookRunner::new();
             if config.hooks.builtin.command_logger {
                 runner.register(Box::new(crate::hooks::builtin::CommandLoggerHook::new()));
+            }
+            if config.hooks.builtin.session_bridge {
+                let sb_config = config.session_bridge.clone().unwrap_or_default();
+                let sb_allowed = config
+                    .channels_config
+                    .telegram
+                    .as_ref()
+                    .map(|tg| tg.allowed_users.clone())
+                    .unwrap_or_default();
+                let sb_config_dir = config
+                    .config_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."));
+                match crate::hooks::builtin::SessionBridgeHook::new(
+                    channels_by_name.clone(),
+                    sb_config,
+                    sb_allowed,
+                    sb_config_dir,
+                )
+                .await
+                {
+                    Ok(hook) => runner.register(Box::new(hook)),
+                    Err(e) => {
+                        tracing::error!("Failed to initialize session-bridge hook: {e}");
+                    }
+                }
             }
             Some(Arc::new(runner))
         } else {

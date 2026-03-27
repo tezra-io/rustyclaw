@@ -211,6 +211,10 @@ pub struct Config {
     #[serde(default)]
     pub hooks: HooksConfig,
 
+    /// Session bridge configuration for routing messages to CLI processes.
+    #[serde(default)]
+    pub session_bridge: Option<SessionBridgeConfig>,
+
     /// Hardware configuration (wizard-driven physical world setup).
     #[serde(default)]
     pub hardware: HardwareConfig,
@@ -1948,6 +1952,58 @@ impl Default for HooksConfig {
 pub struct BuiltinHooksConfig {
     /// Enable the command-logger hook (logs tool calls for auditing).
     pub command_logger: bool,
+    /// Enable the session-bridge hook (routes messages to Claude Code CLI processes).
+    #[serde(default)]
+    pub session_bridge: bool,
+}
+
+// ── Session Bridge ──────────────────────────────────────────────
+
+/// Configuration for the session bridge hook that routes Telegram messages
+/// directly to Claude Code CLI processes, bypassing the normal LLM agent loop.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SessionBridgeConfig {
+    /// Default working directory for spawned CLI sessions.
+    #[serde(default)]
+    pub default_workspace: Option<PathBuf>,
+    /// Maximum number of concurrent sessions across all users.
+    #[serde(default = "default_max_sessions")]
+    pub max_sessions: usize,
+    /// Milliseconds to buffer output before flushing to the channel.
+    #[serde(default = "default_output_buffer_ms")]
+    pub output_buffer_ms: u64,
+    /// Named agent configurations (command + args to spawn).
+    #[serde(default)]
+    pub agents: HashMap<String, SessionBridgeAgentConfig>,
+}
+
+impl Default for SessionBridgeConfig {
+    fn default() -> Self {
+        Self {
+            default_workspace: None,
+            max_sessions: default_max_sessions(),
+            output_buffer_ms: default_output_buffer_ms(),
+            agents: HashMap::new(),
+        }
+    }
+}
+
+fn default_max_sessions() -> usize {
+    5
+}
+
+fn default_output_buffer_ms() -> u64 {
+    500
+}
+
+/// Configuration for a named session bridge agent (the CLI command to spawn).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SessionBridgeAgentConfig {
+    /// The command to execute (e.g. "claude").
+    pub command: String,
+    /// Arguments to pass to the command.
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 // ── Autonomy / Security ──────────────────────────────────────────
@@ -3630,6 +3686,7 @@ impl Default for Config {
             peripherals: PeripheralsConfig::default(),
             agents: HashMap::new(),
             hooks: HooksConfig::default(),
+            session_bridge: None,
             hardware: HardwareConfig::default(),
             query_classification: QueryClassificationConfig::default(),
             transcription: TranscriptionConfig::default(),
@@ -5199,6 +5256,7 @@ default_temperature = 0.7
             peripherals: PeripheralsConfig::default(),
             agents: HashMap::new(),
             hooks: HooksConfig::default(),
+            session_bridge: None,
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
             trajectory: crate::trajectory::TrajectoryConfig::default(),
@@ -5382,6 +5440,7 @@ tool_dispatcher = "xml"
             peripherals: PeripheralsConfig::default(),
             agents: HashMap::new(),
             hooks: HooksConfig::default(),
+            session_bridge: None,
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
             trajectory: crate::trajectory::TrajectoryConfig::default(),
