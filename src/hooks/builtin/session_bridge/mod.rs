@@ -55,6 +55,25 @@ impl SessionBridgeHook {
         })
     }
 
+    /// Check if a canonicalized path is under HOME or configured allowed_roots.
+    fn is_path_allowed(&self, canonical: &std::path::Path) -> bool {
+        // Always allow paths under $HOME
+        if let Ok(home) = std::env::var("HOME") {
+            let home_path = std::path::Path::new(&home);
+            if canonical.starts_with(home_path) {
+                return true;
+            }
+        }
+        // Check configured allowed_roots
+        for root in &self.config.allowed_roots {
+            let root_canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
+            if canonical.starts_with(&root_canonical) {
+                return true;
+            }
+        }
+        false
+    }
+
     async fn send_reply(&self, message: &ChannelMessage, content: &str) {
         if let Some(channel) = self.channels_by_name.get(&message.channel) {
             let reply = SendMessage::new(content, &message.reply_target)
@@ -120,6 +139,23 @@ impl SessionBridgeHook {
                 .await;
                 return HookResult::Cancel("connect: invalid path".to_string());
             }
+        }
+
+        // Validate path is under an allowed root (HOME or configured allowed_roots)
+        let canonical = tokio::fs::canonicalize(&work_dir)
+            .await
+            .unwrap_or_else(|_| work_dir.clone());
+        let allowed = self.is_path_allowed(&canonical);
+        if !allowed {
+            self.send_reply(
+                message,
+                &format!(
+                    "Access denied: {} is outside allowed directories. Only paths under HOME are permitted.",
+                    work_dir.display()
+                ),
+            )
+            .await;
+            return HookResult::Cancel("connect: path not allowed".to_string());
         }
 
         // Check if already bound (non-stale)
@@ -412,6 +448,12 @@ impl HookHandler for SessionBridgeHook {
                         "failed to clean up stale binding"
                     );
                 }
+                // Notify user their previous session ended (restart recovery)
+                self.send_reply(
+                    &message,
+                    "Your Claude Code session ended when RustyClaw restarted. Send /connect to start a new one.",
+                )
+                .await;
                 // Let the message through to normal agent loop
                 return HookResult::Continue(message);
             }
@@ -558,6 +600,12 @@ mod tests {
         );
         SessionBridgeConfig {
             agents,
+            // Allow /tmp and /var for tests (TempDir uses platform-specific tmpdir)
+            allowed_roots: vec![
+                std::path::PathBuf::from("/tmp"),
+                std::path::PathBuf::from("/var"),
+                std::path::PathBuf::from("/private"),
+            ],
             ..Default::default()
         }
     }
@@ -745,6 +793,72 @@ mod tests {
         // /status on Slack should NOT be intercepted
         let msg = test_message_on_channel("/status", "slack");
         assert!(!hook.on_message_received(msg).await.is_cancel());
+    }
+
+    #[tokio::test]
+    async fn stale_binding_sends_restart_notification() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create binding, persist
+        {
+            let hook = make_hook(tmp.path()).await;
+            hook.binding_table
+                .bind(binding_table::SessionBinding {
+                    channel: "telegram".to_string(),
+                    sender: "alice".to_string(),
+                    agent_name: "claude".to_string(),
+                    working_dir: std::path::PathBuf::from("/tmp"),
+                    bound_at: chrono::Utc::now(),
+                    stale: false,
+                })
+                .await
+                .unwrap();
+        }
+
+        // Reload — binding is now stale. Use channel mock to capture replies.
+        let (channel, sent) = mock_channel();
+        let hook = make_hook_with_channel(tmp.path(), config_with_agents(), channel).await;
+
+        // Message should pass through (stale auto-cleaned) and notify user
+        let msg = test_message("hello world");
+        assert!(!hook.on_message_received(msg).await.is_cancel());
+        let reply = last_reply(&sent);
+        assert!(reply.contains("session ended when RustyClaw restarted"));
+    }
+
+    #[tokio::test]
+    async fn connect_path_outside_allowed_roots_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let (channel, sent) = mock_channel();
+        // Config with NO extra allowed_roots — only HOME is permitted
+        let config = SessionBridgeConfig {
+            agents: {
+                let mut a = HashMap::new();
+                a.insert(
+                    "claude".to_string(),
+                    SessionBridgeAgentConfig {
+                        command: "/bin/sh".to_string(),
+                        args: vec!["-c".to_string(), "cat".to_string()],
+                    },
+                );
+                a
+            },
+            allowed_roots: vec![],
+            ..Default::default()
+        };
+        let hook = make_hook_with_channel(tmp.path(), config, channel).await;
+
+        // tmp.path() is NOT under HOME (it's in /var/folders or /tmp).
+        // Since allowed_roots is empty and it's not under HOME, this should be rejected.
+        let path = tmp.path().to_path_buf();
+        let msg = test_message(&format!("/connect claude {}", path.display()));
+        assert!(hook.on_message_received(msg).await.is_cancel());
+        let reply = last_reply(&sent);
+        // Should either be "Access denied" or "Directory not found" (if $HOME check catches it)
+        assert!(
+            reply.contains("Access denied") || reply.contains("outside allowed"),
+            "expected access denied, got: {reply}"
+        );
     }
 
     // ── /connect tests ──────────────────────────────────

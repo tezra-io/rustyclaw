@@ -1975,6 +1975,10 @@ pub struct SessionBridgeConfig {
     /// Named agent configurations (command + args to spawn).
     #[serde(default)]
     pub agents: HashMap<String, SessionBridgeAgentConfig>,
+    /// Additional directories allowed for /connect paths beyond $HOME.
+    /// By default, only paths under the user's home directory are permitted.
+    #[serde(default)]
+    pub allowed_roots: Vec<PathBuf>,
 }
 
 impl Default for SessionBridgeConfig {
@@ -1984,6 +1988,7 @@ impl Default for SessionBridgeConfig {
             max_sessions: default_max_sessions(),
             output_buffer_ms: default_output_buffer_ms(),
             agents: HashMap::new(),
+            allowed_roots: Vec::new(),
         }
     }
 }
