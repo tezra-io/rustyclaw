@@ -1,4 +1,5 @@
 pub mod binding_table;
+pub mod process_manager;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use crate::config::SessionBridgeConfig;
 use crate::hooks::traits::{HookHandler, HookResult};
 
 use binding_table::BindingTable;
+use process_manager::ProcessManager;
 
 /// Runtime commands that the session bridge does NOT intercept.
 /// These pass through to the normal RustyClaw command handling.
@@ -32,6 +34,7 @@ pub struct SessionBridgeHook {
     config: SessionBridgeConfig,
     allowed_users: Vec<String>,
     binding_table: BindingTable,
+    process_manager: ProcessManager,
 }
 
 impl SessionBridgeHook {
@@ -42,11 +45,13 @@ impl SessionBridgeHook {
         config_dir: &Path,
     ) -> Result<Self> {
         let binding_table = BindingTable::load(config_dir).await?;
+        let process_manager = ProcessManager::new();
         Ok(Self {
             channels_by_name,
             config,
             allowed_users,
             binding_table,
+            process_manager,
         })
     }
 
@@ -137,6 +142,20 @@ impl SessionBridgeHook {
             }
         }
 
+        // Check crash cooldown
+        if self
+            .process_manager
+            .in_cooldown(&message.channel, &message.sender)
+            .await
+        {
+            self.send_reply(
+                message,
+                "Too many recent crashes. Please wait before reconnecting.",
+            )
+            .await;
+            return HookResult::Cancel("connect: cooldown".to_string());
+        }
+
         // Check max sessions
         let active = self.binding_table.count_active().await;
         if active >= self.config.max_sessions {
@@ -151,7 +170,7 @@ impl SessionBridgeHook {
             return HookResult::Cancel("connect: max sessions".to_string());
         }
 
-        // Create binding (stale=false; TEZ-264 will add actual process spawning)
+        // Create binding
         let binding = binding_table::SessionBinding {
             channel: message.channel.clone(),
             sender: message.sender.clone(),
@@ -168,19 +187,65 @@ impl SessionBridgeHook {
             return HookResult::Cancel("connect: bind failed".to_string());
         }
 
-        self.send_reply(
-            message,
-            &format!("Connected to {} in {}", agent_name, work_dir.display()),
-        )
-        .await;
+        // Spawn child process
+        let agent_config = &self.config.agents[agent_name];
+        let channel_ref = match self.channels_by_name.get(&message.channel) {
+            Some(ch) => ch.clone(),
+            None => {
+                // Rollback binding
+                let _ = self
+                    .binding_table
+                    .unbind(&message.channel, &message.sender)
+                    .await;
+                self.send_reply(message, "Internal error: channel not found.")
+                    .await;
+                return HookResult::Cancel("connect: no channel".to_string());
+            }
+        };
 
-        tracing::info!(
-            hook = "session-bridge",
-            channel = %message.channel,
-            sender = %message.sender,
-            agent = agent_name,
-            "session connected"
-        );
+        match self
+            .process_manager
+            .spawn(
+                &message.channel,
+                &message.sender,
+                &message.reply_target,
+                message.thread_ts.clone(),
+                agent_config,
+                &work_dir,
+                self.config.output_buffer_ms,
+                channel_ref,
+                &self.binding_table,
+            )
+            .await
+        {
+            Ok(session_id) => {
+                self.send_reply(
+                    message,
+                    &format!("Connected to {} in {}", agent_name, work_dir.display()),
+                )
+                .await;
+
+                tracing::info!(
+                    hook = "session-bridge",
+                    channel = %message.channel,
+                    sender = %message.sender,
+                    agent = agent_name,
+                    session_id = %session_id,
+                    "session connected"
+                );
+            }
+            Err(e) => {
+                // Rollback binding on spawn failure
+                let _ = self
+                    .binding_table
+                    .unbind(&message.channel, &message.sender)
+                    .await;
+                tracing::error!(hook = "session-bridge", error = %e, "spawn failed");
+                self.send_reply(message, &format!("Failed to start session: {e}"))
+                    .await;
+                return HookResult::Cancel("connect: spawn failed".to_string());
+            }
+        }
 
         HookResult::Cancel("connect: success".to_string())
     }
@@ -192,6 +257,11 @@ impl SessionBridgeHook {
             .await
         {
             Some(binding) => {
+                // Kill the child process if running
+                self.process_manager
+                    .kill(&message.channel, &message.sender)
+                    .await;
+
                 if let Err(e) = self
                     .binding_table
                     .unbind(&message.channel, &message.sender)
@@ -346,16 +416,44 @@ impl HookHandler for SessionBridgeHook {
                 return HookResult::Continue(message);
             }
 
-            // 6b. Active binding → route to child process (stub for TEZ-264)
-            tracing::info!(
-                hook = "session-bridge",
-                channel = %message.channel,
-                sender = %message.sender,
-                agent = %binding.agent_name,
-                "routing message to bound session (stub)"
-            );
+            // 6b. Active binding → route to child process
+            match self
+                .process_manager
+                .send_message(&message.channel, &message.sender, content)
+                .await
+            {
+                Ok(pending) => {
+                    if pending >= process_manager::QUEUE_WARN_THRESHOLD {
+                        self.send_reply(
+                            &message,
+                            "Claude Code is still processing. Messages are queued.",
+                        )
+                        .await;
+                    }
+                    tracing::debug!(
+                        hook = "session-bridge",
+                        channel = %message.channel,
+                        sender = %message.sender,
+                        agent = %binding.agent_name,
+                        pending = pending,
+                        "routed message to bound session"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        hook = "session-bridge",
+                        error = %e,
+                        "failed to route message to child process"
+                    );
+                    self.send_reply(
+                        &message,
+                        "Failed to send message to Claude Code session. Try /disconnect and reconnect.",
+                    )
+                    .await;
+                }
+            }
             return HookResult::Cancel(format!(
-                "Session bridge: message would be routed to agent '{}' (not yet implemented)",
+                "session-bridge: routed to '{}'",
                 binding.agent_name
             ));
         }
@@ -438,20 +536,24 @@ mod tests {
         (channel as Arc<dyn Channel>, sent)
     }
 
+    /// Create a config with agent commands that accept arbitrary arguments
+    /// without failing. Uses `/bin/sh -c cat` to simulate a process that
+    /// reads stdin and stays alive, ignoring the extra CLI flags added
+    /// by the process manager (--print, --input-format, etc.).
     fn config_with_agents() -> SessionBridgeConfig {
         let mut agents = HashMap::new();
         agents.insert(
             "claude".to_string(),
             SessionBridgeAgentConfig {
-                command: "claude".to_string(),
-                args: vec![],
+                command: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), "cat".to_string()],
             },
         );
         agents.insert(
             "codex".to_string(),
             SessionBridgeAgentConfig {
-                command: "codex".to_string(),
-                args: vec![],
+                command: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), "cat".to_string()],
             },
         );
         SessionBridgeConfig {

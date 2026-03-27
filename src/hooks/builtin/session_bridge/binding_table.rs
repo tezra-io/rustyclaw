@@ -28,7 +28,7 @@ pub struct SessionBinding {
 ///
 /// Keyed on `(channel, sender)`. Persists as JSON in the config directory
 /// alongside `daemon_state.json`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BindingTable {
     inner: Arc<RwLock<HashMap<BindingKey, SessionBinding>>>,
     persistence_path: PathBuf,
