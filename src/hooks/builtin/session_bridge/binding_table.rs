@@ -108,6 +108,12 @@ impl BindingTable {
         Ok(removed)
     }
 
+    /// Count the number of non-stale (active) bindings.
+    pub async fn count_active(&self) -> usize {
+        let map = self.inner.read().await;
+        map.values().filter(|b| !b.stale).count()
+    }
+
     /// Look up the binding for (channel, sender).
     pub async fn lookup(&self, channel: &str, sender: &str) -> Option<SessionBinding> {
         let map = self.inner.read().await;
