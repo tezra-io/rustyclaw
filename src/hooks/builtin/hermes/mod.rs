@@ -249,6 +249,11 @@ impl HermesExtractionHook {
             return;
         }
 
+        // ── Confidence decay pass (before LLM consolidation) ─────
+        if self.config.confidence_decay_enabled {
+            self.apply_confidence_decay(&memories).await;
+        }
+
         // Build memory listing for the prompt.
         let memories_text: String = memories
             .iter()
@@ -413,6 +418,66 @@ impl HermesExtractionHook {
             tracing::warn!(
                 hook = "hermes-consolidation",
                 "failed to write consolidation state: {e}"
+            );
+        }
+    }
+
+    /// Apply confidence decay to unreinforced memories.
+    /// Memories not recalled within `consolidation_interval_hours × 2` lose confidence.
+    async fn apply_confidence_decay(&self, memories: &[crate::memory::traits::MemoryEntry]) {
+        let stale_threshold =
+            chrono::Duration::hours(i64::from(self.config.consolidation_interval_hours) * 2);
+        let now = chrono::Utc::now();
+        let mut decayed = 0u32;
+
+        for entry in memories {
+            let is_stale = match entry.last_recalled_at.as_deref() {
+                Some(ts) => match chrono::DateTime::parse_from_rfc3339(ts) {
+                    Ok(recalled) => now.signed_duration_since(recalled) >= stale_threshold,
+                    Err(_) => true, // Unparseable → treat as stale.
+                },
+                None => true, // Never recalled → stale.
+            };
+
+            if !is_stale {
+                continue;
+            }
+
+            let new_confidence =
+                (entry.confidence * self.config.decay_factor).max(self.config.decay_floor);
+
+            // Skip if no meaningful change (already at or below floor).
+            if (new_confidence - entry.confidence).abs() < f64::EPSILON {
+                continue;
+            }
+
+            if let Err(e) = self
+                .memory
+                .store_with_metadata(
+                    &entry.key,
+                    &entry.content,
+                    MemoryCategory::Core,
+                    self.session_id.as_deref(),
+                    new_confidence,
+                    entry.source.clone(),
+                )
+                .await
+            {
+                tracing::warn!(
+                    hook = "hermes-decay",
+                    key = %entry.key,
+                    "failed to update decayed confidence: {e}"
+                );
+            } else {
+                decayed += 1;
+            }
+        }
+
+        if decayed > 0 {
+            tracing::info!(
+                hook = "hermes-decay",
+                decayed,
+                "confidence decay pass complete"
             );
         }
     }
@@ -1418,5 +1483,233 @@ mod tests {
         hook.on_heartbeat_tick().await;
 
         assert!(memory.entries().is_empty());
+    }
+
+    // ── Confidence Decay Helpers ─────────────────────────────────
+
+    fn decay_config() -> HermesConfig {
+        HermesConfig {
+            confidence_decay_enabled: true,
+            decay_factor: 0.95,
+            decay_floor: 0.1,
+            consolidation_interval_hours: 24,
+            ..default_config()
+        }
+    }
+
+    /// Seed a memory with an explicit last_recalled_at timestamp.
+    fn seed_memory_with_recall(
+        memory: &MockMemory,
+        key: &str,
+        content: &str,
+        confidence: f64,
+        last_recalled_at: Option<&str>,
+    ) {
+        let mut entries = memory.entries.lock().unwrap();
+        let next_id = entries.len();
+        entries.push(MemoryEntry {
+            id: format!("mock-{next_id}"),
+            key: key.into(),
+            content: content.into(),
+            category: MemoryCategory::Core,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            session_id: None,
+            score: None,
+            confidence,
+            source: MemorySource::Extracted,
+            last_recalled_at: last_recalled_at.map(String::from),
+        });
+    }
+
+    // ── Confidence Decay Tests ───────────────────────────────────
+
+    #[tokio::test]
+    async fn decay_disabled_leaves_confidence_unchanged() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("fact", "some fact", 0.8)]).await;
+
+        // Decay disabled — default config has confidence_decay_enabled = false.
+        let llm_response = r#"[{"action": "keep", "keys": ["fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        assert_eq!(entries.len(), 1);
+        assert!((entries[0].confidence - 0.8).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn decay_reduces_unreinforced_memory_confidence() {
+        let memory = Arc::new(MockMemory::new());
+        // last_recalled_at = None → stale, should decay.
+        seed_memory_with_recall(&memory, "stale_fact", "old info", 0.8, None);
+
+        let llm_response = r#"[{"action": "keep", "keys": ["stale_fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(decay_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        assert_eq!(entries.len(), 1);
+        let expected = 0.8 * 0.95; // 0.76
+        assert!(
+            (entries[0].confidence - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {}",
+            entries[0].confidence
+        );
+    }
+
+    #[tokio::test]
+    async fn decay_skips_recently_recalled_memory() {
+        let memory = Arc::new(MockMemory::new());
+        // Recalled just now → within threshold, should NOT decay.
+        let now = chrono::Utc::now().to_rfc3339();
+        seed_memory_with_recall(&memory, "fresh_fact", "recent info", 0.8, Some(&now));
+
+        let llm_response = r#"[{"action": "keep", "keys": ["fresh_fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(decay_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        assert_eq!(entries.len(), 1);
+        assert!(
+            (entries[0].confidence - 0.8).abs() < f64::EPSILON,
+            "recently recalled memory should not decay"
+        );
+    }
+
+    #[tokio::test]
+    async fn decay_applies_to_old_recalled_memory() {
+        let memory = Arc::new(MockMemory::new());
+        // Recalled 72 hours ago; threshold = 24 * 2 = 48h → stale.
+        let old_time = (chrono::Utc::now() - chrono::Duration::hours(72)).to_rfc3339();
+        seed_memory_with_recall(&memory, "old_recall", "stale info", 0.9, Some(&old_time));
+
+        let llm_response = r#"[{"action": "keep", "keys": ["old_recall"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(decay_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        let expected = 0.9 * 0.95; // 0.855
+        assert!(
+            (entries[0].confidence - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {}",
+            entries[0].confidence
+        );
+    }
+
+    #[tokio::test]
+    async fn decay_respects_floor() {
+        let memory = Arc::new(MockMemory::new());
+        // Confidence already at floor — should not change.
+        seed_memory_with_recall(&memory, "floor_fact", "at floor", 0.1, None);
+
+        let llm_response = r#"[{"action": "keep", "keys": ["floor_fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(decay_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        // 0.1 * 0.95 = 0.095, clamped to floor 0.1 → no change.
+        assert!(
+            (entries[0].confidence - 0.1).abs() < f64::EPSILON,
+            "confidence should not drop below floor"
+        );
+    }
+
+    #[tokio::test]
+    async fn decay_clamps_near_floor() {
+        let memory = Arc::new(MockMemory::new());
+        // Confidence just above floor: 0.12 * 0.95 = 0.114 → still above floor.
+        seed_memory_with_recall(&memory, "near_floor", "barely above", 0.12, None);
+
+        let llm_response = r#"[{"action": "keep", "keys": ["near_floor"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(decay_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        let expected = 0.12 * 0.95; // 0.114
+        assert!(
+            (entries[0].confidence - expected).abs() < 1e-10,
+            "expected {expected}, got {}",
+            entries[0].confidence
+        );
+        assert!(entries[0].confidence >= 0.1, "must be >= floor");
+    }
+
+    #[tokio::test]
+    async fn decay_multiple_cycles_compounds() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memory_with_recall(&memory, "aging", "gets older", 1.0, None);
+
+        let llm_response = r#"[{"action": "keep", "keys": ["aging"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = decay_config();
+        let hook = make_hook_with_dir(config, memory.clone(), provider, &tmp);
+
+        // Run 3 consolidation cycles.
+        for _ in 0..3 {
+            hook.run_consolidation().await;
+        }
+
+        let entries = memory.entries();
+        let expected = 1.0 * 0.95 * 0.95 * 0.95; // ~0.857375
+        assert!(
+            (entries[0].confidence - expected).abs() < 1e-10,
+            "expected {expected}, got {}",
+            entries[0].confidence
+        );
+    }
+
+    #[tokio::test]
+    async fn decay_mixed_stale_and_fresh() {
+        let memory = Arc::new(MockMemory::new());
+        let now = chrono::Utc::now().to_rfc3339();
+        // Fresh memory — recalled just now.
+        seed_memory_with_recall(&memory, "fresh", "just used", 0.9, Some(&now));
+        // Stale memory — never recalled.
+        seed_memory_with_recall(&memory, "stale", "forgotten", 0.9, None);
+
+        let llm_response =
+            r#"[{"action": "keep", "keys": ["fresh"]}, {"action": "keep", "keys": ["stale"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(decay_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        let fresh = entries.iter().find(|e| e.key == "fresh").unwrap();
+        let stale = entries.iter().find(|e| e.key == "stale").unwrap();
+
+        // Fresh should be unchanged.
+        assert!(
+            (fresh.confidence - 0.9).abs() < f64::EPSILON,
+            "fresh memory should not decay"
+        );
+        // Stale should be decayed.
+        let expected = 0.9 * 0.95;
+        assert!(
+            (stale.confidence - expected).abs() < f64::EPSILON,
+            "stale memory should decay to {expected}, got {}",
+            stale.confidence
+        );
     }
 }
