@@ -13,8 +13,8 @@ use crate::hooks::traits::HookHandler;
 use crate::memory::traits::{Memory, MemoryCategory, MemorySource};
 use crate::providers::traits::{ChatMessage, ChatResponse, Provider};
 
-use prompts::build_extraction_prompt;
-use types::ExtractedFact;
+use prompts::{build_consolidation_prompt, build_extraction_prompt};
+use types::{ConsolidationAction, ConsolidationActionKind, ExtractedFact};
 
 const STATE_FILE: &str = "hermes_state.json";
 
@@ -22,6 +22,10 @@ const STATE_FILE: &str = "hermes_state.json";
 struct HermesState {
     last_extraction_at: Option<String>,
     total_extracted_memories: u64,
+    #[serde(default)]
+    last_consolidation_at: Option<String>,
+    #[serde(default)]
+    total_consolidations: u64,
 }
 
 /// Hermes extraction hook — buffers conversation turns and runs LLM extraction
@@ -211,6 +215,222 @@ impl HermesExtractionHook {
         std::fs::write(path, json)?;
         Ok(())
     }
+
+    /// Check whether enough time has elapsed since the last consolidation.
+    fn should_consolidate(&self) -> bool {
+        let state = read_state(&self.workspace_dir);
+        let Some(last_str) = state.last_consolidation_at.as_deref() else {
+            return true; // Never consolidated — run now.
+        };
+        let Ok(last) = chrono::DateTime::parse_from_rfc3339(last_str) else {
+            return true; // Unparseable timestamp — run now.
+        };
+        let elapsed = chrono::Utc::now().signed_duration_since(last);
+        let interval = chrono::Duration::hours(i64::from(self.config.consolidation_interval_hours));
+        elapsed >= interval
+    }
+
+    /// Run LLM consolidation on all Core memories.
+    async fn run_consolidation(&self) {
+        // Load all Core memories.
+        let memories = match self.memory.list(Some(&MemoryCategory::Core), None).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(
+                    hook = "hermes-consolidation",
+                    "failed to list memories for consolidation: {e}"
+                );
+                return;
+            }
+        };
+
+        if memories.is_empty() {
+            self.write_consolidation_state().ok();
+            return;
+        }
+
+        // Build memory listing for the prompt.
+        let memories_text: String = memories
+            .iter()
+            .map(|e| {
+                format!(
+                    "{} (confidence={:.2}, timestamp={}): {}",
+                    e.key, e.confidence, e.timestamp, e.content
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let prompt = build_consolidation_prompt(&memories_text);
+
+        // Call LLM for consolidation.
+        let response = match self
+            .provider
+            .chat_with_system(
+                Some(&prompt),
+                "Review and consolidate the memories above.",
+                &self.model,
+                0.3,
+            )
+            .await
+        {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!(
+                    hook = "hermes-consolidation",
+                    "LLM consolidation call failed: {e}"
+                );
+                return;
+            }
+        };
+
+        // Parse JSON response.
+        let json_str = strip_json_fences(&response);
+        let actions: Vec<ConsolidationAction> = match serde_json::from_str(json_str) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!(
+                    hook = "hermes-consolidation",
+                    response_preview = &response[..response.len().min(200)],
+                    "malformed consolidation JSON: {e}"
+                );
+                return;
+            }
+        };
+
+        // Execute each action.
+        for action in &actions {
+            match action.action {
+                ConsolidationActionKind::Keep => { /* no-op */ }
+                ConsolidationActionKind::Forget => {
+                    for key in &action.keys {
+                        if let Err(e) = self.memory.forget(key).await {
+                            tracing::warn!(
+                                hook = "hermes-consolidation",
+                                key = %key,
+                                "failed to forget memory: {e}"
+                            );
+                        }
+                    }
+                }
+                ConsolidationActionKind::Merge => {
+                    let Some(content) = action.content.as_deref() else {
+                        tracing::warn!(
+                            hook = "hermes-consolidation",
+                            keys = ?action.keys,
+                            "merge action missing content field, skipping"
+                        );
+                        continue;
+                    };
+                    let confidence = action.confidence.unwrap_or(0.8);
+                    // Use the first key as the merged entry's key.
+                    let merged_key = match action.keys.first() {
+                        Some(k) => k.clone(),
+                        None => continue,
+                    };
+                    // Store the merged entry.
+                    if let Err(e) = self
+                        .memory
+                        .store_with_metadata(
+                            &merged_key,
+                            content,
+                            MemoryCategory::Core,
+                            self.session_id.as_deref(),
+                            confidence,
+                            MemorySource::Extracted,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            hook = "hermes-consolidation",
+                            key = %merged_key,
+                            "failed to store merged memory: {e}"
+                        );
+                        continue;
+                    }
+                    // Forget the remaining originals (skip the first — it's now the merged key).
+                    for key in action.keys.iter().skip(1) {
+                        if let Err(e) = self.memory.forget(key).await {
+                            tracing::warn!(
+                                hook = "hermes-consolidation",
+                                key = %key,
+                                "failed to forget original after merge: {e}"
+                            );
+                        }
+                    }
+                }
+                ConsolidationActionKind::Update => {
+                    for key in &action.keys {
+                        let content = match action.content.as_deref() {
+                            Some(c) => c,
+                            None => {
+                                tracing::warn!(
+                                    hook = "hermes-consolidation",
+                                    key = %key,
+                                    "update action missing content field, skipping"
+                                );
+                                continue;
+                            }
+                        };
+                        let confidence = action.confidence.unwrap_or(0.8);
+                        if let Err(e) = self
+                            .memory
+                            .store_with_metadata(
+                                key,
+                                content,
+                                MemoryCategory::Core,
+                                self.session_id.as_deref(),
+                                confidence,
+                                MemorySource::Extracted,
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                hook = "hermes-consolidation",
+                                key = %key,
+                                "failed to update memory: {e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let action_count = actions
+            .iter()
+            .filter(|a| a.action != ConsolidationActionKind::Keep)
+            .count();
+        if action_count > 0 {
+            tracing::info!(
+                hook = "hermes-consolidation",
+                total_actions = actions.len(),
+                modifications = action_count,
+                "consolidation cycle complete"
+            );
+        }
+
+        if let Err(e) = self.write_consolidation_state() {
+            tracing::warn!(
+                hook = "hermes-consolidation",
+                "failed to write consolidation state: {e}"
+            );
+        }
+    }
+
+    fn write_consolidation_state(&self) -> anyhow::Result<()> {
+        let path = state_path(&self.workspace_dir);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let mut state = read_state(&self.workspace_dir);
+        state.last_consolidation_at = Some(chrono::Utc::now().to_rfc3339());
+        state.total_consolidations += 1;
+
+        let json = serde_json::to_vec_pretty(&state)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
 }
 
 fn state_path(workspace_dir: &Path) -> PathBuf {
@@ -286,10 +506,16 @@ impl HookHandler for HermesExtractionHook {
         if !self.config.enabled {
             return;
         }
-        if self.turn_count.load(Ordering::SeqCst) < self.config.extraction_turn_threshold {
-            return;
+
+        // Run extraction if enough turns have accumulated.
+        if self.turn_count.load(Ordering::SeqCst) >= self.config.extraction_turn_threshold {
+            self.run_extraction().await;
         }
-        self.run_extraction().await;
+
+        // Run consolidation if enough time has elapsed.
+        if self.should_consolidate() {
+            self.run_consolidation().await;
+        }
     }
 }
 
@@ -889,5 +1115,308 @@ mod tests {
         let hook = make_hook(default_config(), memory as Arc<dyn Memory>, provider);
         assert_eq!(hook.name(), "hermes-extraction");
         assert_eq!(hook.priority(), -100);
+    }
+
+    // ── Consolidation Helpers ─────────────────────────────────────
+
+    /// Create a hook with a persistent tempdir (caller must hold the TempDir).
+    fn make_hook_with_dir(
+        config: HermesConfig,
+        memory: Arc<dyn Memory>,
+        provider: Arc<dyn Provider>,
+        tmp: &tempfile::TempDir,
+    ) -> HermesExtractionHook {
+        HermesExtractionHook::new(
+            config,
+            memory,
+            provider,
+            "test-model".into(),
+            tmp.path().to_path_buf(),
+            Some("test-session".into()),
+        )
+    }
+
+    /// Seed memories into MockMemory for consolidation tests.
+    async fn seed_memories(memory: &MockMemory, entries: &[(&str, &str, f64)]) {
+        for (key, content, confidence) in entries {
+            memory
+                .store_with_metadata(
+                    key,
+                    content,
+                    MemoryCategory::Core,
+                    None,
+                    *confidence,
+                    MemorySource::Extracted,
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    // ── Consolidation Tests ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn consolidation_forget_action_removes_memory() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("old_fact", "outdated info", 0.5)]).await;
+
+        let llm_response = r#"[{"action": "forget", "keys": ["old_fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        assert!(memory.entries().is_empty());
+    }
+
+    #[tokio::test]
+    async fn consolidation_keep_action_is_noop() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("good_fact", "still valid", 0.9)]).await;
+
+        let llm_response = r#"[{"action": "keep", "keys": ["good_fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, "good_fact");
+        assert_eq!(entries[0].content, "still valid");
+    }
+
+    #[tokio::test]
+    async fn consolidation_merge_action_combines_and_forgets_originals() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(
+            &memory,
+            &[
+                ("lang_rust", "User uses Rust", 0.7),
+                ("lang_pref", "User prefers Rust", 0.8),
+            ],
+        )
+        .await;
+
+        let llm_response = r#"[{
+            "action": "merge",
+            "keys": ["lang_rust", "lang_pref"],
+            "content": "User strongly prefers Rust as their primary language",
+            "confidence": 0.9
+        }]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        // Should have 1 merged entry under the first key.
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, "lang_rust");
+        assert_eq!(
+            entries[0].content,
+            "User strongly prefers Rust as their primary language"
+        );
+        assert!((entries[0].confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn consolidation_update_action_overwrites_content_and_confidence() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("user_role", "maybe a developer", 0.5)]).await;
+
+        let llm_response = r#"[{
+            "action": "update",
+            "keys": ["user_role"],
+            "content": "User is a senior Rust developer",
+            "confidence": 0.95
+        }]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "User is a senior Rust developer");
+        assert!((entries[0].confidence - 0.95).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn consolidation_all_four_actions_in_one_pass() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(
+            &memory,
+            &[
+                ("keep_me", "good fact", 0.9),
+                ("forget_me", "stale fact", 0.3),
+                ("merge_a", "partial A", 0.6),
+                ("merge_b", "partial B", 0.7),
+                ("update_me", "old wording", 0.5),
+            ],
+        )
+        .await;
+
+        let llm_response = r#"[
+            {"action": "keep", "keys": ["keep_me"]},
+            {"action": "forget", "keys": ["forget_me"]},
+            {"action": "merge", "keys": ["merge_a", "merge_b"], "content": "combined A+B", "confidence": 0.85},
+            {"action": "update", "keys": ["update_me"], "content": "new wording", "confidence": 0.8}
+        ]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let entries = memory.entries();
+        let keys: Vec<&str> = entries.iter().map(|e| e.key.as_str()).collect();
+
+        // keep_me preserved.
+        assert!(keys.contains(&"keep_me"));
+        // forget_me removed.
+        assert!(!keys.contains(&"forget_me"));
+        // merge_b removed, merge_a updated with merged content.
+        assert!(keys.contains(&"merge_a"));
+        assert!(!keys.contains(&"merge_b"));
+        let merged = entries.iter().find(|e| e.key == "merge_a").unwrap();
+        assert_eq!(merged.content, "combined A+B");
+        // update_me has new content.
+        let updated = entries.iter().find(|e| e.key == "update_me").unwrap();
+        assert_eq!(updated.content, "new wording");
+        assert!((updated.confidence - 0.8).abs() < f64::EPSILON);
+
+        // Total: keep_me + merge_a + update_me = 3.
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn consolidation_malformed_json_does_not_modify_memories() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("safe", "should survive", 0.9)]).await;
+
+        let provider = Arc::new(MockProvider::new("not valid json at all"));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        // Memory unchanged.
+        let entries = memory.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, "safe");
+    }
+
+    #[tokio::test]
+    async fn consolidation_skips_when_no_memories() {
+        let memory = Arc::new(MockMemory::new());
+        // Provider should NOT be called — no memories to consolidate.
+        let provider = Arc::new(MockProvider::new("SHOULD_NOT_BE_CALLED"));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        // State should still be updated (consolidation ran, found nothing).
+        let state = read_state(tmp.path());
+        assert!(state.last_consolidation_at.is_some());
+        assert_eq!(state.total_consolidations, 1);
+    }
+
+    #[tokio::test]
+    async fn consolidation_respects_interval() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("fact", "content", 0.8)]).await;
+
+        let llm_response = r#"[{"action": "keep", "keys": ["fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        // First consolidation — should run (no prior state).
+        assert!(hook.should_consolidate());
+        hook.run_consolidation().await;
+
+        let state = read_state(tmp.path());
+        assert!(state.last_consolidation_at.is_some());
+        assert_eq!(state.total_consolidations, 1);
+
+        // Second check — should NOT run (just consolidated).
+        assert!(!hook.should_consolidate());
+    }
+
+    #[tokio::test]
+    async fn consolidation_state_file_written() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("k", "v", 0.8)]).await;
+
+        let llm_response = r#"[{"action": "keep", "keys": ["k"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        let state = read_state(tmp.path());
+        assert!(state.last_consolidation_at.is_some());
+        assert_eq!(state.total_consolidations, 1);
+    }
+
+    #[tokio::test]
+    async fn consolidation_disabled_hook_skipped() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("fact", "content", 0.8)]).await;
+
+        let llm_response = r#"[{"action": "forget", "keys": ["fact"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let config = HermesConfig {
+            enabled: false,
+            ..default_config()
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(config, memory.clone(), provider, &tmp);
+
+        // on_heartbeat_tick returns early when disabled.
+        hook.on_heartbeat_tick().await;
+
+        // Memory should be untouched.
+        assert_eq!(memory.entries().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn consolidation_merge_missing_content_skipped() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("a", "content a", 0.7), ("b", "content b", 0.7)]).await;
+
+        // Merge action without content field — should be skipped.
+        let llm_response = r#"[{"action": "merge", "keys": ["a", "b"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        hook.run_consolidation().await;
+
+        // Both memories should still exist.
+        assert_eq!(memory.entries().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn consolidation_runs_on_heartbeat_without_extraction() {
+        let memory = Arc::new(MockMemory::new());
+        seed_memories(&memory, &[("stale", "old fact", 0.3)]).await;
+
+        let llm_response = r#"[{"action": "forget", "keys": ["stale"]}]"#;
+        let provider = Arc::new(MockProvider::new(llm_response));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = make_hook_with_dir(default_config(), memory.clone(), provider, &tmp);
+
+        // No turns buffered — extraction won't run, but consolidation should.
+        hook.on_heartbeat_tick().await;
+
+        assert!(memory.entries().is_empty());
     }
 }
