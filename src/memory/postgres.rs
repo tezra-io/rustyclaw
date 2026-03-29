@@ -1,4 +1,4 @@
-use super::traits::{Memory, MemoryCategory, MemoryEntry};
+use super::traits::{Memory, MemoryCategory, MemoryEntry, MemorySource};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -134,6 +134,9 @@ impl PostgresMemory {
             timestamp: timestamp.to_rfc3339(),
             session_id: row.get(5),
             score: row.try_get(6).ok(),
+            confidence: 1.0,
+            source: MemorySource::default(),
+            last_recalled_at: None,
         })
     }
 }

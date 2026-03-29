@@ -69,7 +69,7 @@ impl MemoryLoader for DefaultMemoryLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::{Memory, MemoryCategory, MemoryEntry};
+    use crate::memory::{Memory, MemoryCategory, MemoryEntry, MemorySource};
     use std::sync::Arc;
 
     struct MockMemory;
@@ -106,6 +106,9 @@ mod tests {
                 timestamp: "now".into(),
                 session_id: None,
                 score: None,
+                confidence: 1.0,
+                source: MemorySource::default(),
+                last_recalled_at: None,
             }])
         }
 
@@ -209,6 +212,9 @@ mod tests {
                     timestamp: "now".into(),
                     session_id: None,
                     score: Some(0.95),
+                    confidence: 1.0,
+                    source: MemorySource::default(),
+                    last_recalled_at: None,
                 },
                 MemoryEntry {
                     id: "2".into(),
@@ -218,6 +224,9 @@ mod tests {
                     timestamp: "now".into(),
                     session_id: None,
                     score: Some(0.9),
+                    confidence: 1.0,
+                    source: MemorySource::default(),
+                    last_recalled_at: None,
                 },
             ]),
         };

@@ -32,7 +32,7 @@ pub use scanning::ScannedMemory;
 pub use sqlite::SqliteMemory;
 pub use traits::Memory;
 #[allow(unused_imports)]
-pub use traits::{MemoryCategory, MemoryEntry};
+pub use traits::{MemoryCategory, MemoryEntry, MemorySource};
 
 use crate::config::{EmbeddingRouteConfig, MemoryConfig, StorageProviderConfig};
 use anyhow::Context;
@@ -263,6 +263,7 @@ pub fn create_memory_with_storage_and_routes(
             config.keyword_weight as f32,
             config.embedding_cache_size,
             config.sqlite_open_timeout_secs,
+            Some(config.hermes.confidence_weight),
         )?;
         Ok(mem)
     }

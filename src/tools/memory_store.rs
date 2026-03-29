@@ -1,5 +1,5 @@
 use super::traits::{Tool, ToolResult};
-use crate::memory::{Memory, MemoryCategory};
+use crate::memory::{Memory, MemoryCategory, MemorySource};
 use crate::security::policy::ToolOperation;
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
@@ -78,7 +78,11 @@ impl Tool for MemoryStoreTool {
             });
         }
 
-        match self.memory.store(key, content, category, None).await {
+        match self
+            .memory
+            .store_with_metadata(key, content, category, None, 1.0, MemorySource::Explicit)
+            .await
+        {
             Ok(()) => Ok(ToolResult {
                 success: true,
                 output: format!("Stored memory: {key}"),

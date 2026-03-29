@@ -20,7 +20,7 @@
 
 ## What is RustyClaw?
 
-RustyClaw is a multi-agent AI runtime that pairs a high-performance **Rust core** (245 source files) with an **Elixir/OTP orchestration layer** (523 `.ex` files) for multi-agent coordination. The Rust layer handles LLM providers, messaging channels, tool execution, security, and memory. The Elixir layer manages agent lifecycle, supervision, inter-agent messaging, plugin orchestration, and dynamic tool synthesis using OTP primitives.
+RustyClaw is a multi-agent AI runtime that pairs a high-performance **Rust core** (245 source files, 289 total `.rs` across the repo) with an **Elixir/OTP orchestration layer** (609 `.ex`/`.exs` files) for multi-agent coordination. The Rust layer handles LLM providers, messaging channels, tool execution, security, and memory. The Elixir layer manages agent lifecycle, supervision, inter-agent messaging, plugin orchestration, and dynamic tool synthesis using OTP primitives.
 
 Key numbers:
 
@@ -38,7 +38,7 @@ RustyClaw is a two-layer system connected by a Unix Domain Socket (UDS) bridge:
 
 ```mermaid
 graph TB
-    subgraph Elixir["Elixir/OTP Orchestration Layer (523 .ex files)"]
+    subgraph Elixir["Elixir/OTP Orchestration Layer (609 .ex/.exs files)"]
         direction TB
         AD[AgentDiscovery] --> AC[AgentCoordinator]
         AC --> AS[AgentSupervisor]
@@ -79,7 +79,7 @@ graph TB
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                 Elixir/OTP Orchestration Layer                │
+│          Elixir/OTP Orchestration Layer (609 files)           │
 │                                                              │
 │  AgentDiscovery ── AgentCoordinator ── AgentSupervisor       │
 │                         │                                    │
@@ -449,8 +449,9 @@ rustyclaw/
 │   ├── skills/                   # Skill manifests + audit
 │   ├── sop/                      # Standard Operating Procedures
 │   ├── tools/                    # 43 built-in tools
-│   └── trajectory/               # Conversation logging + export
-├── elixir/rustyclaw_orchestrator/ # Elixir OTP layer (523 .ex files)
+│   ├── trajectory/               # Conversation logging + export
+│   └── tunnel/                   # Tunnel providers (Cloudflare, ngrok, Tailscale)
+├── elixir/rustyclaw_orchestrator/ # Elixir OTP layer (609 .ex/.exs files)
 │   └── lib/rustyclaw_orchestrator/
 │       ├── application.ex        # OTP application + supervision tree
 │       ├── agent_coordinator.ex  # Capability routing, delegation ACL
@@ -470,11 +471,13 @@ rustyclaw/
 │       ├── tools/                # 4 agent management tools
 │       └── tool_synthesis/       # 11 dynamic tool generation modules
 ├── crates/robot-kit/             # Hardware robot kit crate
-├── docs/                         # 175 design & reference docs
+├── firmware/                     # Embedded firmware (Nucleo, ESP32)
+├── tests/                        # Integration & regression tests
+├── docs/                         # 175 design & reference docs (13 categories)
 ├── scripts/                      # CI, smoke tests, utilities
 ├── config/                       # Configuration templates
-├── Cargo.toml                    # Rust workspace manifest
-└── elixir/rustyclaw_orchestrator/ # Elixir OTP application (mix.exs)
+├── Cargo.toml                    # Rust workspace manifest (MSRV 1.91)
+└── elixir/rustyclaw_orchestrator/mix.exs  # Elixir OTP application
 ```
 
 ## Development
@@ -516,30 +519,34 @@ Builds the release binary, boots the gateway on a random port, validates `/healt
 | `Channel` | `src/channels/traits.rs` | Messaging platform (send, listen, health) |
 | `Tool` | `src/tools/traits.rs` | Agent capability (execute, schema) |
 | `Memory` | `src/memory/traits.rs` | Persistence (store, recall, forget) |
+| `Config` | `src/config/traits.rs` | Configuration source abstraction |
 | `Observer` | `src/observability/traits.rs` | Telemetry collection |
 | `RuntimeAdapter` | `src/runtime/traits.rs` | Platform abstraction |
 | `Peripheral` | `src/peripherals/traits.rs` | Hardware board interface |
 | `HookHandler` | `src/hooks/traits.rs` | Lifecycle event hooks |
 | `Sandbox` | `src/security/traits.rs` | OS-level process isolation |
-| `Plugin (Elixir)` | `elixir/.../plugins/behaviour.ex` | Elixir plugin behaviour |
+| `Plugin (Elixir)` | `elixir/rustyclaw_orchestrator/lib/rustyclaw_orchestrator/plugins/behaviour.ex` | Elixir plugin behaviour |
 
 ## Documentation
 
 The `docs/` directory contains 175 documents organized across categories:
 
-| Category | Contents |
-|----------|----------|
-| [getting-started/](docs/getting-started) | Onboarding, first run, quick start |
-| [reference/](docs/reference) | CLI commands, config schema, providers, channels |
-| [security/](docs/security) | Sandboxing, policy, secrets, security roadmap |
-| [operations/](docs/operations) | Runbook, troubleshooting, release process |
-| [hardware/](docs/hardware) | Board setup, peripherals, datasheets |
-| [contributing/](docs/contributing) | PR workflow, reviewer playbook, doc template |
-| [structure/](docs/structure) | Architecture, project triage |
-| [project/](docs/project) | Design docs, reviews |
-| [sop/](docs/sop) | Standard operating procedures |
-| [superpowers/](docs/superpowers) | Advanced features and patterns |
-| [i18n/](docs/i18n) | Internationalization (FR, JA, RU, VI, ZH-CN) |
+| Category | Files | Contents |
+|----------|------:|----------|
+| [contributing/](docs/contributing) | 1 | PR workflow, reviewer playbook, doc template |
+| [datasheets/](docs/datasheets) | 3 | Hardware component datasheets |
+| [getting-started/](docs/getting-started) | 3 | Onboarding, first run, quick start |
+| [hardware/](docs/hardware) | 1 | Board setup, peripherals |
+| [i18n/](docs/i18n) | 42 | Internationalization (FR, JA, RU, VI, ZH-CN) |
+| [operations/](docs/operations) | 1 | Runbook, troubleshooting, release process |
+| [project/](docs/project) | 1 | Design docs, reviews |
+| [reference/](docs/reference) | 1 | CLI commands, config schema, providers, channels |
+| [security/](docs/security) | 1 | Sandboxing, policy, secrets, security roadmap |
+| [sop/](docs/sop) | 5 | Standard operating procedures |
+| [structure/](docs/structure) | 1 | Architecture, project triage |
+| [superpowers/](docs/superpowers) | 2 | Advanced features and patterns |
+| [vi/](docs/vi) | 40 | Vietnamese documentation |
+| *(root)* | 73 | Design docs, summaries, READMEs |
 
 Key design documents:
 - [Elixir Orchestration Design](docs/ELIXIR_ORCHESTRATION_DESIGN.md) — full architecture and implementation plan

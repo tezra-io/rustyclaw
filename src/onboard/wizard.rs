@@ -579,6 +579,7 @@ fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
         auto_hydrate: true,
         sqlite_open_timeout_secs: None,
         qdrant: crate::config::QdrantConfig::default(),
+        hermes: crate::config::HermesConfig::default(),
     }
 }
 

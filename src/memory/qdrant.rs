@@ -1,5 +1,5 @@
 use super::embeddings::EmbeddingProvider;
-use super::traits::{Memory, MemoryCategory, MemoryEntry};
+use super::traits::{Memory, MemoryCategory, MemoryEntry, MemorySource};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
@@ -363,6 +363,9 @@ impl Memory for QdrantMemory {
                     timestamp: payload.timestamp,
                     session_id: payload.session_id,
                     score: Some(point.score),
+                    confidence: 1.0,
+                    source: MemorySource::default(),
+                    last_recalled_at: None,
                 })
             })
             .collect();
@@ -419,6 +422,9 @@ impl Memory for QdrantMemory {
                 timestamp: payload.timestamp,
                 session_id: payload.session_id,
                 score: None,
+                confidence: 1.0,
+                source: MemorySource::default(),
+                last_recalled_at: None,
             })
         });
 
@@ -496,6 +502,9 @@ impl Memory for QdrantMemory {
                     timestamp: payload.timestamp,
                     session_id: payload.session_id,
                     score: None,
+                    confidence: 1.0,
+                    source: MemorySource::default(),
+                    last_recalled_at: None,
                 })
             })
             .collect();

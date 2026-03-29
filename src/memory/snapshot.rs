@@ -36,13 +36,13 @@ pub fn export_snapshot(workspace_dir: &Path) -> Result<usize> {
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
 
     let mut stmt = conn.prepare(
-        "SELECT key, content, category, created_at, updated_at
+        "SELECT key, content, category, created_at, updated_at, confidence, source
          FROM memories
          WHERE category = 'core'
          ORDER BY updated_at DESC",
     )?;
 
-    let rows: Vec<(String, String, String, String, String)> = stmt
+    let rows: Vec<(String, String, String, String, String, f64, String)> = stmt
         .query_map([], |row| {
             Ok((
                 row.get(0)?,
@@ -50,6 +50,9 @@ pub fn export_snapshot(workspace_dir: &Path) -> Result<usize> {
                 row.get(2)?,
                 row.get(3)?,
                 row.get(4)?,
+                row.get::<_, f64>(5).unwrap_or(1.0),
+                row.get::<_, String>(6)
+                    .unwrap_or_else(|_| "explicit".to_string()),
             ))
         })?
         .filter_map(|r| r.ok())
@@ -67,9 +70,14 @@ pub fn export_snapshot(workspace_dir: &Path) -> Result<usize> {
     write!(output, "**Last exported:** {now}\n\n").unwrap();
     write!(output, "**Total core memories:** {}\n\n---\n\n", rows.len()).unwrap();
 
-    for (key, content, _category, created_at, updated_at) in &rows {
+    for (key, content, _category, created_at, updated_at, confidence, source) in &rows {
         write!(output, "### 🔑 `{key}`\n\n").unwrap();
         write!(output, "{content}\n\n").unwrap();
+        write!(
+            output,
+            "- **Confidence:** {confidence:.2}\n- **Source:** {source}\n\n"
+        )
+        .unwrap();
         write!(
             output,
             "*Created: {created_at} | Updated: {updated_at}*\n\n---\n\n"
@@ -139,15 +147,30 @@ pub fn hydrate_from_snapshot(workspace_dir: &Path) -> Result<usize> {
         );",
     )?;
 
+    // Migration: ensure hermes columns exist in hydrated schema
+    let schema_sql: String = conn
+        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
+        .ok()
+        .and_then(|mut stmt| stmt.query_row([], |row| row.get::<_, String>(0)).ok())
+        .unwrap_or_default();
+    if !schema_sql.contains("confidence") {
+        let _ = conn.execute_batch(
+            "ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0;
+             ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'explicit';
+             ALTER TABLE memories ADD COLUMN last_recalled_at TEXT;
+             CREATE INDEX IF NOT EXISTS idx_memories_confidence ON memories(confidence);",
+        );
+    }
+
     let now = Local::now().to_rfc3339();
     let mut hydrated = 0;
 
-    for (key, content) in &entries {
+    for entry in &entries {
         let id = uuid::Uuid::new_v4().to_string();
         let result = conn.execute(
-            "INSERT OR IGNORE INTO memories (id, key, content, category, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'core', ?4, ?5)",
-            params![id, key, content, now, now],
+            "INSERT OR IGNORE INTO memories (id, key, content, category, created_at, updated_at, confidence, source)
+             VALUES (?1, ?2, ?3, 'core', ?4, ?5, ?6, ?7)",
+            params![id, entry.key, entry.content, now, now, entry.confidence, entry.source],
         );
 
         match result {
@@ -155,15 +178,15 @@ pub fn hydrate_from_snapshot(workspace_dir: &Path) -> Result<usize> {
                 // Populate FTS5
                 let _ = conn.execute(
                     "INSERT INTO memories_fts(key, content) VALUES (?1, ?2)",
-                    params![key, content],
+                    params![entry.key, entry.content],
                 );
                 hydrated += 1;
             }
             Ok(_) => {
-                tracing::debug!("hydrate: key '{key}' already exists, skipping");
+                tracing::debug!("hydrate: key '{}' already exists, skipping", entry.key);
             }
             Err(e) => {
-                tracing::warn!("hydrate: failed to insert key '{key}': {e}");
+                tracing::warn!("hydrate: failed to insert key '{}': {e}", entry.key);
             }
         }
     }
@@ -203,11 +226,21 @@ fn snapshot_path(workspace_dir: &Path) -> PathBuf {
     workspace_dir.join(SNAPSHOT_FILENAME)
 }
 
-/// Parse the structured markdown snapshot back into (key, content) pairs.
-fn parse_snapshot(input: &str) -> Vec<(String, String)> {
+/// Parsed snapshot entry with optional metadata.
+struct SnapshotEntry {
+    key: String,
+    content: String,
+    confidence: f64,
+    source: String,
+}
+
+/// Parse the structured markdown snapshot back into entries with metadata.
+fn parse_snapshot(input: &str) -> Vec<SnapshotEntry> {
     let mut entries = Vec::new();
     let mut current_key: Option<String> = None;
     let mut current_content = String::new();
+    let mut current_confidence: f64 = 1.0;
+    let mut current_source = "hydrated".to_string();
 
     for line in input.lines() {
         let trimmed = line.trim();
@@ -218,7 +251,12 @@ fn parse_snapshot(input: &str) -> Vec<(String, String)> {
             if let Some(key) = current_key.take() {
                 let content = current_content.trim().to_string();
                 if !content.is_empty() {
-                    entries.push((key, content));
+                    entries.push(SnapshotEntry {
+                        key,
+                        content,
+                        confidence: current_confidence,
+                        source: current_source.clone(),
+                    });
                 }
             }
 
@@ -232,9 +270,20 @@ fn parse_snapshot(input: &str) -> Vec<(String, String)> {
             if !key.is_empty() {
                 current_key = Some(key);
                 current_content = String::new();
+                current_confidence = 1.0;
+                current_source = "hydrated".to_string();
             }
         } else if current_key.is_some() {
-            // Skip metadata lines and separators
+            // Parse metadata lines
+            if let Some(val) = trimmed.strip_prefix("- **Confidence:** ") {
+                current_confidence = val.parse::<f64>().unwrap_or(1.0);
+                continue;
+            }
+            if let Some(val) = trimmed.strip_prefix("- **Source:** ") {
+                current_source = val.to_string();
+                continue;
+            }
+            // Skip old metadata lines and separators
             if trimmed.starts_with("*Created:") || trimmed == "---" {
                 continue;
             }
@@ -252,7 +301,12 @@ fn parse_snapshot(input: &str) -> Vec<(String, String)> {
     if let Some(key) = current_key {
         let content = current_content.trim().to_string();
         if !content.is_empty() {
-            entries.push((key, content));
+            entries.push(SnapshotEntry {
+                key,
+                content,
+                confidence: current_confidence,
+                source: current_source,
+            });
         }
     }
 
@@ -295,10 +349,13 @@ The user prefers Rust for systems programming.
 
         let entries = parse_snapshot(input);
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].0, "identity");
-        assert!(entries[0].1.contains("self-preserving"));
-        assert_eq!(entries[1].0, "preference_lang");
-        assert!(entries[1].1.contains("Rust"));
+        assert_eq!(entries[0].key, "identity");
+        assert!(entries[0].content.contains("self-preserving"));
+        // Old format → defaults
+        assert!((entries[0].confidence - 1.0).abs() < f64::EPSILON);
+        assert_eq!(entries[0].source, "hydrated");
+        assert_eq!(entries[1].key, "preference_lang");
+        assert!(entries[1].content.contains("Rust"));
     }
 
     #[test]
@@ -323,8 +380,29 @@ Rule 3: Protect the user.
 
         let entries = parse_snapshot(input);
         assert_eq!(entries.len(), 1);
-        assert!(entries[0].1.contains("Rule 1"));
-        assert!(entries[0].1.contains("Rule 3"));
+        assert!(entries[0].content.contains("Rule 1"));
+        assert!(entries[0].content.contains("Rule 3"));
+    }
+
+    #[test]
+    fn parse_snapshot_with_confidence_and_source() {
+        let input = r#"### 🔑 `user_preference`
+
+User prefers TypeScript for frontend work.
+
+- **Confidence:** 0.85
+- **Source:** extracted
+
+*Created: 2026-03-28 | Updated: 2026-03-28*
+
+---
+"#;
+
+        let entries = parse_snapshot(input);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].content.contains("TypeScript"));
+        assert!((entries[0].confidence - 0.85).abs() < f64::EPSILON);
+        assert_eq!(entries[0].source, "extracted");
     }
 
     #[test]
@@ -354,7 +432,10 @@ Rule 3: Protect the user.
                 category TEXT NOT NULL DEFAULT 'core',
                 embedding BLOB,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                source TEXT NOT NULL DEFAULT 'explicit',
+                last_recalled_at TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_mem_key ON memories(key);",
         )
@@ -362,8 +443,8 @@ Rule 3: Protect the user.
 
         let now = Local::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO memories (id, key, content, category, created_at, updated_at)
-             VALUES ('id1', 'identity', 'I am a test agent', 'core', ?1, ?2)",
+            "INSERT INTO memories (id, key, content, category, created_at, updated_at, confidence, source)
+             VALUES ('id1', 'identity', 'I am a test agent', 'core', ?1, ?2, 0.9, 'extracted')",
             params![now, now],
         )
         .unwrap();
@@ -394,6 +475,9 @@ Rule 3: Protect the user.
         assert!(content.contains("I am a test agent"));
         assert!(content.contains("preference"));
         assert!(!content.contains("Random convo"));
+        // Verify confidence/source metadata in snapshot
+        assert!(content.contains("**Confidence:** 0.90"));
+        assert!(content.contains("**Source:** extracted"));
 
         // Simulate catastrophic failure: delete brain.db
         fs::remove_file(&db_path).unwrap();
@@ -452,9 +536,13 @@ Rule 3: Protect the user.
                 category TEXT NOT NULL DEFAULT 'core',
                 embedding BLOB,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                source TEXT NOT NULL DEFAULT 'explicit',
+                last_recalled_at TEXT
              );
-             INSERT INTO memories VALUES('x','x','x','core',NULL,'2025-01-01','2025-01-01');",
+             INSERT INTO memories (id, key, content, category, created_at, updated_at)
+             VALUES('x','x','x','core','2025-01-01','2025-01-01');",
         )
         .unwrap();
         drop(conn);

@@ -1,5 +1,5 @@
 use super::embeddings::EmbeddingProvider;
-use super::traits::{Memory, MemoryCategory, MemoryEntry};
+use super::traits::{Memory, MemoryCategory, MemoryEntry, MemorySource};
 use super::vector;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -32,6 +32,7 @@ pub struct SqliteMemory {
     vector_weight: f32,
     keyword_weight: f32,
     cache_max: usize,
+    confidence_weight: f64,
 }
 
 impl SqliteMemory {
@@ -43,14 +44,18 @@ impl SqliteMemory {
             0.3,
             10_000,
             None,
+            None,
         )
     }
 
-    /// Build SQLite memory with optional open timeout.
+    /// Build SQLite memory with full configuration.
     ///
     /// If `open_timeout_secs` is `Some(n)`, opening the database is limited to `n` seconds
     /// (capped at 300). Useful when the DB file may be locked or on slow storage.
     /// `None` = wait indefinitely (default).
+    ///
+    /// `confidence_weight`: weight of confidence in recall scoring (0.0–1.0).
+    /// `None` defaults to 0.3. Formula: boost = (1.0 - weight) + weight * confidence.
     pub fn with_embedder(
         workspace_dir: &Path,
         embedder: Arc<dyn EmbeddingProvider>,
@@ -58,6 +63,7 @@ impl SqliteMemory {
         keyword_weight: f32,
         cache_max: usize,
         open_timeout_secs: Option<u64>,
+        confidence_weight: Option<f64>,
     ) -> anyhow::Result<Self> {
         let db_path = workspace_dir.join("memory").join("brain.db");
 
@@ -90,6 +96,7 @@ impl SqliteMemory {
             vector_weight,
             keyword_weight,
             cache_max,
+            confidence_weight: confidence_weight.unwrap_or(0.3),
         })
     }
 
@@ -172,14 +179,24 @@ impl SqliteMemory {
         )?;
 
         // Migration: add session_id column if not present (safe to run repeatedly)
-        let has_session_id: bool = conn
+        let schema_sql: String = conn
             .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")?
-            .query_row([], |row| row.get::<_, String>(0))?
-            .contains("session_id");
-        if !has_session_id {
+            .query_row([], |row| row.get::<_, String>(0))?;
+
+        if !schema_sql.contains("session_id") {
             conn.execute_batch(
                 "ALTER TABLE memories ADD COLUMN session_id TEXT;
                  CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);",
+            )?;
+        }
+
+        // Migration: add Hermes confidence scoring columns
+        if !schema_sql.contains("confidence") {
+            conn.execute_batch(
+                "ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0;
+                 ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'explicit';
+                 ALTER TABLE memories ADD COLUMN last_recalled_at TEXT;
+                 CREATE INDEX IF NOT EXISTS idx_memories_confidence ON memories(confidence);",
             )?;
         }
 
@@ -201,6 +218,15 @@ impl SqliteMemory {
             "daily" => MemoryCategory::Daily,
             "conversation" => MemoryCategory::Conversation,
             other => MemoryCategory::Custom(other.to_string()),
+        }
+    }
+
+    fn str_to_source(s: &str) -> MemorySource {
+        match s {
+            "auto_save" => MemorySource::AutoSave,
+            "extracted" => MemorySource::Extracted,
+            "hydrated" => MemorySource::Hydrated,
+            _ => MemorySource::Explicit,
         }
     }
 
@@ -443,6 +469,26 @@ impl Memory for SqliteMemory {
         category: MemoryCategory,
         session_id: Option<&str>,
     ) -> anyhow::Result<()> {
+        self.store_with_metadata(
+            key,
+            content,
+            category,
+            session_id,
+            1.0,
+            MemorySource::Explicit,
+        )
+        .await
+    }
+
+    async fn store_with_metadata(
+        &self,
+        key: &str,
+        content: &str,
+        category: MemoryCategory,
+        session_id: Option<&str>,
+        confidence: f64,
+        source: MemorySource,
+    ) -> anyhow::Result<()> {
         // Compute embedding (async, before blocking work)
         let embedding_bytes = self
             .get_or_compute_embedding(content)
@@ -453,6 +499,7 @@ impl Memory for SqliteMemory {
         let key = key.to_string();
         let content = content.to_string();
         let sid = session_id.map(String::from);
+        let source_str = source.to_string();
 
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let conn = conn.lock();
@@ -461,15 +508,17 @@ impl Memory for SqliteMemory {
             let id = Uuid::new_v4().to_string();
 
             conn.execute(
-                "INSERT INTO memories (id, key, content, category, embedding, created_at, updated_at, session_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "INSERT INTO memories (id, key, content, category, embedding, created_at, updated_at, session_id, confidence, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(key) DO UPDATE SET
                     content = excluded.content,
                     category = excluded.category,
                     embedding = excluded.embedding,
                     updated_at = excluded.updated_at,
-                    session_id = excluded.session_id",
-                params![id, key, content, cat, embedding_bytes, now, now, sid],
+                    session_id = excluded.session_id,
+                    confidence = excluded.confidence,
+                    source = excluded.source",
+                params![id, key, content, cat, embedding_bytes, now, now, sid, confidence, source_str],
             )?;
             Ok(())
         })
@@ -494,6 +543,7 @@ impl Memory for SqliteMemory {
         let sid = session_id.map(String::from);
         let vector_weight = self.vector_weight;
         let keyword_weight = self.keyword_weight;
+        let confidence_weight = self.confidence_weight;
 
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<MemoryEntry>> {
             let conn = conn.lock();
@@ -539,7 +589,8 @@ impl Memory for SqliteMemory {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let sql = format!(
-                    "SELECT id, key, content, category, created_at, session_id \
+                    "SELECT id, key, content, category, created_at, session_id, \
+                            confidence, source, last_recalled_at \
                      FROM memories WHERE id IN ({placeholders})"
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -557,17 +608,40 @@ impl Memory for SqliteMemory {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, Option<String>>(5)?,
+                        row.get::<_, f64>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 })?;
 
                 let mut entry_map = std::collections::HashMap::new();
                 for row in rows {
-                    let (id, key, content, cat, ts, sid) = row?;
-                    entry_map.insert(id, (key, content, cat, ts, sid));
+                    let (id, key, content, cat, ts, sid, confidence, source, last_recalled) = row?;
+                    entry_map.insert(
+                        id,
+                        (
+                            key,
+                            content,
+                            cat,
+                            ts,
+                            sid,
+                            confidence,
+                            source,
+                            last_recalled,
+                        ),
+                    );
                 }
 
                 for scored in &merged {
-                    if let Some((key, content, cat, ts, sid)) = entry_map.remove(&scored.id) {
+                    if let Some((key, content, cat, ts, sid, confidence, source, last_recalled)) =
+                        entry_map.remove(&scored.id)
+                    {
+                        // Confidence boost: (1 - w) + w * confidence
+                        // With default w=0.3: confidence=1.0 → 1.0, confidence=0.5 → 0.85
+                        let confidence_boost =
+                            (1.0 - confidence_weight) + confidence_weight * confidence;
+                        let boosted_score = f64::from(scored.final_score) * confidence_boost;
+
                         let entry = MemoryEntry {
                             id: scored.id.clone(),
                             key,
@@ -575,7 +649,10 @@ impl Memory for SqliteMemory {
                             category: Self::str_to_category(&cat),
                             timestamp: ts,
                             session_id: sid,
-                            score: Some(f64::from(scored.final_score)),
+                            score: Some(boosted_score),
+                            confidence,
+                            source: Self::str_to_source(&source),
+                            last_recalled_at: last_recalled,
                         };
                         if let Some(filter_sid) = session_ref {
                             if entry.session_id.as_deref() != Some(filter_sid) {
@@ -585,6 +662,13 @@ impl Memory for SqliteMemory {
                         results.push(entry);
                     }
                 }
+
+                // Re-sort by boosted score (confidence may have reordered results)
+                results.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
             }
 
             // If hybrid returned nothing, fall back to LIKE search.
@@ -607,7 +691,9 @@ impl Memory for SqliteMemory {
                         .collect();
                     let where_clause = conditions.join(" OR ");
                     let sql = format!(
-                        "SELECT id, key, content, category, created_at, session_id FROM memories
+                        "SELECT id, key, content, category, created_at, session_id, \
+                                confidence, source, last_recalled_at \
+                         FROM memories
                          WHERE {where_clause}
                          ORDER BY updated_at DESC
                          LIMIT ?{}",
@@ -632,6 +718,9 @@ impl Memory for SqliteMemory {
                             timestamp: row.get(4)?,
                             session_id: row.get(5)?,
                             score: Some(1.0),
+                            confidence: row.get(6)?,
+                            source: Self::str_to_source(&row.get::<_, String>(7)?),
+                            last_recalled_at: row.get(8)?,
                         })
                     })?;
                     for row in rows {
@@ -647,6 +736,17 @@ impl Memory for SqliteMemory {
             }
 
             results.truncate(limit);
+
+            // Update last_recalled_at for all recalled entries
+            if !results.is_empty() {
+                let now = chrono::Utc::now().to_rfc3339();
+                let mut update_stmt =
+                    conn.prepare("UPDATE memories SET last_recalled_at = ?1 WHERE key = ?2")?;
+                for entry in &results {
+                    update_stmt.execute(params![now, entry.key])?;
+                }
+            }
+
             Ok(results)
         })
         .await?
@@ -659,7 +759,9 @@ impl Memory for SqliteMemory {
         tokio::task::spawn_blocking(move || -> anyhow::Result<Option<MemoryEntry>> {
             let conn = conn.lock();
             let mut stmt = conn.prepare(
-                "SELECT id, key, content, category, created_at, session_id FROM memories WHERE key = ?1",
+                "SELECT id, key, content, category, created_at, session_id, \
+                        confidence, source, last_recalled_at \
+                 FROM memories WHERE key = ?1",
             )?;
 
             let mut rows = stmt.query_map(params![key], |row| {
@@ -671,6 +773,9 @@ impl Memory for SqliteMemory {
                     timestamp: row.get(4)?,
                     session_id: row.get(5)?,
                     score: None,
+                    confidence: row.get(6)?,
+                    source: Self::str_to_source(&row.get::<_, String>(7)?),
+                    last_recalled_at: row.get(8)?,
                 })
             })?;
 
@@ -707,13 +812,18 @@ impl Memory for SqliteMemory {
                     timestamp: row.get(4)?,
                     session_id: row.get(5)?,
                     score: None,
+                    confidence: row.get(6)?,
+                    source: Self::str_to_source(&row.get::<_, String>(7)?),
+                    last_recalled_at: row.get(8)?,
                 })
             };
 
             if let Some(ref cat) = category {
                 let cat_str = Self::category_to_str(cat);
                 let mut stmt = conn.prepare(
-                    "SELECT id, key, content, category, created_at, session_id FROM memories
+                    "SELECT id, key, content, category, created_at, session_id, \
+                            confidence, source, last_recalled_at \
+                     FROM memories
                      WHERE category = ?1 ORDER BY updated_at DESC LIMIT ?2",
                 )?;
                 let rows = stmt.query_map(params![cat_str, DEFAULT_LIST_LIMIT], row_mapper)?;
@@ -728,7 +838,9 @@ impl Memory for SqliteMemory {
                 }
             } else {
                 let mut stmt = conn.prepare(
-                    "SELECT id, key, content, category, created_at, session_id FROM memories
+                    "SELECT id, key, content, category, created_at, session_id, \
+                            confidence, source, last_recalled_at \
+                     FROM memories
                      ORDER BY updated_at DESC LIMIT ?1",
                 )?;
                 let rows = stmt.query_map(params![DEFAULT_LIST_LIMIT], row_mapper)?;
@@ -1223,7 +1335,7 @@ mod tests {
     fn open_with_timeout_succeeds_when_fast() {
         let tmp = TempDir::new().unwrap();
         let embedder = Arc::new(super::super::embeddings::NoopEmbedding);
-        let mem = SqliteMemory::with_embedder(tmp.path(), embedder, 0.7, 0.3, 1000, Some(5));
+        let mem = SqliteMemory::with_embedder(tmp.path(), embedder, 0.7, 0.3, 1000, Some(5), None);
         assert!(
             mem.is_ok(),
             "open with 5s timeout should succeed on fast path"
@@ -1241,6 +1353,7 @@ mod tests {
             0.3,
             1000,
             Some(2),
+            None,
         )
         .unwrap();
         mem.store(
@@ -1261,7 +1374,7 @@ mod tests {
     fn with_embedder_noop() {
         let tmp = TempDir::new().unwrap();
         let embedder = Arc::new(super::super::embeddings::NoopEmbedding);
-        let mem = SqliteMemory::with_embedder(tmp.path(), embedder, 0.7, 0.3, 1000, None);
+        let mem = SqliteMemory::with_embedder(tmp.path(), embedder, 0.7, 0.3, 1000, None, None);
         assert!(mem.is_ok());
         assert_eq!(mem.unwrap().name(), "sqlite");
     }

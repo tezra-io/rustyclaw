@@ -1,4 +1,4 @@
-use super::traits::{Memory, MemoryCategory, MemoryEntry};
+use super::traits::{Memory, MemoryCategory, MemoryEntry, MemorySource};
 use async_trait::async_trait;
 use chrono::Local;
 use std::path::{Path, PathBuf};
@@ -91,6 +91,9 @@ impl MarkdownMemory {
                     timestamp: filename.to_string(),
                     session_id: None,
                     score: None,
+                    confidence: 1.0,
+                    source: MemorySource::default(),
+                    last_recalled_at: None,
                 }
             })
             .collect()

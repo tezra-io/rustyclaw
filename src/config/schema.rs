@@ -1797,6 +1797,13 @@ pub struct MemoryConfig {
     /// Only used when `backend = "qdrant"`.
     #[serde(default)]
     pub qdrant: QdrantConfig,
+
+    // ── Hermes memory enhancement ─────────────────────────────
+    /// Configuration for the Hermes memory enhancement system
+    /// (LLM extraction, confidence scoring, consolidation).
+    /// Requires `[heartbeat] enabled = true` for extraction and consolidation.
+    #[serde(default)]
+    pub hermes: HermesConfig,
 }
 
 fn default_embedding_provider() -> String {
@@ -1867,7 +1874,102 @@ impl Default for MemoryConfig {
             auto_hydrate: true,
             sqlite_open_timeout_secs: None,
             qdrant: QdrantConfig::default(),
+            hermes: HermesConfig::default(),
         }
+    }
+}
+
+// ── Hermes Memory Enhancement ────────────────────────────────────
+
+/// Configuration for the Hermes memory enhancement system.
+/// Requires `[heartbeat] enabled = true` for extraction and consolidation.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HermesConfig {
+    /// Enable Hermes LLM-driven memory extraction
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Optional model for extraction (format: "provider/model").
+    /// Falls back to default_provider + default_model if not set.
+    #[serde(default)]
+    pub extraction_model: Option<String>,
+
+    /// Minimum conversation turns before extraction runs (default: 3)
+    #[serde(default = "default_extraction_turn_threshold")]
+    pub extraction_turn_threshold: u32,
+
+    /// Max memories to extract per heartbeat tick (default: 10)
+    #[serde(default = "default_max_extractions_per_tick")]
+    pub max_extractions_per_tick: usize,
+
+    /// Hours between consolidation passes (default: 24)
+    #[serde(default = "default_consolidation_interval_hours")]
+    pub consolidation_interval_hours: u32,
+
+    /// Weight of confidence in recall scoring (0.0–1.0, default: 0.3).
+    /// Formula: boost = (1.0 - weight) + weight * confidence
+    #[serde(default = "default_confidence_weight")]
+    pub confidence_weight: f64,
+
+    /// Enable confidence decay for unreinforced memories (default: false)
+    #[serde(default)]
+    pub confidence_decay_enabled: bool,
+
+    /// Decay factor per consolidation cycle (default: 0.95)
+    #[serde(default = "default_decay_factor")]
+    pub decay_factor: f64,
+
+    /// Minimum confidence before memory is eligible for auto-cleanup (default: 0.1)
+    #[serde(default = "default_decay_floor")]
+    pub decay_floor: f64,
+}
+
+fn default_extraction_turn_threshold() -> u32 {
+    3
+}
+fn default_max_extractions_per_tick() -> usize {
+    10
+}
+fn default_consolidation_interval_hours() -> u32 {
+    24
+}
+fn default_confidence_weight() -> f64 {
+    0.3
+}
+fn default_decay_factor() -> f64 {
+    0.95
+}
+fn default_decay_floor() -> f64 {
+    0.1
+}
+
+impl Default for HermesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            extraction_model: None,
+            extraction_turn_threshold: default_extraction_turn_threshold(),
+            max_extractions_per_tick: default_max_extractions_per_tick(),
+            consolidation_interval_hours: default_consolidation_interval_hours(),
+            confidence_weight: default_confidence_weight(),
+            confidence_decay_enabled: false,
+            decay_factor: default_decay_factor(),
+            decay_floor: default_decay_floor(),
+        }
+    }
+}
+
+impl PartialEq for HermesConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.enabled == other.enabled
+            && self.extraction_model == other.extraction_model
+            && self.extraction_turn_threshold == other.extraction_turn_threshold
+            && self.max_extractions_per_tick == other.max_extractions_per_tick
+            && self.consolidation_interval_hours == other.consolidation_interval_hours
+            && (self.confidence_weight - other.confidence_weight).abs() < f64::EPSILON
+            && self.confidence_decay_enabled == other.confidence_decay_enabled
+            && (self.decay_factor - other.decay_factor).abs() < f64::EPSILON
+            && (self.decay_floor - other.decay_floor).abs() < f64::EPSILON
     }
 }
 

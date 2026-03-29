@@ -5,7 +5,7 @@
 //! data exfiltration, invisible unicode, etc.) while delegating all other
 //! operations directly to the inner backend.
 
-use crate::memory::traits::{Memory, MemoryCategory, MemoryEntry};
+use crate::memory::traits::{Memory, MemoryCategory, MemoryEntry, MemorySource};
 use crate::security::ContentScanner;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -86,6 +86,36 @@ impl Memory for ScannedMemory {
     async fn health_check(&self) -> bool {
         self.inner.health_check().await
     }
+
+    async fn store_with_metadata(
+        &self,
+        key: &str,
+        content: &str,
+        category: MemoryCategory,
+        session_id: Option<&str>,
+        confidence: f64,
+        source: MemorySource,
+    ) -> anyhow::Result<()> {
+        let key_scan = self.scanner.scan(key);
+        if !key_scan.is_clean() {
+            anyhow::bail!(
+                "Memory key blocked by injection scan: {}",
+                key_scan.summary()
+            );
+        }
+
+        let content_scan = self.scanner.scan(content);
+        if !content_scan.is_clean() {
+            anyhow::bail!(
+                "Memory content blocked by injection scan: {}",
+                content_scan.summary()
+            );
+        }
+
+        self.inner
+            .store_with_metadata(key, content, category, session_id, confidence, source)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +156,9 @@ mod tests {
                 timestamp: "2026-03-11T00:00:00Z".to_string(),
                 session_id: session_id.map(String::from),
                 score: None,
+                confidence: 1.0,
+                source: MemorySource::default(),
+                last_recalled_at: None,
             };
             self.entries.lock().await.push(entry);
             Ok(())

@@ -1,5 +1,5 @@
 use super::sqlite::SqliteMemory;
-use super::traits::{Memory, MemoryCategory, MemoryEntry};
+use super::traits::{Memory, MemoryCategory, MemoryEntry, MemorySource};
 use async_trait::async_trait;
 use chrono::Local;
 use parking_lot::Mutex;
@@ -226,6 +226,9 @@ impl LucidMemory {
                 timestamp: now.clone(),
                 session_id: None,
                 score: Some((1.0 - rank as f64 * 0.05).max(0.1)),
+                confidence: 1.0,
+                source: MemorySource::default(),
+                last_recalled_at: None,
             });
         }
 
@@ -381,6 +384,29 @@ impl Memory for LucidMemory {
 
     async fn health_check(&self) -> bool {
         self.local.health_check().await
+    }
+
+    async fn store_with_metadata(
+        &self,
+        key: &str,
+        content: &str,
+        category: MemoryCategory,
+        session_id: Option<&str>,
+        confidence: f64,
+        source: MemorySource,
+    ) -> anyhow::Result<()> {
+        self.local
+            .store_with_metadata(
+                key,
+                content,
+                category.clone(),
+                session_id,
+                confidence,
+                source,
+            )
+            .await?;
+        self.sync_to_lucid_async(key, content, &category).await;
+        Ok(())
     }
 }
 
