@@ -3402,6 +3402,11 @@ pub async fn start_channels(config: Config) -> Result<()> {
             if config.hooks.builtin.command_logger {
                 runner.register(Box::new(crate::hooks::builtin::CommandLoggerHook::new()));
             }
+            if let Some(ld_config) = config.hooks.builtin.loop_detection.clone() {
+                runner.register(Box::new(crate::hooks::builtin::LoopDetectionHook::new(
+                    ld_config,
+                )));
+            }
             if config.hooks.builtin.session_bridge {
                 let sb_config = config.session_bridge.clone().unwrap_or_default();
                 let sb_allowed = config

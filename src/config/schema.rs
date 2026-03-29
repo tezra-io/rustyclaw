@@ -2057,6 +2057,48 @@ pub struct BuiltinHooksConfig {
     /// Enable the session-bridge hook (routes messages to Claude Code CLI processes).
     #[serde(default)]
     pub session_bridge: bool,
+    /// Enable the loop-detection hook (detects repetitive tool calls).
+    #[serde(default)]
+    pub loop_detection: Option<LoopDetectionConfig>,
+}
+
+// ── Loop Detection ─────────────────────────────────────────────
+
+/// Configuration for the loop-detection hook that identifies repetitive
+/// tool calls and stops runaway agents.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LoopDetectionConfig {
+    /// Number of recent tool calls to track.
+    #[serde(default = "default_loop_window_size")]
+    pub window_size: usize,
+    /// Emit a warning when a tool call repeats this many times in the window.
+    #[serde(default = "default_loop_warn_threshold")]
+    pub warn_threshold: usize,
+    /// Cancel the tool call when it repeats this many times in the window.
+    #[serde(default = "default_loop_hard_stop_threshold")]
+    pub hard_stop_threshold: usize,
+}
+
+impl Default for LoopDetectionConfig {
+    fn default() -> Self {
+        Self {
+            window_size: default_loop_window_size(),
+            warn_threshold: default_loop_warn_threshold(),
+            hard_stop_threshold: default_loop_hard_stop_threshold(),
+        }
+    }
+}
+
+fn default_loop_window_size() -> usize {
+    20
+}
+
+fn default_loop_warn_threshold() -> usize {
+    3
+}
+
+fn default_loop_hard_stop_threshold() -> usize {
+    5
 }
 
 // ── Session Bridge ──────────────────────────────────────────────
