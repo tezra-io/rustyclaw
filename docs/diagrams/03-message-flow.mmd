@@ -1,0 +1,69 @@
+sequenceDiagram
+    participant User
+    participant Channel as Channel<br/>(Telegram/Discord/...)
+    participant Gateway as Gateway (Axum)
+    participant RustBridge as RustBridge (HTTP)
+    participant Coordinator as AgentCoordinator
+    participant AgentSrv as AgentServer
+    participant AgentLoop as Agent Loop (Rust)
+    participant Provider as LLM Provider
+    participant Tool as Tool Executor
+    participant Memory as Memory Backend
+    participant Hooks as Hooks (Hermes)
+    participant BtwRouter as BtwRouter
+    participant BtwServer as BtwServer
+    participant SubSession as SubAgentSession
+
+    rect rgb(232, 245, 233)
+    Note over User, SubSession: Flow 1 - Inbound Message Processing
+    User->>Channel: Send message
+    Channel->>Gateway: ChannelMessage (via listen)
+    Gateway->>RustBridge: HTTP POST /webhook
+    RustBridge->>Coordinator: route_message/3
+    Coordinator->>AgentSrv: GenServer.call(:handle_message)
+    AgentSrv->>AgentLoop: chat_with_system()
+    AgentLoop->>Provider: LLM inference request
+    Provider-->>AgentLoop: ChatResponse (text + tool_calls)
+    AgentLoop->>Hooks: on_response (Hermes extraction)
+    AgentLoop-->>AgentSrv: Response text
+    AgentSrv-->>Coordinator: {:ok, response}
+    Coordinator-->>RustBridge: Response
+    RustBridge-->>Gateway: HTTP 200
+    Gateway->>Channel: send(SendMessage)
+    Channel-->>User: Reply
+    end
+
+    rect rgb(237, 231, 246)
+    Note over User, SubSession: Flow 2 - Tool Execution
+    AgentLoop->>Tool: execute(tool_name, params)
+    Tool->>Memory: store/recall (if memory tool)
+    Memory-->>Tool: Result
+    Tool-->>AgentLoop: ToolResult
+    AgentLoop->>Provider: LLM with tool result
+    Provider-->>AgentLoop: Next response
+    end
+
+    rect rgb(227, 242, 253)
+    Note over User, SubSession: Flow 3 - Agent Delegation
+    AgentSrv->>Coordinator: delegate(task, capabilities)
+    Coordinator->>SubSession: create(agent, task)
+    Coordinator->>AgentSrv: spawn child agent
+    AgentSrv->>AgentLoop: Execute delegated task
+    AgentLoop-->>AgentSrv: Result
+    AgentSrv-->>Coordinator: {:completed, result}
+    Coordinator->>SubSession: update(:completed)
+    Coordinator-->>AgentSrv: Delegation result
+    end
+
+    rect rgb(252, 228, 236)
+    Note over User, SubSession: Flow 4 - BTW Side-Channel
+    User->>Channel: /btw check logs
+    Channel->>Gateway: ChannelMessage
+    Gateway->>RustBridge: HTTP POST
+    RustBridge->>BtwRouter: route(/btw ...)
+    BtwRouter->>BtwServer: handle in parallel
+    BtwServer->>AgentLoop: Execute side task
+    AgentLoop-->>BtwServer: Result
+    BtwServer-->>BtwRouter: Response
+    BtwRouter-->>Channel: Reply (non-blocking)
+    end

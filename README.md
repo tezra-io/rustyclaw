@@ -34,75 +34,39 @@ Key numbers:
 
 ## Architecture
 
-RustyClaw is a two-layer system connected by a Unix Domain Socket (UDS) bridge:
+RustyClaw is a two-layer system connected by a UDS bridge. The Rust core handles I/O-intensive operations (channels, providers, tools, security, memory) while the Elixir/OTP layer manages agent lifecycle, coordination, plugins, and tool synthesis.
 
-```mermaid
-graph TB
-    subgraph Elixir["Elixir/OTP Orchestration Layer (609 .ex/.exs files)"]
-        direction TB
-        AD[AgentDiscovery] --> AC[AgentCoordinator]
-        AC --> AS[AgentSupervisor]
-        AS --> AG["AgentServer (GenServer × N)"]
-        AC --> SAS[SubAgentSession]
-        AG --> RB[RustBridge]
-        PM[PluginManager] --> PL["Plugins (18)"]
-        TS["ToolSynthesis (11 modules)"]
-        MP[MessageProvenance]
-        TRS[TraceStore]
-        RL[ResourceLock]
-        BTW["BtwServer / BtwRouter / BtwSupervisor"]
-    end
+### System Overview
 
-    subgraph Rust["Rust Core (245 .rs files)"]
-        direction TB
-        CH["Channels (20)"]
-        PR["Providers (13)"]
-        TL["Tools (43)"]
-        SEC["Security & Approval"]
-        MEM["Memory (6 backends)"]
-        GW["Gateway (Axum + UDS Bridge)"]
-        SB["Session Bridge"]
-        SVC["Service Manager (launchd)"]
-        TRAJ["Trajectory & Observability"]
-        SOP["SOP Engine"]
-        SK["Skills System"]
-        SF["SkillForge"]
-        CR["Cron Scheduler"]
-        HW["Hardware Peripherals"]
-    end
+<p align="center">
+  <img src="docs/diagrams/01-system-overview.svg" alt="RustyClaw System Overview" />
+</p>
 
-    RB -- "UDS (bridge.sock)" --> GW
-```
+### Elixir/OTP Orchestration Detail
 
-<details>
-<summary>ASCII fallback (for terminals)</summary>
+The Elixir layer is structured as an OTP supervision tree with dedicated subsystems for agent management, plugin orchestration, BTW side-channels, tool synthesis, and session lifecycle.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│          Elixir/OTP Orchestration Layer (609 files)           │
-│                                                              │
-│  AgentDiscovery ── AgentCoordinator ── AgentSupervisor       │
-│                         │                                    │
-│                  AgentServer (GenServer × N)                  │
-│                         │                                    │
-│  PluginManager ── 18 Plugins     SubAgentSession (ETS)       │
-│  ToolSynthesis (11 modules)      MessageProvenance           │
-│  BtwServer/BtwRouter/BtwSupervisor   TraceStore              │
-│  ResourceLock    AgentDefinition     RustBridge              │
-└─────────────────────────┬────────────────────────────────────┘
-                          │ UDS (bridge.sock)
-┌─────────────────────────▼────────────────────────────────────┐
-│                       Rust Core                              │
-│                                                              │
-│  Channels (20)   Providers (13)   Tools (43)   Memory (6)    │
-│  Security/Approval   Gateway (Axum)   Session Bridge         │
-│  Service Manager     Trajectory       SOP Engine             │
-│  Skills System       SkillForge       Cron Scheduler         │
-│  Hardware Peripherals   Observability (Prometheus, OTel)     │
-└──────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/diagrams/02-elixir-orchestration.svg" alt="Elixir Orchestration Detail" />
+</p>
 
-</details>
+### Message Flow
+
+Four primary message flows through the system: inbound message processing, tool execution, agent delegation, and BTW side-channel routing.
+
+<p align="center">
+  <img src="docs/diagrams/03-message-flow.svg" alt="Message Flow" />
+</p>
+
+### Memory, Security, and Infrastructure
+
+The memory subsystem supports 7 backends with Hermes-powered LLM fact extraction. The security model is deny-by-default with 4 sandbox implementations and multi-layer content protection.
+
+<p align="center">
+  <img src="docs/diagrams/04-memory-security.svg" alt="Memory and Security Architecture" />
+</p>
+
+> Diagram source files (Mermaid): [`docs/diagrams/`](docs/diagrams/). PNG versions also available for offline viewing.
 
 ### Layer responsibilities
 

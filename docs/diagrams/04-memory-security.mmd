@@ -1,0 +1,100 @@
+graph TB
+    subgraph MemorySystem["Memory Subsystem (src/memory/)"]
+        MemTrait["Memory Trait<br/>(store, recall, forget,<br/>store_with_metadata)"]
+        SQLite["SQLite Backend<br/>(primary, 69K)"]
+        Markdown["Markdown Backend"]
+        Qdrant["Qdrant Vector Backend"]
+        Postgres["PostgreSQL Backend"]
+        Lucid["Lucid Backend"]
+        Snapshot["Snapshot Backend"]
+        NoneBack["None Backend"]
+        VectorEmbed["Vector Embeddings"]
+        Chunker["Chunker<br/>(text splitting)"]
+        ResponseCache["Response Cache"]
+        Hygiene["Memory Hygiene"]
+        Scanning["Memory Scanning"]
+        MemCLI["Memory CLI"]
+        MemTrait --> SQLite
+        MemTrait --> Markdown
+        MemTrait --> Qdrant
+        MemTrait --> Postgres
+        MemTrait --> Lucid
+        MemTrait --> Snapshot
+        MemTrait --> NoneBack
+        VectorEmbed --> Qdrant
+        Chunker --> VectorEmbed
+    end
+
+    subgraph Hermes["Hermes Memory Extraction (src/hooks/builtin/hermes/)"]
+        HermesHook["HermesExtractionHook"]
+        ConvBuffer["Conversation Buffer<br/>(heartbeat-triggered)"]
+        LLMExtract["LLM Fact Extraction<br/>(provider.chat_with_system)"]
+        ExtractedFact["ExtractedFact<br/>(confidence, source,<br/>category, keywords)"]
+        Consolidation["Memory Consolidation Pass<br/>(merge duplicates,<br/>update confidence)"]
+        ConfDecay["Confidence Decay (TEZ-277)<br/>factor=0.95, floor=0.1,<br/>threshold=48h"]
+        LoopDetect["LoopDetectionHook<br/>(SHA-256 sliding window)"]
+        CmdLogger["CommandLoggerHook"]
+        SessionBridge["SessionBridgeHook"]
+        HermesHook --> ConvBuffer
+        ConvBuffer --> LLMExtract
+        LLMExtract --> ExtractedFact
+        ExtractedFact --> Consolidation
+        Consolidation --> ConfDecay
+    end
+
+    subgraph SecurityModel["Security Model (src/security/)"]
+        Policy["Policy Engine<br/>(deny-by-default, 78K)"]
+        Pairing["Device Pairing<br/>(OTP, 25K)"]
+        Secrets["Secrets Manager<br/>(30K)"]
+        Sandbox["Sandbox Trait"]
+        BubbleWrap["BubbleWrap"]
+        Firejail["Firejail"]
+        Landlock["Landlock"]
+        DockerSB["Docker"]
+        PromptGuard["Prompt Guard"]
+        ContentScan["Content Scanner<br/>(24K)"]
+        LeakDetect["Leak Detector"]
+        DomainMatch["Domain Matcher"]
+        Audit["Audit Log"]
+        EStop["Emergency Stop"]
+        Sandbox --> BubbleWrap
+        Sandbox --> Firejail
+        Sandbox --> Landlock
+        Sandbox --> DockerSB
+        Policy --> Audit
+    end
+
+    subgraph Infra["Supporting Infrastructure"]
+        Observability["Observability:<br/>Prometheus, OpenTelemetry,<br/>Runtime Trace"]
+        Cron["Cron:<br/>Scheduler, Store, Types"]
+        Daemon["Daemon:<br/>Service Supervisor,<br/>Elixir Bridge"]
+        Runtime["Runtime:<br/>Native, Docker, WASM"]
+        Approval["Approval:<br/>Human-in-the-loop"]
+        Peripherals["Peripherals:<br/>Arduino, RPi, STM32,<br/>Serial, UNO-Q"]
+        RAG["RAG: Hardware<br/>Datasheet Retrieval"]
+        Cost["Cost: Token<br/>Usage Tracking"]
+        Health["Health Checks"]
+        Heartbeat["Heartbeat Monitor"]
+        Tunnel["Tunnel<br/>(ngrok/cloudflared)"]
+        Skills["SkillForge"]
+        SOP["SOP Engine"]
+        Trajectory["Trajectory Tracking"]
+        Identity["Identity Mgmt"]
+    end
+
+    HermesHook -.->|"store extracted facts"| MemTrait
+    AgentLoop["Agent Loop"] --> MemTrait
+    AgentLoop --> Policy
+    AgentLoop --> HermesHook
+    ContentScan -.->|"scan tool output"| Policy
+    PromptGuard -.->|"guard LLM input"| Policy
+
+    classDef memStyle fill:#E3F2FD,stroke:#6B87A8,color:#374151
+    classDef hermesStyle fill:#EDE7F6,stroke:#6B6B9E,color:#374151
+    classDef secStyle fill:#FBE9E7,stroke:#C4795B,color:#374151
+    classDef infraStyle fill:#F1F8E9,stroke:#6B9E8A,color:#374151
+
+    class MemorySystem memStyle
+    class Hermes hermesStyle
+    class SecurityModel secStyle
+    class Infra infraStyle

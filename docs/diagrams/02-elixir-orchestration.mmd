@@ -1,0 +1,120 @@
+graph TB
+    subgraph App["RustyclawOrchestrator.Application"]
+        AppSup["Application Supervisor"]
+    end
+
+    subgraph Supervision["OTP Supervision Tree"]
+        AgentSup["AgentSupervisor<br/>(DynamicSupervisor)"]
+        AgentCoord["AgentCoordinator<br/>(GenServer)"]
+        BtwSup["BtwSupervisor<br/>(DynamicSupervisor)"]
+        PlugRouter["PluginRouter<br/>(GenServer)"]
+        PlugManager["Plugin.Manager"]
+        TraceStore["TraceStore"]
+        ResLock["ResourceLock"]
+    end
+
+    subgraph Agents["Agent Instances"]
+        AS1["AgentServer :agent_1"]
+        AS2["AgentServer :agent_2"]
+        AS3["AgentServer :agent_n"]
+    end
+
+    subgraph BTW["BTW Side-Channel (TEZ-182)"]
+        BtwRouter["BtwRouter"]
+        BtwS1["BtwServer :agent_1_btw"]
+        BtwS2["BtwServer :agent_2_btw"]
+    end
+
+    subgraph PluginSys["Plugin System"]
+        ClaudeCode["ClaudeCodePlugin"]
+        Codex["CodexPlugin"]
+        Linear["LinearIntegration"]
+        CronBridge["CronBridge"]
+        GitWorktree["GitWorktree"]
+        BaseLLM["BaseLlmPlugin"]
+        AutoRouter["AutoRouter"]
+        BatchProc["BatchProcessor"]
+        QualityGate["QualityGate"]
+        RetryScheduler["RetryScheduler"]
+        TaskOrch["TaskOrchestrator"]
+        TaskQueue["TaskQueue"]
+        Worker["Worker"]
+    end
+
+    subgraph ToolSynth["Tool Synthesis Pipeline"]
+        TSComposer["Composer"]
+        TSSynthesizer["Synthesizer"]
+        TSRegistry["Registry"]
+        TSImprover["Improver"]
+        TSAnalyzer["StaticAnalyzer"]
+        TSProbation["Probation"]
+        TSPersistence["Persistence"]
+        TSSandbox["Sandbox"]
+        TSIsolation["Isolation"]
+        TSApiRouter["ApiRouter"]
+        TSComposer --> TSSynthesizer
+        TSSynthesizer --> TSRegistry
+        TSImprover --> TSAnalyzer
+        TSProbation --> TSPersistence
+    end
+
+    subgraph Sessions["Session Management"]
+        SubSession["SubAgentSession (ETS)"]
+        States["pending > active > completed / failed"]
+        AgentDef["AgentDefinition<br/>(YAML+MD, NimbleOptions)"]
+        AgentDisc["AgentDiscovery"]
+        MsgProv["MessageProvenance"]
+    end
+
+    subgraph AgentTools["Agent Tools (TEZ-165)"]
+        SpawnTool["SpawnAgentTool"]
+        ListTool["ListAgentsTool"]
+        MsgTool["MessageAgentTool"]
+        KillTool["KillAgentTool"]
+    end
+
+    subgraph RBridge["Rust Bridge"]
+        RustBridge["RustBridge<br/>(Req HTTP + retry/backoff)"]
+    end
+
+    AppSup --> AgentSup
+    AppSup --> AgentCoord
+    AppSup --> BtwSup
+    AppSup --> PlugRouter
+    AppSup --> TraceStore
+    AgentSup --> AS1
+    AgentSup --> AS2
+    AgentSup --> AS3
+    BtwSup --> BtwS1
+    BtwSup --> BtwS2
+    BtwRouter --> BtwSup
+    PlugRouter --> PlugManager
+    PlugManager --> PluginSys
+    AgentCoord --> SubSession
+    AgentCoord --> RustBridge
+    AS1 -.->|"delegate"| AgentCoord
+    AS1 -.->|"tool call"| RustBridge
+    SpawnTool --> AgentSup
+    KillTool --> AgentSup
+    ListTool --> AgentSup
+    MsgTool --> AS1
+
+    classDef appStyle fill:#EDE7F6,stroke:#6B6B9E,color:#374151
+    classDef supStyle fill:#E8EAF6,stroke:#6B6B9E,color:#374151
+    classDef agentStyle fill:#F3E5F5,stroke:#6B6B9E,color:#374151
+    classDef btwStyle fill:#FCE4EC,stroke:#9E6B6B,color:#374151
+    classDef pluginStyle fill:#E8F5E9,stroke:#6B9E8A,color:#374151
+    classDef synthStyle fill:#FFF3E0,stroke:#C4795B,color:#374151
+    classDef sessionStyle fill:#E3F2FD,stroke:#6B87A8,color:#374151
+    classDef toolStyle fill:#F1F8E9,stroke:#6B9E8A,color:#374151
+    classDef bridgeStyle fill:#FBE9E7,stroke:#C4795B,color:#374151
+
+    class App appStyle
+    class Supervision supStyle
+    class Agents agentStyle
+    class BTW btwStyle
+    class PluginSys pluginStyle
+    class ToolSynth synthStyle
+    class Sessions sessionStyle
+    class AgentTools toolStyle
+    class RBridge bridgeStyle

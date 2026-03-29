@@ -1,0 +1,87 @@
+graph LR
+    subgraph Users["User Entry Points"]
+        CLI["CLI"]
+        MSG["Messaging<br/>Channels"]
+        API["Gateway API"]
+    end
+
+    subgraph Elixir["Elixir/OTP Orchestration Layer"]
+        direction TB
+        AppSup["Application<br/>Supervisor"]
+        AgentSup["AgentSupervisor<br/>(DynamicSupervisor)"]
+        AgentSrv["AgentServer<br/>instances"]
+        Coord["AgentCoordinator"]
+        BtwSup["BtwSupervisor"]
+        BtwSrv["BtwServer /<br/>BtwRouter"]
+        SubSession["SubAgentSession<br/>(ETS)"]
+        PluginRouter["PluginRouter"]
+        Plugins["Plugins:<br/>Claude Code, Codex,<br/>Linear, CronBridge"]
+        ToolSynth["Tool Synthesis:<br/>Composer, Synthesizer,<br/>Registry, Improver"]
+        Tools_EX["Agent Tools:<br/>Spawn, List,<br/>Message, Kill"]
+        AgentDef["AgentDefinition<br/>(YAML+MD parser)"]
+        AppSup --> AgentSup
+        AppSup --> Coord
+        AppSup --> BtwSup
+        AppSup --> PluginRouter
+        AgentSup --> AgentSrv
+        BtwSup --> BtwSrv
+        Coord --> SubSession
+        PluginRouter --> Plugins
+    end
+
+    subgraph Bridge["Bridge"]
+        RustBridge["RustBridge<br/>(Req HTTP)"]
+    end
+
+    subgraph Rust["Rust Core"]
+        direction TB
+        Gateway["Gateway<br/>(Axum: HTTP, SSE, WS)"]
+        Agent["Agent Loop<br/>(LLM calls, tool exec)"]
+        Providers["Providers (13)<br/>Anthropic, OpenAI, Gemini,<br/>Bedrock, Ollama, OpenRouter..."]
+        Channels["Channels (20)<br/>Telegram, Discord, Signal,<br/>Slack, WhatsApp, iMessage..."]
+        ToolsRust["Tools (43)<br/>shell, file, web, browser,<br/>memory, cron, git, SOP..."]
+        Memory["Memory<br/>SQLite, Markdown, Qdrant,<br/>Postgres, Lucid, Vector"]
+        Security["Security<br/>Policy, Pairing, Secrets,<br/>Sandbox, PromptGuard"]
+        Hooks["Hooks<br/>Hermes, LoopDetection,<br/>SessionBridge"]
+        Config["Config"]
+        Observability["Observability<br/>Prometheus, OTEL"]
+        Cron["Cron Scheduler"]
+        Daemon["Daemon"]
+        Approval["Approval"]
+        Peripherals["Peripherals<br/>Arduino, RPi, STM32"]
+        Runtime["Runtime<br/>Native, Docker, WASM"]
+        Gateway --> Agent
+        Agent --> Providers
+        Agent --> ToolsRust
+        Agent --> Memory
+        Agent --> Hooks
+    end
+
+    subgraph External["External Services"]
+        LLMs["LLM APIs<br/>Anthropic, OpenAI,<br/>Google, AWS"]
+        MsgPlat["Messaging Platforms<br/>Telegram, Discord,<br/>Signal, Slack"]
+        VectorDBs["Vector DBs<br/>(Qdrant)"]
+        Storage["Storage<br/>(PostgreSQL, SQLite)"]
+    end
+
+    CLI --> Gateway
+    MSG --> Channels
+    API --> Gateway
+    Coord --> RustBridge
+    RustBridge --> Gateway
+    Providers --> LLMs
+    Channels --> MsgPlat
+    Memory --> VectorDBs
+    Memory --> Storage
+
+    classDef userStyle fill:#E8F5E9,stroke:#6B9E8A,color:#374151
+    classDef elixirStyle fill:#EDE7F6,stroke:#6B6B9E,color:#374151
+    classDef bridgeStyle fill:#FFF3E0,stroke:#C4795B,color:#374151
+    classDef rustStyle fill:#FBE9E7,stroke:#C4795B,color:#374151
+    classDef externalStyle fill:#E3F2FD,stroke:#6B87A8,color:#374151
+
+    class Users userStyle
+    class Elixir elixirStyle
+    class Bridge bridgeStyle
+    class Rust rustStyle
+    class External externalStyle
