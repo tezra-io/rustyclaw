@@ -3433,6 +3433,16 @@ pub async fn start_channels(config: Config) -> Result<()> {
                     }
                 }
             }
+            if config.memory.hermes.enabled {
+                runner.register(Box::new(crate::hooks::builtin::HermesExtractionHook::new(
+                    config.memory.hermes.clone(),
+                    Arc::clone(&mem),
+                    Arc::clone(&provider),
+                    model.clone(),
+                    config.workspace_dir.clone(),
+                    None,
+                )));
+            }
             Some(Arc::new(runner))
         } else {
             None

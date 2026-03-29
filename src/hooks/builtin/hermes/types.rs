@@ -1,0 +1,55 @@
+use serde::{Deserialize, Serialize};
+
+/// A single fact extracted by the Hermes LLM analysis pass.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractedFact {
+    pub key: String,
+    pub content: String,
+    pub category: String,
+    pub confidence: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracted_fact_roundtrip() {
+        let fact = ExtractedFact {
+            key: "preferred_language".into(),
+            content: "User prefers Rust".into(),
+            category: "preference".into(),
+            confidence: 0.9,
+        };
+        let json = serde_json::to_string(&fact).unwrap();
+        let parsed: ExtractedFact = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.key, "preferred_language");
+        assert!((parsed.confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_extraction_array() {
+        let json = r#"[
+            {"key": "name", "content": "User is Alice", "category": "knowledge", "confidence": 1.0},
+            {"key": "goal", "content": "Building a CLI tool", "category": "goal", "confidence": 0.7}
+        ]"#;
+        let facts: Vec<ExtractedFact> = serde_json::from_str(json).unwrap();
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts[0].key, "name");
+        assert_eq!(facts[1].category, "goal");
+    }
+
+    #[test]
+    fn malformed_json_returns_error() {
+        let bad = r#"{"key": "oops"}"#; // not an array
+        let result: Result<Vec<ExtractedFact>, _> = serde_json::from_str(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn missing_field_returns_error() {
+        let json = r#"[{"key": "x", "content": "y"}]"#; // missing category + confidence
+        let result: Result<Vec<ExtractedFact>, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+}
