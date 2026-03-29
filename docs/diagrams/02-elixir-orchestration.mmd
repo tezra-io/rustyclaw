@@ -4,13 +4,13 @@ graph TB
     end
 
     subgraph Supervision["OTP Supervision Tree"]
+        AgentReg["AgentRegistry<br/>(Registry, :unique)"]
         AgentSup["AgentSupervisor<br/>(DynamicSupervisor)"]
         AgentCoord["AgentCoordinator<br/>(GenServer)"]
         BtwSup["BtwSupervisor<br/>(DynamicSupervisor)"]
-        PlugRouter["PluginRouter<br/>(GenServer)"]
-        PlugManager["Plugin.Manager"]
+        PlugRouter["PluginRouter<br/>(Plug.Router / Bandit)"]
+        PlugManager["Plugin.Manager<br/>(GenServer)"]
         TraceStore["TraceStore"]
-        ResLock["ResourceLock"]
     end
 
     subgraph Agents["Agent Instances"]
@@ -26,6 +26,7 @@ graph TB
     end
 
     subgraph PluginSys["Plugin System"]
+        ProgressTracker["ProgressTracker<br/>(GenServer)"]
         ClaudeCode["ClaudeCodePlugin"]
         Codex["CodexPlugin"]
         Linear["LinearIntegration"]
@@ -38,6 +39,7 @@ graph TB
         RetryScheduler["RetryScheduler"]
         TaskOrch["TaskOrchestrator"]
         TaskQueue["TaskQueue"]
+        WorkerSup["WorkerSupervisor<br/>(DynamicSupervisor)"]
         Worker["Worker"]
     end
 
@@ -60,6 +62,7 @@ graph TB
 
     subgraph Sessions["Session Management"]
         SubSession["SubAgentSession (ETS)"]
+        ResLock["ResourceLock (ETS)"]
         States["pending > active > completed / failed"]
         AgentDef["AgentDefinition<br/>(YAML+MD, NimbleOptions)"]
         AgentDisc["AgentDiscovery"]
@@ -77,11 +80,14 @@ graph TB
         RustBridge["RustBridge<br/>(Req HTTP + retry/backoff)"]
     end
 
+    AppSup --> AgentReg
     AppSup --> AgentSup
     AppSup --> AgentCoord
     AppSup --> BtwSup
     AppSup --> PlugRouter
     AppSup --> TraceStore
+    AppSup -.->|"supervises"| ToolSynth
+    AppSup -.->|"supervises"| PluginSys
     AgentSup --> AS1
     AgentSup --> AS2
     AgentSup --> AS3
@@ -90,10 +96,11 @@ graph TB
     BtwRouter --> BtwSup
     PlugRouter --> PlugManager
     PlugManager --> PluginSys
-    AgentCoord --> SubSession
-    AgentCoord --> RustBridge
-    AS1 -.->|"delegate"| AgentCoord
-    AS1 -.->|"tool call"| RustBridge
+    WorkerSup --> Worker
+    AgentCoord -->|"list/spawn"| AgentSup
+    AgentCoord -.->|"run_task"| AS1
+    AS1 -.->|"delegate_to_child"| AS2
+    AS1 -.->|"health_check"| RustBridge
     SpawnTool --> AgentSup
     KillTool --> AgentSup
     ListTool --> AgentSup

@@ -2,39 +2,38 @@ sequenceDiagram
     participant User
     participant Channel as Channel<br/>(Telegram/Discord/...)
     participant Gateway as Gateway (Axum)
-    participant RustBridge as RustBridge (HTTP)
+    participant BtwRouter as BtwRouter
     participant Coordinator as AgentCoordinator
     participant AgentSrv as AgentServer
+    participant RustBridge as RustBridge (HTTP)
     participant AgentLoop as Agent Loop (Rust)
     participant Provider as LLM Provider
     participant Tool as Tool Executor
     participant Memory as Memory Backend
     participant Hooks as Hooks (Hermes)
-    participant BtwRouter as BtwRouter
     participant BtwServer as BtwServer
-    participant SubSession as SubAgentSession
 
-    rect rgb(232, 245, 233)
-    Note over User, SubSession: Flow 1 - Inbound Message Processing
+    rect rgb(240, 253, 250)
+    Note over User, BtwServer: Flow 1 - Inbound Message Processing
     User->>Channel: Send message
     Channel->>Gateway: ChannelMessage (via listen)
-    Gateway->>RustBridge: HTTP POST /webhook
-    RustBridge->>Coordinator: route_message/3
-    Coordinator->>AgentSrv: GenServer.call(:handle_message)
-    AgentSrv->>AgentLoop: chat_with_system()
+    Gateway->>BtwRouter: route_message/3
+    BtwRouter->>AgentSrv: run_task/3
+    AgentSrv->>RustBridge: run_task/3
+    RustBridge->>AgentLoop: HTTP POST /api/agent/run
     AgentLoop->>Provider: LLM inference request
     Provider-->>AgentLoop: ChatResponse (text + tool_calls)
-    AgentLoop->>Hooks: on_response (Hermes extraction)
-    AgentLoop-->>AgentSrv: Response text
-    AgentSrv-->>Coordinator: {:ok, response}
-    Coordinator-->>RustBridge: Response
-    RustBridge-->>Gateway: HTTP 200
+    AgentLoop->>Hooks: on_llm_output (Hermes extraction)
+    AgentLoop-->>RustBridge: Response
+    RustBridge-->>AgentSrv: {:ok, response}
+    AgentSrv-->>BtwRouter: {:ok, response}
+    BtwRouter-->>Gateway: Response
     Gateway->>Channel: send(SendMessage)
     Channel-->>User: Reply
     end
 
-    rect rgb(237, 231, 246)
-    Note over User, SubSession: Flow 2 - Tool Execution
+    rect rgb(245, 243, 255)
+    Note over User, BtwServer: Flow 2 - Tool Execution
     AgentLoop->>Tool: execute(tool_name, params)
     Tool->>Memory: store/recall (if memory tool)
     Memory-->>Tool: Result
@@ -43,27 +42,29 @@ sequenceDiagram
     Provider-->>AgentLoop: Next response
     end
 
-    rect rgb(227, 242, 253)
-    Note over User, SubSession: Flow 3 - Agent Delegation
+    rect rgb(248, 250, 252)
+    Note over User, BtwServer: Flow 3 - Agent Delegation
     AgentSrv->>Coordinator: delegate(task, capabilities)
-    Coordinator->>SubSession: create(agent, task)
-    Coordinator->>AgentSrv: spawn child agent
-    AgentSrv->>AgentLoop: Execute delegated task
-    AgentLoop-->>AgentSrv: Result
-    AgentSrv-->>Coordinator: {:completed, result}
-    Coordinator->>SubSession: update(:completed)
+    Note over Coordinator: find_matching + ACL check
+    Coordinator->>AgentSrv: run_task/3 (matched agent)
+    AgentSrv->>RustBridge: run_task/3
+    RustBridge->>AgentLoop: Execute delegated task
+    AgentLoop-->>RustBridge: Result
+    RustBridge-->>AgentSrv: {:ok, result}
+    AgentSrv-->>Coordinator: {:ok, result}
     Coordinator-->>AgentSrv: Delegation result
     end
 
-    rect rgb(252, 228, 236)
-    Note over User, SubSession: Flow 4 - BTW Side-Channel
+    rect rgb(253, 245, 247)
+    Note over User, BtwServer: Flow 4 - BTW Side-Channel
     User->>Channel: /btw check logs
     Channel->>Gateway: ChannelMessage
-    Gateway->>RustBridge: HTTP POST
-    RustBridge->>BtwRouter: route(/btw ...)
-    BtwRouter->>BtwServer: handle in parallel
-    BtwServer->>AgentLoop: Execute side task
-    AgentLoop-->>BtwServer: Result
-    BtwServer-->>BtwRouter: Response
-    BtwRouter-->>Channel: Reply (non-blocking)
+    Gateway->>BtwRouter: route_message/3
+    BtwRouter->>BtwServer: start_btw (via BtwSupervisor)
+    BtwServer->>RustBridge: run_task/3
+    RustBridge->>AgentLoop: Execute side task
+    AgentLoop-->>RustBridge: Result
+    RustBridge-->>BtwServer: {:ok, result}
+    BtwServer->>RustBridge: send_to_channel(response)
+    RustBridge-->>Channel: Reply (non-blocking)
     end

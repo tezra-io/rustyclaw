@@ -39,15 +39,7 @@ RustyClaw is a two-layer system connected by a UDS bridge. The Rust core handles
 ### System Overview
 
 <p align="center">
-  <img src="docs/diagrams/01-system-overview.svg" alt="RustyClaw System Overview" />
-</p>
-
-### Elixir/OTP Orchestration Detail
-
-The Elixir layer is structured as an OTP supervision tree with dedicated subsystems for agent management, plugin orchestration, BTW side-channels, tool synthesis, and session lifecycle.
-
-<p align="center">
-  <img src="docs/diagrams/02-elixir-orchestration.svg" alt="Elixir Orchestration Detail" />
+  <img src="docs/diagrams/01-system-overview.png" alt="RustyClaw System Overview" />
 </p>
 
 ### Message Flow
@@ -55,7 +47,7 @@ The Elixir layer is structured as an OTP supervision tree with dedicated subsyst
 Four primary message flows through the system: inbound message processing, tool execution, agent delegation, and BTW side-channel routing.
 
 <p align="center">
-  <img src="docs/diagrams/03-message-flow.svg" alt="Message Flow" />
+  <img src="docs/diagrams/03-message-flow.png" alt="Message Flow" />
 </p>
 
 ### Memory, Security, and Infrastructure
@@ -63,10 +55,10 @@ Four primary message flows through the system: inbound message processing, tool 
 The memory subsystem supports 7 backends with Hermes-powered LLM fact extraction. The security model is deny-by-default with 4 sandbox implementations and multi-layer content protection.
 
 <p align="center">
-  <img src="docs/diagrams/04-memory-security.svg" alt="Memory and Security Architecture" />
+  <img src="docs/diagrams/04-memory-security.png" alt="Memory and Security Architecture" />
 </p>
 
-> Diagram source files (Mermaid): [`docs/diagrams/`](docs/diagrams/). PNG versions also available for offline viewing.
+> Diagram source files: [`docs/diagrams/`](docs/diagrams/). Editable versions in [Figma](https://www.figma.com/design/TPCSyiAnKcseWKPkSqXsy8). Mermaid sources (.mmd) also available.
 
 ### Layer responsibilities
 
