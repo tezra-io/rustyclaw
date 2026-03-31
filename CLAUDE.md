@@ -274,3 +274,24 @@ When uncertain, classify as higher risk.
 - `docs/operations-runbook.md` — operational procedures
 - `docs/troubleshooting.md` — debugging guide
 - `CONTRIBUTING.md` — contribution guidelines
+
+## Test-First (Mandatory)
+
+1. Write failing tests that define correct behavior
+2. Make them pass
+3. Refactor while green
+
+"Write failing tests, then make them pass" — not "implement this feature."
+
+## Code Rules (Non-Negotiable)
+
+1. **Linear flow.** Max 2 nesting levels. Top to bottom.
+2. **Bound loops.** Explicit max on retries, polls, recursion. Define cap behavior.
+3. **Small functions.** 40-60 lines max. One job per function.
+4. **Own resources.** Open → close on every path, including errors.
+5. **Narrow state.** No module globals. Pass deps explicitly.
+6. **Assert assumptions.** Guards and validation on every public function. Fail loud.
+7. **Never swallow errors.** No bare catch/rescue. Every failure logged, raised, or returned.
+8. **Visible side effects.** I/O obvious at call site. Separate pure from effectful.
+9. **Minimal indirection.** Readable > elegant. One layer of abstraction max.
+10. **Warnings = errors.** Linters, typecheckers, analyzers are hard gates. Zero warnings.
