@@ -4,6 +4,9 @@
 //! "rusty" and "aira" in `~/.axon/keys/`.
 //!
 //! Run with: `cargo test --test axon_integration -- --include-ignored`
+//!
+//! Unix-only: Axon uses Unix domain sockets.
+#![cfg(unix)]
 
 use std::path::PathBuf;
 use std::time::Duration;
