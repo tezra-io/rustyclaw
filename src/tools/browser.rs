@@ -279,6 +279,27 @@ impl BrowserTool {
         }
     }
 
+    fn is_unix_endpoint(&self) -> bool {
+        self.computer_use.endpoint.trim().starts_with("unix://")
+    }
+
+    fn unix_socket_path(&self) -> anyhow::Result<std::path::PathBuf> {
+        let endpoint = self.computer_use.endpoint.trim();
+        let path_str = endpoint
+            .strip_prefix("unix://")
+            .ok_or_else(|| anyhow::anyhow!("Not a unix:// endpoint: '{endpoint}'"))?;
+        if path_str.is_empty() {
+            anyhow::bail!("browser.computer_use.endpoint unix:// path cannot be empty");
+        }
+        let path = std::path::Path::new(path_str);
+        if !path.is_absolute() {
+            anyhow::bail!(
+                "browser.computer_use.endpoint unix:// path must be absolute: '{path_str}'"
+            );
+        }
+        Ok(path.to_path_buf())
+    }
+
     fn computer_use_endpoint_url(&self) -> anyhow::Result<reqwest::Url> {
         if self.computer_use.timeout_ms == 0 {
             anyhow::bail!("browser.computer_use.timeout_ms must be > 0");
@@ -321,6 +342,15 @@ impl BrowserTool {
     }
 
     fn computer_use_available(&self) -> anyhow::Result<bool> {
+        if self.is_unix_endpoint() {
+            #[cfg(unix)]
+            {
+                let path = self.unix_socket_path()?;
+                return Ok(unix_socket_reachable(&path));
+            }
+            #[cfg(not(unix))]
+            anyhow::bail!("Unix socket endpoints are not supported on this platform");
+        }
         let endpoint = self.computer_use_endpoint_url()?;
         Ok(endpoint_reachable(&endpoint, Duration::from_millis(500)))
     }
@@ -743,8 +773,6 @@ impl BrowserTool {
         action: &str,
         args: &Value,
     ) -> anyhow::Result<ToolResult> {
-        let endpoint = self.computer_use_endpoint_url()?;
-
         let mut params = args
             .as_object()
             .cloned()
@@ -769,34 +797,69 @@ impl BrowserTool {
             }
         });
 
-        let client = crate::config::build_runtime_proxy_client("tool.browser");
-        let mut request = client
-            .post(endpoint)
-            .timeout(Duration::from_millis(self.computer_use.timeout_ms))
-            .json(&payload);
+        let (status, body) = if self.is_unix_endpoint() {
+            #[cfg(not(unix))]
+            anyhow::bail!("Unix socket endpoints are not supported on this platform");
 
-        if let Some(api_key) = self.computer_use.api_key.as_deref() {
-            let token = api_key.trim();
-            if !token.is_empty() {
-                request = request.bearer_auth(token);
+            #[cfg(unix)]
+            {
+                let socket_path = self.unix_socket_path()?;
+                let bearer = self
+                    .computer_use
+                    .api_key
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty());
+                let payload_bytes = serde_json::to_vec(&payload)?;
+                http_post_unix(
+                    &socket_path,
+                    "/v1/actions",
+                    &payload_bytes,
+                    Duration::from_millis(self.computer_use.timeout_ms),
+                    bearer,
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to call computer-use sidecar at {}",
+                        self.computer_use.endpoint
+                    )
+                })?
             }
-        }
+        } else {
+            let endpoint = self.computer_use_endpoint_url()?;
+            let client = crate::config::build_runtime_proxy_client("tool.browser");
+            let mut request = client
+                .post(endpoint)
+                .timeout(Duration::from_millis(self.computer_use.timeout_ms))
+                .json(&payload);
 
-        let response = request.send().await.with_context(|| {
-            format!(
-                "Failed to call computer-use sidecar at {}",
-                self.computer_use.endpoint
-            )
-        })?;
+            if let Some(api_key) = self.computer_use.api_key.as_deref() {
+                let token = api_key.trim();
+                if !token.is_empty() {
+                    request = request.bearer_auth(token);
+                }
+            }
 
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .context("Failed to read computer-use sidecar response body")?;
+            let response = request.send().await.with_context(|| {
+                format!(
+                    "Failed to call computer-use sidecar at {}",
+                    self.computer_use.endpoint
+                )
+            })?;
+
+            let status = response.status().as_u16();
+            let body = response
+                .text()
+                .await
+                .context("Failed to read computer-use sidecar response body")?;
+            (status, body)
+        };
+
+        let is_success = (200..300).contains(&status);
 
         if let Ok(parsed) = serde_json::from_str::<ComputerUseResponse>(&body) {
-            if status.is_success() && parsed.success.unwrap_or(true) {
+            if is_success && parsed.success.unwrap_or(true) {
                 let output = parsed
                     .data
                     .map(|data| serde_json::to_string_pretty(&data).unwrap_or_default())
@@ -817,7 +880,7 @@ impl BrowserTool {
             }
 
             let error = parsed.error.or_else(|| {
-                if status.is_success() && parsed.success == Some(false) {
+                if is_success && parsed.success == Some(false) {
                     Some("computer-use sidecar returned success=false".to_string())
                 } else {
                     Some(format!(
@@ -833,7 +896,7 @@ impl BrowserTool {
             });
         }
 
-        if status.is_success() {
+        if is_success {
             return Ok(ToolResult {
                 success: true,
                 output: body,
@@ -2018,6 +2081,79 @@ fn endpoint_reachable(endpoint: &reqwest::Url, timeout: Duration) -> bool {
     std::net::TcpStream::connect_timeout(&addr, timeout).is_ok()
 }
 
+#[cfg(unix)]
+async fn http_post_unix(
+    socket_path: &std::path::Path,
+    http_path: &str,
+    body: &[u8],
+    timeout: Duration,
+    bearer_token: Option<&str>,
+) -> anyhow::Result<(u16, String)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let stream = tokio::time::timeout(timeout, tokio::net::UnixStream::connect(socket_path))
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Unix socket connection timed out: {}",
+                socket_path.display()
+            )
+        })?
+        .with_context(|| {
+            format!(
+                "Failed to connect to Unix socket: {}",
+                socket_path.display()
+            )
+        })?;
+
+    let (mut reader, mut writer) = stream.into_split();
+
+    let mut auth_header = String::new();
+    if let Some(token) = bearer_token {
+        auth_header = format!("Authorization: Bearer {token}\r\n");
+    }
+
+    let request = format!(
+        "POST {http_path} HTTP/1.1\r\n\
+         Host: localhost\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         {auth_header}\
+         \r\n",
+        body.len(),
+    );
+
+    writer.write_all(request.as_bytes()).await?;
+    writer.write_all(body).await?;
+    writer.shutdown().await?;
+
+    let mut response_buf = Vec::new();
+    tokio::time::timeout(timeout, reader.read_to_end(&mut response_buf))
+        .await
+        .map_err(|_| anyhow::anyhow!("Unix socket read timed out: {}", socket_path.display()))?
+        .context("Failed to read Unix socket response")?;
+
+    let response_str = String::from_utf8_lossy(&response_buf);
+    let (headers, response_body) = response_str.split_once("\r\n\r\n").ok_or_else(|| {
+        anyhow::anyhow!("Invalid HTTP response from Unix socket (no header/body separator)")
+    })?;
+
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .ok_or_else(|| anyhow::anyhow!("Could not parse HTTP status from Unix socket response"))?;
+
+    Ok((status, response_body.to_string()))
+}
+
+#[cfg(unix)]
+fn unix_socket_reachable(path: &std::path::Path) -> bool {
+    std::os::unix::net::UnixStream::connect(path).is_ok()
+}
+
 fn extract_host(url_str: &str) -> anyhow::Result<String> {
     // Simple host extraction without url crate
     let url = url_str.trim();
@@ -2491,5 +2627,242 @@ mod tests {
             state.reset_session().await;
             state.reset_session().await;
         });
+    }
+
+    // --- Unix Domain Socket transport tests (TEZ-250) ---
+
+    #[test]
+    fn unix_endpoint_is_detected() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "unix:///tmp/peekaboo/bridge.sock".into(),
+                ..ComputerUseConfig::default()
+            },
+        );
+        assert!(tool.is_unix_endpoint());
+    }
+
+    #[test]
+    fn http_endpoint_is_not_unix() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig::default(),
+        );
+        assert!(!tool.is_unix_endpoint());
+    }
+
+    #[test]
+    fn unix_socket_path_extracts_absolute_path() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "unix:///tmp/peekaboo/bridge.sock".into(),
+                ..ComputerUseConfig::default()
+            },
+        );
+        let path = tool.unix_socket_path().unwrap();
+        assert_eq!(path, std::path::PathBuf::from("/tmp/peekaboo/bridge.sock"));
+    }
+
+    #[test]
+    fn unix_socket_path_handles_spaces() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "unix:///Users/foo/Library/Application Support/Peekaboo/bridge.sock"
+                    .into(),
+                ..ComputerUseConfig::default()
+            },
+        );
+        let path = tool.unix_socket_path().unwrap();
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/Users/foo/Library/Application Support/Peekaboo/bridge.sock")
+        );
+    }
+
+    #[test]
+    fn unix_socket_path_rejects_empty_path() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "unix://".into(),
+                ..ComputerUseConfig::default()
+            },
+        );
+        assert!(tool.unix_socket_path().is_err());
+    }
+
+    #[test]
+    fn unix_socket_path_rejects_relative_path() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "unix://relative/path.sock".into(),
+                ..ComputerUseConfig::default()
+            },
+        );
+        assert!(tool.unix_socket_path().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_endpoint_available_returns_false_for_missing_socket() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "unix:///tmp/nonexistent_rustyclaw_test_27f3a.sock".into(),
+                ..ComputerUseConfig::default()
+            },
+        );
+        assert!(!tool.computer_use_available().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_endpoint_available_returns_true_for_connectable_socket() {
+        let sock_path = std::env::temp_dir().join("rustyclaw_uds_health_test.sock");
+        let _ = std::fs::remove_file(&sock_path);
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec!["example.com".into()],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: format!("unix://{}", sock_path.display()),
+                ..ComputerUseConfig::default()
+            },
+        );
+        assert!(tool.computer_use_available().unwrap());
+
+        drop(listener);
+        let _ = std::fs::remove_file(&sock_path);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn execute_computer_use_over_unix_happy_path() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let _ = stream.read(&mut buf).await.unwrap();
+            let body = r#"{"success":true,"data":{"action":"screen_capture","ok":true}}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(resp.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec![],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: format!("unix://{}", sock_path.display()),
+                ..ComputerUseConfig::default()
+            },
+        );
+
+        let args = json!({"action": "screen_capture"});
+        let result = tool
+            .execute_computer_use_action("screen_capture", &args)
+            .await
+            .unwrap();
+        assert!(result.success);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn execute_computer_use_over_unix_reports_connection_error() {
+        let security = Arc::new(SecurityPolicy::default());
+        let tool = BrowserTool::new_with_backend(
+            security,
+            vec![],
+            None,
+            "computer_use".into(),
+            true,
+            "http://127.0.0.1:9515".into(),
+            None,
+            ComputerUseConfig {
+                endpoint: "unix:///tmp/nonexistent_rustyclaw_exec_test.sock".into(),
+                ..ComputerUseConfig::default()
+            },
+        );
+
+        let args = json!({"action": "screen_capture"});
+        let result = tool
+            .execute_computer_use_action("screen_capture", &args)
+            .await;
+        assert!(result.is_err());
     }
 }
