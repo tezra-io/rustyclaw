@@ -2804,6 +2804,8 @@ pub struct ChannelsConfig {
     pub nostr: Option<NostrConfig>,
     /// ClawdTalk voice channel configuration.
     pub clawdtalk: Option<crate::channels::clawdtalk::ClawdTalkConfig>,
+    /// Axon agent mesh channel configuration.
+    pub axon: Option<AxonConfig>,
     /// Base timeout in seconds for processing a single channel message (LLM + tools).
     /// Runtime uses this as a per-turn budget that scales with tool-loop depth
     /// (up to 4x, capped) so one slow/retried model call does not consume the
@@ -2894,6 +2896,10 @@ impl ChannelsConfig {
                 Box::new(ConfigWrapper::new(self.clawdtalk.as_ref())),
                 self.clawdtalk.is_some(),
             ),
+            (
+                Box::new(ConfigWrapper::new(self.axon.as_ref())),
+                self.axon.is_some(),
+            ),
         ]
     }
 
@@ -2935,6 +2941,7 @@ impl Default for ChannelsConfig {
             qq: None,
             nostr: None,
             clawdtalk: None,
+            axon: None,
             message_timeout_secs: default_channel_message_timeout_secs(),
         }
     }
@@ -3162,6 +3169,49 @@ impl ChannelConfig for SignalConfig {
     }
     fn desc() -> &'static str {
         "An open-source, encrypted messaging service"
+    }
+}
+
+/// Axon agent mesh channel configuration.
+///
+/// Connects to a local Axon broker over Unix domain socket for native
+/// agent-to-agent messaging. Uses Ed25519 challenge-response authentication.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AxonConfig {
+    /// Identity name to register as on the mesh (e.g. `"rusty"`).
+    pub identity: String,
+    /// Path to the Axon broker UDS socket. Default: `~/.axon/broker.sock`.
+    #[serde(default = "default_axon_broker_socket")]
+    pub broker_socket: String,
+    /// Directory containing Ed25519 keypairs. Default: `~/.axon/keys`.
+    #[serde(default = "default_axon_keys_dir")]
+    pub keys_dir: String,
+    /// Initial reconnect delay in milliseconds (exponential backoff, 30s cap).
+    #[serde(default = "default_axon_reconnect_delay")]
+    pub reconnect_initial_delay_ms: u64,
+    /// Restrict inbound messages to these agent names. Empty = allow all.
+    #[serde(default)]
+    pub allowed_from: Vec<String>,
+}
+
+fn default_axon_broker_socket() -> String {
+    "~/.axon/broker.sock".to_string()
+}
+
+fn default_axon_keys_dir() -> String {
+    "~/.axon/keys".to_string()
+}
+
+fn default_axon_reconnect_delay() -> u64 {
+    1000
+}
+
+impl ChannelConfig for AxonConfig {
+    fn name() -> &'static str {
+        "Axon"
+    }
+    fn desc() -> &'static str {
+        "Local agent mesh for native agent-to-agent messaging"
     }
 }
 
@@ -5400,6 +5450,7 @@ default_temperature = 0.7
                 qq: None,
                 nostr: None,
                 clawdtalk: None,
+                axon: None,
                 message_timeout_secs: 300,
             },
             memory: MemoryConfig::default(),
@@ -5970,6 +6021,7 @@ allowed_users = ["@ops:matrix.org"]
             qq: None,
             nostr: None,
             clawdtalk: None,
+            axon: None,
             message_timeout_secs: 300,
         };
         let toml_str = toml::to_string_pretty(&c).unwrap();
@@ -6184,6 +6236,7 @@ channel_id = "C123"
             qq: None,
             nostr: None,
             clawdtalk: None,
+            axon: None,
             message_timeout_secs: 300,
         };
         let toml_str = toml::to_string_pretty(&c).unwrap();

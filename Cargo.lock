@@ -5499,6 +5499,7 @@ dependencies = [
  "cron",
  "dialoguer",
  "directories",
+ "ed25519-dalek",
  "fantoccini",
  "futures-util",
  "glob",
