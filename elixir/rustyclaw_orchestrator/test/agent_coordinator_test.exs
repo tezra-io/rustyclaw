@@ -2,8 +2,12 @@ defmodule RustyclawOrchestrator.AgentCoordinatorTest do
   use ExUnit.Case
 
   alias RustyclawOrchestrator.{AgentCoordinator, AgentDefinition, AgentSupervisor}
+  alias RustyclawOrchestrator.TestSupport.BridgeMock
 
   setup do
+    # Mock RustBridge so run_task calls succeed via Bypass
+    BridgeMock.setup()
+
     # Reset coordinator definitions to empty so disk-cached defs don't leak between tests
     empty_dir =
       Path.join(System.tmp_dir!(), "rustyclaw_empty_agents_#{System.unique_integer([:positive])}")
@@ -184,7 +188,7 @@ defmodule RustyclawOrchestrator.AgentCoordinatorTest do
       spawn_agent("worker", capabilities: ["task"])
 
       assert {:ok, result} = AgentCoordinator.delegate("do it", capabilities: ["task"])
-      assert result.task == "do it"
+      assert result["task"] == "do it"
     end
 
     test "returns no_matching_agents when none match" do

@@ -40,6 +40,7 @@ pub mod hardware_memory_map;
 pub mod hardware_memory_read;
 pub mod http_request;
 pub mod image_info;
+pub mod invoke_skill;
 pub mod memory_forget;
 pub mod memory_recall;
 pub mod memory_store;
@@ -84,6 +85,7 @@ pub use hardware_memory_map::HardwareMemoryMapTool;
 pub use hardware_memory_read::HardwareMemoryReadTool;
 pub use http_request::HttpRequestTool;
 pub use image_info::ImageInfoTool;
+pub use invoke_skill::InvokeSkillTool;
 pub use memory_forget::MemoryForgetTool;
 pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
@@ -377,6 +379,9 @@ pub fn all_tools_with_runtime(
             security.clone(),
         )));
     }
+
+    // Skill invocation tool — delegates to Elixir-supervised ephemeral agents
+    tool_arcs.push(Arc::new(InvokeSkillTool::new(config)));
 
     boxed_registry_from_arcs(tool_arcs)
 }

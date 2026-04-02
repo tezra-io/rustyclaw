@@ -2,9 +2,12 @@ defmodule RustyclawOrchestrator.Tools.MessageAgentToolTest do
   use ExUnit.Case
 
   alias RustyclawOrchestrator.{AgentDefinition, AgentServer, AgentSupervisor}
+  alias RustyclawOrchestrator.TestSupport.BridgeMock
   alias RustyclawOrchestrator.Tools.MessageAgentTool
 
   setup do
+    BridgeMock.setup()
+
     on_exit(fn ->
       for name <- AgentSupervisor.list_agents() do
         AgentSupervisor.stop_agent(name)
@@ -60,7 +63,7 @@ defmodule RustyclawOrchestrator.Tools.MessageAgentToolTest do
 
       assert result.delivered == true
       assert result.mode == :sync
-      assert result.result.task == "do work"
+      assert result.result["task"] == "do work"
     end
 
     test "sync mode with string mode key" do

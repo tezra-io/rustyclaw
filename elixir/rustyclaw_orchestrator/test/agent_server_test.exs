@@ -105,24 +105,23 @@ defmodule RustyclawOrchestrator.AgentServerTest do
     end
   end
 
-  describe "task execution" do
-    test "run_task returns placeholder result" do
+  describe "task execution (TEZ-146: wired to RustBridge)" do
+    test "run_task returns bridge error when Rust core is unreachable" do
       {:ok, _} = AgentSupervisor.spawn_agent(make_definition("task-agent"))
 
-      assert {:ok, result} = AgentServer.run_task("task-agent", "do something")
-      assert result.task == "do something"
-      assert result.status == :pending_bridge
+      # Bridge is unreachable in tests (max_retries: 0, connect_timeout: 100)
+      assert {:error, _reason} = AgentServer.run_task("task-agent", "do something")
     end
 
-    test "run_task records history" do
+    test "run_task records history on error" do
       {:ok, _} = AgentSupervisor.spawn_agent(make_definition("hist-agent"))
 
       AgentServer.run_task("hist-agent", "task 1")
-      AgentServer.run_task("hist-agent", "task 2")
 
       state = AgentServer.get_state("hist-agent")
-      assert length(state.history) == 2
-      assert hd(state.history).event == :task_executed
+      assert state.history != []
+      events = Enum.map(state.history, & &1.event)
+      assert :task_completed in events
     end
 
     test "run_task updates last_active_at" do
@@ -133,6 +132,23 @@ defmodule RustyclawOrchestrator.AgentServerTest do
       state_after = AgentServer.get_state("active-agent")
 
       assert DateTime.compare(state_after.last_active_at, state_before.last_active_at) != :lt
+    end
+
+    test "run_task returns to idle status after completion" do
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("status-agent"))
+
+      AgentServer.run_task("status-agent", "task")
+
+      state = AgentServer.get_state("status-agent")
+      assert state.status == :idle
+      assert state.pending_task == nil
+    end
+
+    test "run_task accepts timeout option" do
+      {:ok, _} = AgentSupervisor.spawn_agent(make_definition("timeout-agent"))
+
+      # Should not raise with a custom timeout
+      AgentServer.run_task("timeout-agent", "task", timeout: 10_000)
     end
   end
 
@@ -201,8 +217,9 @@ defmodule RustyclawOrchestrator.AgentServerTest do
       {:ok, _} = AgentSupervisor.spawn_agent(make_definition("del-parent"))
       {:ok, _} = AgentSupervisor.spawn_agent(make_definition("del-child"))
 
-      {:ok, result} = AgentServer.delegate_to_child("del-parent", "del-child", "child task")
-      assert result.task == "child task"
+      # Delegation calls child's run_task which goes through bridge (unreachable in tests)
+      result = AgentServer.delegate_to_child("del-parent", "del-child", "child task")
+      assert is_tuple(result)
 
       parent_state = AgentServer.get_state("del-parent")
       assert Enum.any?(parent_state.history, &(&1.event == :delegated_to_child))
@@ -265,7 +282,10 @@ defmodule RustyclawOrchestrator.AgentServerTest do
     test "agent without max_memory_mb accepts unlimited state" do
       {:ok, _} = AgentSupervisor.spawn_agent(make_definition("no-mem-limit"))
 
-      assert {:ok, _} = AgentServer.run_task("no-mem-limit", "should succeed")
+      # run_task dispatches to bridge (errors in test, but not rejected by memory limit)
+      result = AgentServer.run_task("no-mem-limit", "should not be memory-rejected")
+      # Should NOT be :memory_limit_exceeded
+      refute match?({:error, :memory_limit_exceeded}, result)
 
       assert :ok =
                AgentServer.update_accumulated_state("no-mem-limit", %{

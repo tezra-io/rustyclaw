@@ -226,6 +226,20 @@ pub struct Config {
     /// Trajectory collection configuration for training data capture (`[trajectory]`).
     #[serde(default)]
     pub trajectory: crate::trajectory::TrajectoryConfig,
+
+    /// Elixir orchestration configuration (`[elixir]`).
+    #[serde(default)]
+    pub elixir: ElixirConfig,
+}
+
+// ── Elixir orchestration ─────────────────────────────────────────
+
+/// Configuration for the Elixir orchestration layer (`[elixir]`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct ElixirConfig {
+    /// Base URL for the Elixir API. Defaults to auto-discovery via synth port.
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -3840,6 +3854,7 @@ impl Default for Config {
             query_classification: QueryClassificationConfig::default(),
             transcription: TranscriptionConfig::default(),
             trajectory: crate::trajectory::TrajectoryConfig::default(),
+            elixir: ElixirConfig::default(),
         }
     }
 }
@@ -5409,6 +5424,7 @@ default_temperature = 0.7
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
             trajectory: crate::trajectory::TrajectoryConfig::default(),
+            elixir: ElixirConfig::default(),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -5593,6 +5609,7 @@ tool_dispatcher = "xml"
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
             trajectory: crate::trajectory::TrajectoryConfig::default(),
+            elixir: ElixirConfig::default(),
         };
 
         config.save().await.unwrap();

@@ -34,7 +34,8 @@ defmodule RustyclawOrchestrator.AgentServer do
           started_at: DateTime.t(),
           last_active_at: DateTime.t(),
           last_health_check: DateTime.t() | nil,
-          recovery_attempts: non_neg_integer()
+          recovery_attempts: non_neg_integer(),
+          pending_task: {GenServer.from(), reference()} | nil
         }
 
   # --- Client API ---
@@ -50,9 +51,17 @@ defmodule RustyclawOrchestrator.AgentServer do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Send a task to the agent for execution. Optionally pass provenance."
-  def run_task(agent_name, task, provenance \\ nil) when is_binary(agent_name) do
-    GenServer.call(via_registry(agent_name), {:run_task, task, provenance}, @call_timeout)
+  @doc """
+  Send a task to the agent for execution.
+
+  Third argument accepts keyword opts or a legacy provenance value:
+    - `[provenance: prov, timeout: ms]` — keyword opts
+    - `%MessageProvenance{}` — legacy form, equivalent to `[provenance: prov]`
+    - `nil` — no provenance (default)
+  """
+  def run_task(agent_name, task, opts_or_prov \\ []) when is_binary(agent_name) do
+    {provenance, timeout} = parse_run_task_opts(opts_or_prov)
+    GenServer.call(via_registry(agent_name), {:run_task, task, provenance}, timeout)
   end
 
   @doc "Send an async message to the agent. Optionally pass provenance."
@@ -136,6 +145,7 @@ defmodule RustyclawOrchestrator.AgentServer do
       last_health_check: nil,
       recovery_attempts: 0,
       pending_delegations: %{},
+      pending_task: nil,
       bridge_healthy: true,
       last_successful_task: now
     }
@@ -152,25 +162,31 @@ defmodule RustyclawOrchestrator.AgentServer do
      append_history(state, :task_rejected, %{task: task, reason: :unhealthy})}
   end
 
-  def handle_call({:run_task, task, provenance}, _from, state) do
+  def handle_call({:run_task, task, provenance}, from, state) do
     case check_memory_limit(state) do
       :ok ->
         maybe_record_provenance(provenance)
         maybe_log_provenance(:task_executed, state.definition.name, provenance)
 
-        state = %{state | status: :running, last_active_at: DateTime.utc_now()}
+        %Task{ref: ref} =
+          Task.Supervisor.async_nolink(@task_supervisor, fn ->
+            RustyclawOrchestrator.RustBridge.run_task(
+              state.definition.name,
+              task,
+              provenance: provenance,
+              model: state.definition.model,
+              temperature: state.definition.temperature
+            )
+          end)
 
-        # Task execution will be routed through RustBridge in TEZ-146.
-        # For now, record the task and return a placeholder.
-        result = {:ok, %{task: task, status: :pending_bridge}}
-
-        state =
+        state = %{
           state
-          |> Map.put(:status, :idle)
-          |> Map.put(:last_successful_task, DateTime.utc_now())
-          |> append_history(:task_executed, %{task: task, result: result})
+          | status: :running,
+            last_active_at: DateTime.utc_now(),
+            pending_task: {from, ref}
+        }
 
-        {:reply, result, state}
+        {:noreply, state}
 
       {:error, _} = err ->
         state = append_history(state, :task_rejected, %{task: task, reason: :memory_limit})
@@ -292,25 +308,39 @@ defmodule RustyclawOrchestrator.AgentServer do
     {:noreply, state}
   end
 
-  # Delegation task completed successfully
+  # Task/delegation completed successfully
   def handle_info({ref, result}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
 
-    case Map.pop(state.pending_delegations, ref) do
-      {nil, _} ->
-        # Not a delegation task — could be bridge health check result
-        state = handle_task_result(result, state)
-        {:noreply, state}
-
-      {from, remaining} ->
+    case state do
+      # run_task completed via RustBridge (TEZ-146)
+      %{pending_task: {from, ^ref}} ->
         GenServer.reply(from, result)
 
         state =
-          state
-          |> Map.put(:pending_delegations, remaining)
+          %{state | status: :idle, pending_task: nil, last_successful_task: DateTime.utc_now()}
           |> Map.put(:last_active_at, DateTime.utc_now())
+          |> append_history(:task_completed, %{result: result})
 
         {:noreply, state}
+
+      _ ->
+        case Map.pop(state.pending_delegations, ref) do
+          {nil, _} ->
+            # Not a delegation task — could be bridge health check result
+            state = handle_task_result(result, state)
+            {:noreply, state}
+
+          {from, remaining} ->
+            GenServer.reply(from, result)
+
+            state =
+              state
+              |> Map.put(:pending_delegations, remaining)
+              |> Map.put(:last_active_at, DateTime.utc_now())
+
+            {:noreply, state}
+        end
     end
   end
 
@@ -324,24 +354,19 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    # Check if this is a pending delegation task that crashed
-    case Map.pop(state.pending_delegations, ref) do
-      {nil, _} ->
-        # Not a delegation — handle as child/parent process exit
-        state = %{state | child_pids: MapSet.delete(state.child_pids, pid)}
+    case state do
+      # run_task bridge call crashed (TEZ-146)
+      %{pending_task: {from, ^ref}} ->
+        GenServer.reply(from, {:error, {:task_crashed, reason}})
 
         state =
-          if state.parent_pid == pid do
-            %{state | parent_pid: nil}
-          else
-            state
-          end
+          %{state | status: :idle, pending_task: nil}
+          |> append_history(:task_failed, %{reason: reason})
 
         {:noreply, state}
 
-      {from, remaining} ->
-        GenServer.reply(from, {:error, {:delegation_crashed, reason}})
-        {:noreply, %{state | pending_delegations: remaining}}
+      _ ->
+        handle_down_delegation_or_process(ref, pid, reason, state)
     end
   end
 
@@ -355,6 +380,29 @@ defmodule RustyclawOrchestrator.AgentServer do
   end
 
   # --- Internals ---
+
+  defp handle_down_delegation_or_process(ref, pid, reason, state) do
+    case Map.pop(state.pending_delegations, ref) do
+      {nil, _} ->
+        state = %{state | child_pids: MapSet.delete(state.child_pids, pid)}
+        state = maybe_clear_parent(state, pid)
+        {:noreply, state}
+
+      {from, remaining} ->
+        GenServer.reply(from, {:error, {:delegation_crashed, reason}})
+        {:noreply, %{state | pending_delegations: remaining}}
+    end
+  end
+
+  defp maybe_clear_parent(%{parent_pid: pid} = state, pid), do: %{state | parent_pid: nil}
+  defp maybe_clear_parent(state, _pid), do: state
+
+  defp parse_run_task_opts(opts) when is_list(opts) do
+    {Keyword.get(opts, :provenance), Keyword.get(opts, :timeout, @call_timeout)}
+  end
+
+  defp parse_run_task_opts(%MessageProvenance{} = prov), do: {prov, @call_timeout}
+  defp parse_run_task_opts(nil), do: {nil, @call_timeout}
 
   defp via_registry(agent_name) do
     {:via, Registry, {RustyclawOrchestrator.AgentRegistry, agent_name}}
@@ -414,7 +462,8 @@ defmodule RustyclawOrchestrator.AgentServer do
       started_at: state.started_at,
       last_active_at: state.last_active_at,
       last_health_check: state.last_health_check,
-      recovery_attempts: state.recovery_attempts
+      recovery_attempts: state.recovery_attempts,
+      pending_task: state.pending_task
     }
   end
 

@@ -235,7 +235,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
   defp execute_strategy(:first_available, task, [agent | _], provenance, definitions) do
     with :ok <- ensure_agent_running(agent, definitions) do
       child_prov = stamp_provenance(provenance, agent)
-      AgentServer.run_task(agent, task, child_prov)
+      AgentServer.run_task(agent, task, provenance: child_prov)
     end
   end
 
@@ -253,7 +253,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
           case ensure_agent_running(agent, definitions) do
             :ok ->
               child_prov = stamp_provenance(provenance, agent)
-              {agent, AgentServer.run_task(agent, task, child_prov)}
+              {agent, AgentServer.run_task(agent, task, provenance: child_prov)}
 
             {:error, reason} ->
               {agent, {:error, {:spawn_failed, reason}}}
@@ -275,7 +275,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
       :ok ->
         child_prov = stamp_provenance(provenance, agent)
 
-        case AgentServer.run_task(agent, task, child_prov) do
+        case AgentServer.run_task(agent, task, provenance: child_prov) do
           {:ok, _} = result -> {:halt, result}
           {:error, _} -> {:cont, {:error, :all_failed}}
         end

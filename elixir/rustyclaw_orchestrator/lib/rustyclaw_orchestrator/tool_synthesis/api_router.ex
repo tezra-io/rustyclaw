@@ -25,6 +25,8 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
     Synthesizer
   }
 
+  alias RustyclawOrchestrator.{AgentServer, AgentSupervisor, SkillRegistry}
+
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
   plug(:dispatch)
@@ -252,6 +254,64 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
     end
   end
 
+  # --- POST /api/skills/invoke (Rust → Elixir skill delegation) ---
+
+  post "/api/skills/invoke" do
+    with {:ok, skill_name} <- require_field(conn.body_params, "skill"),
+         {:ok, task} <- require_field(conn.body_params, "task") do
+      context = Map.get(conn.body_params, "context")
+      timeout_ms = Map.get(conn.body_params, "timeout_ms", 300_000)
+      timeout_ms = min(timeout_ms, 300_000)
+
+      full_task = build_skill_task(task, context)
+
+      case SkillRegistry.load(skill_name) do
+        {:ok, definition} ->
+          # Force ephemeral with a unique name so concurrent invocations don't clash
+          suffix = Base.hex_encode32(:crypto.strong_rand_bytes(4), case: :lower, padding: false)
+          instance_name = "#{definition.name}-#{suffix}"
+          definition = %{definition | name: instance_name, persistent: false}
+
+          case AgentSupervisor.spawn_agent(definition) do
+            {:ok, _pid} ->
+              result =
+                try do
+                  AgentServer.run_task(instance_name, full_task, timeout: timeout_ms)
+                catch
+                  :exit, {:timeout, _} -> {:error, :timeout}
+                  :exit, reason -> {:error, {:agent_exit, reason}}
+                after
+                  AgentSupervisor.stop_agent(instance_name)
+                end
+
+              case result do
+                {:ok, output} ->
+                  json_response(conn, 200, %{ok: true, result: output})
+
+                {:error, reason} ->
+                  json_response(conn, 500, %{ok: false, error: inspect(reason)})
+              end
+
+            {:error, reason} ->
+              json_response(conn, 500, %{ok: false, error: "spawn failed: #{inspect(reason)}"})
+          end
+
+        {:error, reason} ->
+          json_response(conn, 404, %{ok: false, error: "skill not found: #{reason}"})
+      end
+    else
+      {:error, {:missing_field, field}} ->
+        json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+    end
+  end
+
+  # --- GET /api/skills (list available skills) ---
+
+  get "/api/skills" do
+    skills = SkillRegistry.list()
+    json_response(conn, 200, %{ok: true, skills: skills})
+  end
+
   # --- Catch-all ---
 
   match _ do
@@ -278,6 +338,13 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
       {:ok, value} -> Keyword.put(opts, opt_key, value)
       :error -> opts
     end
+  end
+
+  defp build_skill_task(task, nil), do: task
+  defp build_skill_task(task, ""), do: task
+
+  defp build_skill_task(task, context) do
+    "Context:\n#{context}\n\nTask:\n#{task}"
   end
 
   defp require_bridge_secret(conn) do
