@@ -15,7 +15,7 @@ defmodule RustyclawOrchestrator.Plugins.CodexPlugin do
 
   @impl true
   def connect(config) do
-    api_key = config[:api_key] || config["api_key"] || System.get_env("OPENAI_API_KEY")
+    api_key = config[:api_key] || config["api_key"]
 
     if is_nil(api_key) or api_key == "" do
       {:error, :missing_api_key}
