@@ -257,52 +257,58 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
   # --- POST /api/skills/invoke (Rust → Elixir skill delegation) ---
 
   post "/api/skills/invoke" do
-    with {:ok, skill_name} <- require_field(conn.body_params, "skill"),
-         {:ok, task} <- require_field(conn.body_params, "task") do
-      context = Map.get(conn.body_params, "context")
-      timeout_ms = Map.get(conn.body_params, "timeout_ms", 300_000)
-      timeout_ms = min(timeout_ms, 300_000)
+    case require_bridge_secret(conn) do
+      :ok ->
+        invoke_skill(conn)
 
+      {:error, conn} ->
+        conn
+    end
+  end
+
+  defp invoke_skill(conn) do
+    with {:ok, skill_name} <- require_field(conn.body_params, "skill"),
+         {:ok, task} <- require_field(conn.body_params, "task"),
+         {:ok, definition} <- SkillRegistry.load(skill_name),
+         {:ok, _pid, instance_name, definition} <- spawn_ephemeral(definition) do
+      timeout_ms = min(Map.get(conn.body_params, "timeout_ms", 300_000), 300_000)
+      context = Map.get(conn.body_params, "context")
       full_task = build_skill_task(task, context)
 
-      case SkillRegistry.load(skill_name) do
-        {:ok, definition} ->
-          # Force ephemeral with a unique name so concurrent invocations don't clash
-          suffix = Base.hex_encode32(:crypto.strong_rand_bytes(4), case: :lower, padding: false)
-          instance_name = "#{definition.name}-#{suffix}"
-          definition = %{definition | name: instance_name, persistent: false}
-
-          case AgentSupervisor.spawn_agent(definition) do
-            {:ok, _pid} ->
-              result =
-                try do
-                  AgentServer.run_task(instance_name, full_task, timeout: timeout_ms)
-                catch
-                  :exit, {:timeout, _} -> {:error, :timeout}
-                  :exit, reason -> {:error, {:agent_exit, reason}}
-                after
-                  AgentSupervisor.stop_agent(instance_name)
-                end
-
-              case result do
-                {:ok, output} ->
-                  json_response(conn, 200, %{ok: true, result: output})
-
-                {:error, reason} ->
-                  json_response(conn, 500, %{ok: false, error: inspect(reason)})
-              end
-
-            {:error, reason} ->
-              json_response(conn, 500, %{ok: false, error: "spawn failed: #{inspect(reason)}"})
-          end
-
-        {:error, reason} ->
-          json_response(conn, 404, %{ok: false, error: "skill not found: #{reason}"})
+      case run_skill_task(instance_name, full_task, timeout_ms, definition) do
+        {:ok, output} -> json_response(conn, 200, %{ok: true, result: output})
+        {:error, reason} -> json_response(conn, 500, %{ok: false, error: inspect(reason)})
       end
     else
       {:error, {:missing_field, field}} ->
         json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+
+      {:error, reason} when is_binary(reason) ->
+        json_response(conn, 404, %{ok: false, error: "skill not found: #{reason}"})
+
+      {:error, {:spawn_failed, reason}} ->
+        json_response(conn, 500, %{ok: false, error: "spawn failed: #{inspect(reason)}"})
     end
+  end
+
+  defp spawn_ephemeral(definition) do
+    suffix = Base.hex_encode32(:crypto.strong_rand_bytes(4), case: :lower, padding: false)
+    instance_name = "#{definition.name}-#{suffix}"
+    definition = %{definition | name: instance_name, persistent: false}
+
+    case AgentSupervisor.spawn_agent(definition) do
+      {:ok, pid} -> {:ok, pid, instance_name, definition}
+      {:error, reason} -> {:error, {:spawn_failed, reason}}
+    end
+  end
+
+  defp run_skill_task(instance_name, task, timeout_ms, _definition) do
+    AgentServer.run_task(instance_name, task, timeout: timeout_ms)
+  catch
+    :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, reason -> {:error, {:agent_exit, reason}}
+  after
+    AgentSupervisor.stop_agent(instance_name)
   end
 
   # --- GET /api/skills (list available skills) ---

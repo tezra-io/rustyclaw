@@ -69,6 +69,26 @@ defmodule RustyclawOrchestrator.SkillRegistryTest do
       assert {:error, reason} = SkillRegistry.load("empty-skill")
       assert reason =~ "Failed to read"
     end
+
+    test "rejects path traversal attempts" do
+      assert {:error, reason} = SkillRegistry.load("../../../etc/passwd")
+      assert reason =~ "invalid skill name"
+    end
+
+    test "rejects skill names with slashes" do
+      assert {:error, reason} = SkillRegistry.load("foo/bar")
+      assert reason =~ "invalid skill name"
+    end
+
+    test "rejects skill names with dots" do
+      assert {:error, reason} = SkillRegistry.load("foo.bar")
+      assert reason =~ "invalid skill name"
+    end
+
+    test "rejects empty skill name" do
+      assert {:error, reason} = SkillRegistry.load("")
+      assert reason =~ "invalid skill name"
+    end
   end
 
   describe "list/0" do

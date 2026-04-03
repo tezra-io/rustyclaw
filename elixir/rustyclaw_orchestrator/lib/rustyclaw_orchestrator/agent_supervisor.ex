@@ -6,7 +6,7 @@ defmodule RustyclawOrchestrator.AgentSupervisor do
   Each agent is supervised with :one_for_one strategy, max 3 restarts per 5 seconds.
 
   Persistent agents use `:permanent` restart strategy (always restarted).
-  Non-persistent agents use `:transient` restart (only restarted on abnormal exit).
+  Non-persistent agents use `:temporary` restart (never restarted).
   """
 
   alias RustyclawOrchestrator.{AgentDefinition, AgentServer}
@@ -18,7 +18,7 @@ defmodule RustyclawOrchestrator.AgentSupervisor do
   """
   @spec spawn_agent(AgentDefinition.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   def spawn_agent(%AgentDefinition{} = definition, opts \\ []) do
-    restart = if definition.persistent, do: :permanent, else: :transient
+    restart = if definition.persistent, do: :permanent, else: :temporary
     parent_pid = Keyword.get(opts, :parent_pid)
 
     child_spec =

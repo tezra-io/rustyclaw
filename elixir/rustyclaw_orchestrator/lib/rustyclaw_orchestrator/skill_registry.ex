@@ -13,8 +13,12 @@ defmodule RustyclawOrchestrator.SkillRegistry do
   @doc "Load a skill definition by name."
   @spec load(String.t()) :: {:ok, AgentDefinition.t()} | {:error, String.t()}
   def load(skill_name) when is_binary(skill_name) do
-    path = Path.join([skills_dir(), skill_name, "SKILL.md"])
-    AgentDefinition.from_file(path)
+    if skill_name =~ ~r/\A[a-zA-Z0-9_\-]+\z/ do
+      path = Path.join([skills_dir(), skill_name, "SKILL.md"])
+      AgentDefinition.from_file(path)
+    else
+      {:error, "invalid skill name: must match [a-zA-Z0-9_-]+"}
+    end
   end
 
   @doc "List available skill names."

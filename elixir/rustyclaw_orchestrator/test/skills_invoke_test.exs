@@ -13,10 +13,13 @@ defmodule RustyclawOrchestrator.SkillsInvokeTest do
                 "rustyclaw_skills_invoke_test_#{System.unique_integer([:positive])}"
               )
 
+  @bridge_secret "test-bridge-secret-skills"
+
   setup do
     File.rm_rf!(@skills_dir)
     File.mkdir_p!(@skills_dir)
     Application.put_env(:rustyclaw_orchestrator, :skills_dir, @skills_dir)
+    System.put_env("RUSTYCLAW_BRIDGE_SECRET", @bridge_secret)
 
     on_exit(fn ->
       for name <- AgentSupervisor.list_agents() do
@@ -25,6 +28,7 @@ defmodule RustyclawOrchestrator.SkillsInvokeTest do
 
       File.rm_rf!(@skills_dir)
       Application.delete_env(:rustyclaw_orchestrator, :skills_dir)
+      System.delete_env("RUSTYCLAW_BRIDGE_SECRET")
     end)
 
     :ok
@@ -59,10 +63,20 @@ defmodule RustyclawOrchestrator.SkillsInvokeTest do
   defp post_invoke(body) do
     conn(:post, "/api/skills/invoke", Jason.encode!(body))
     |> put_req_header("content-type", "application/json")
+    |> put_req_header("x-bridge-secret", @bridge_secret)
     |> call_router()
   end
 
   describe "POST /api/skills/invoke" do
+    test "rejects unauthenticated requests" do
+      conn =
+        conn(:post, "/api/skills/invoke", Jason.encode!(%{skill: "x", task: "y"}))
+        |> put_req_header("content-type", "application/json")
+        |> call_router()
+
+      assert conn.status == 401
+    end
+
     test "returns 400 when skill name is missing" do
       conn = post_invoke(%{task: "do something"})
 

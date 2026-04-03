@@ -150,7 +150,7 @@ defmodule RustyclawOrchestrator.AgentServer do
       last_successful_task: now
     }
 
-    schedule_health_check()
+    if definition.persistent, do: schedule_health_check()
     {:ok, state}
   end
 
@@ -463,7 +463,7 @@ defmodule RustyclawOrchestrator.AgentServer do
       last_active_at: state.last_active_at,
       last_health_check: state.last_health_check,
       recovery_attempts: state.recovery_attempts,
-      pending_task: state.pending_task
+      pending_task: if(state.pending_task, do: :running, else: nil)
     }
   end
 
