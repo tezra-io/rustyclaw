@@ -220,15 +220,28 @@ impl AxonChannel {
 
     /// Load a 32-byte Ed25519 signing key from `{keys_dir}/{identity}.key`.
     fn load_signing_key(keys_dir: &Path, identity: &str) -> anyhow::Result<SigningKey> {
-        let key_path = keys_dir.join(format!("{identity}.key"));
-        if !key_path.exists() {
-            anyhow::bail!(
-                "Axon identity '{identity}' not found at {} \
-                 — run `axon identity create {identity}` to create it",
-                key_path.display(),
-            );
+        // Validate identity to prevent path traversal
+        if !identity
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            || identity.is_empty()
+        {
+            anyhow::bail!("invalid Axon identity '{identity}': must match [a-zA-Z0-9_-]+");
         }
-        let bytes = std::fs::read(&key_path)?;
+
+        let key_path = keys_dir.join(format!("{identity}.key"));
+        // Single fs::read avoids TOCTOU between exists() and read()
+        let bytes = match std::fs::read(&key_path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::bail!(
+                    "Axon identity '{identity}' not found at {} \
+                     — run `axon identity create {identity}` to create it",
+                    key_path.display(),
+                );
+            }
+            Err(e) => return Err(e.into()),
+        };
         if bytes.len() != 32 {
             anyhow::bail!(
                 "invalid key file at {}: expected 32 bytes, got {}",
@@ -250,10 +263,16 @@ impl AxonChannel {
 
         let (mut reader, mut writer) = tokio::io::split(&mut stream);
 
-        // Read challenge
+        // Read challenge — verify msg_type before trusting payload
         let challenge = read_envelope(&mut reader)
             .await?
             .ok_or_else(|| anyhow::anyhow!("connection closed before challenge"))?;
+        if challenge.msg_type != "challenge" {
+            anyhow::bail!(
+                "expected 'challenge' from broker, got '{}'",
+                challenge.msg_type
+            );
+        }
         let nonce = challenge.body["nonce"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing nonce in challenge"))?;
@@ -290,10 +309,11 @@ impl AxonChannel {
     }
 
     /// Inner listen loop: connect event socket, read messages, handle ping/pong.
+    /// Returns `true` if the receiver was dropped (caller should stop reconnecting).
     async fn connect_and_listen(
         &self,
         tx: &tokio::sync::mpsc::Sender<ChannelMessage>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let mut stream = self.connect_and_register("event").await?;
         self.connected.store(true, Ordering::Relaxed);
         tracing::info!("[axon] connected as '{}' on event socket", self.identity);
@@ -314,20 +334,29 @@ impl AxonChannel {
                         continue;
                     }
 
-                    if let Some(ref from) = envelope.from {
-                        if !Self::is_sender_allowed(from, &self.allowed_from) {
-                            tracing::debug!("[axon] filtered message from: {}", from);
+                    match envelope.from {
+                        Some(ref from) => {
+                            if !Self::is_sender_allowed(from, &self.allowed_from) {
+                                tracing::debug!("[axon] filtered message from: {}", from);
+                                continue;
+                            }
+                        }
+                        None if !self.allowed_from.is_empty() => {
+                            tracing::debug!(
+                                "[axon] rejected message with no sender (allowed_from is set)"
+                            );
                             continue;
                         }
+                        None => {}
                     }
 
                     if let Some(msg) = Self::envelope_to_channel_message(&envelope) {
                         if tx.send(msg).await.is_err() {
-                            return Ok(());
+                            return Ok(true); // receiver dropped
                         }
                     }
                 }
-                Ok(None) => return Ok(()),
+                Ok(None) => return Ok(false), // broker disconnected
                 Err(e) => return Err(e),
             }
         }
@@ -378,7 +407,13 @@ impl Channel for AxonChannel {
 
         loop {
             match self.connect_and_listen(&tx).await {
-                Ok(()) => {
+                Ok(true) => {
+                    // Receiver dropped — no one is consuming messages, stop reconnecting
+                    tracing::info!("[axon] message receiver dropped, stopping listener");
+                    self.connected.store(false, Ordering::Relaxed);
+                    return Ok(());
+                }
+                Ok(false) => {
                     attempt = 0;
                     tracing::info!("[axon] broker disconnected, reconnecting...");
                 }
@@ -646,6 +681,42 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expected 32 bytes"));
+    }
+
+    #[test]
+    fn load_signing_key_rejects_path_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = AxonChannel::load_signing_key(dir.path(), "../../../etc/passwd");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid Axon identity"), "got: {err}");
+    }
+
+    #[test]
+    fn load_signing_key_rejects_slash_in_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = AxonChannel::load_signing_key(dir.path(), "foo/bar");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid Axon identity"), "got: {err}");
+    }
+
+    #[test]
+    fn load_signing_key_rejects_empty_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = AxonChannel::load_signing_key(dir.path(), "");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid Axon identity"), "got: {err}");
+    }
+
+    #[test]
+    fn load_signing_key_accepts_valid_identity_chars() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("my-agent_01.key");
+        std::fs::write(&key_path, [7u8; 32]).unwrap();
+        let key = AxonChannel::load_signing_key(dir.path(), "my-agent_01").unwrap();
+        assert_eq!(key.to_bytes(), [7u8; 32]);
     }
 
     // ── Wire framing ────────────────────────────────────────────

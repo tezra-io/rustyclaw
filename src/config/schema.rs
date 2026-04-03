@@ -2805,6 +2805,7 @@ pub struct ChannelsConfig {
     /// ClawdTalk voice channel configuration.
     pub clawdtalk: Option<crate::channels::clawdtalk::ClawdTalkConfig>,
     /// Axon agent mesh channel configuration.
+    #[cfg(unix)]
     pub axon: Option<AxonConfig>,
     /// Base timeout in seconds for processing a single channel message (LLM + tools).
     /// Runtime uses this as a per-turn budget that scales with tool-loop depth
@@ -2896,6 +2897,7 @@ impl ChannelsConfig {
                 Box::new(ConfigWrapper::new(self.clawdtalk.as_ref())),
                 self.clawdtalk.is_some(),
             ),
+            #[cfg(unix)]
             (
                 Box::new(ConfigWrapper::new(self.axon.as_ref())),
                 self.axon.is_some(),
@@ -2941,6 +2943,7 @@ impl Default for ChannelsConfig {
             qq: None,
             nostr: None,
             clawdtalk: None,
+            #[cfg(unix)]
             axon: None,
             message_timeout_secs: default_channel_message_timeout_secs(),
         }
@@ -3176,6 +3179,7 @@ impl ChannelConfig for SignalConfig {
 ///
 /// Connects to a local Axon broker over Unix domain socket for native
 /// agent-to-agent messaging. Uses Ed25519 challenge-response authentication.
+#[cfg(unix)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AxonConfig {
     /// Identity name to register as on the mesh (e.g. `"rusty"`).
@@ -3194,18 +3198,22 @@ pub struct AxonConfig {
     pub allowed_from: Vec<String>,
 }
 
+#[cfg(unix)]
 fn default_axon_broker_socket() -> String {
     "~/.axon/broker.sock".to_string()
 }
 
+#[cfg(unix)]
 fn default_axon_keys_dir() -> String {
     "~/.axon/keys".to_string()
 }
 
+#[cfg(unix)]
 fn default_axon_reconnect_delay() -> u64 {
     1000
 }
 
+#[cfg(unix)]
 impl ChannelConfig for AxonConfig {
     fn name() -> &'static str {
         "Axon"

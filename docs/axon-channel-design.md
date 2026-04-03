@@ -138,66 +138,42 @@ reconnect_initial_delay_ms = 1000             # exponential backoff: 1s → 2s �
 
 ## Socket Architecture
 
-The core challenge: `listen()` is a long-running reader on the UDS socket, but `send()` also needs to write AND read delivery acks from the same socket concurrently.
+**Implemented: Two-socket architecture (per-send command sockets)**
 
-**Solution: Split ownership with delivery ack routing**
+The implementation uses separate sockets for sending and listening, which avoids the complexity of shared-writer contention:
 
 ```
-                    ┌─────────────────────────┐
-                    │   UDS Connection         │
-                    │  (tokio::io::split)      │
-                    ├────────────┬─────────────┤
-                    │ ReadHalf   │ WriteHalf   │
-                    └─────┬──────┴──────┬──────┘
-                          │             │
-                          ▼             │
-                 ┌────────────────┐     │
-                 │ Reader Task    │     │
-                 │ (owns ReadHalf)│     │
-                 │                │     │
-                 │ Routes:        │     │
-                 │  "send" msgs   │     │
-                 │   → tx channel │     │
-                 │  "ping" msgs   ├─────┤ (writes pong via
-                 │   → auto-pong  │     │  Arc<Mutex<WriteHalf>>)
-                 │  "delivery_*"  │     │
-                 │   → pending map│     │
-                 └────────────────┘     │
-                                        │
-                 ┌────────────────┐     │
-                 │ send()         ├─────┘
-                 │ (Arc<Mutex<    │
-                 │  WriteHalf>>)  │
-                 │                │
-                 │ 1. Write envelope
-                 │ 2. Wait on     │
-                 │    oneshot rx   │
-                 │    from pending │
-                 │    map (keyed   │
-                 │    by msg id)   │
-                 └────────────────┘
+  ┌─────────────────────────────────────────────────┐
+  │                  AxonChannel                     │
+  ├─────────────────────┬───────────────────────────┤
+  │  Event Socket       │  Command Socket           │
+  │  (long-lived)       │  (per-send, ephemeral)    │
+  │                     │                           │
+  │  connect_and_register("event")                  │
+  │  → read loop:       │  send():                  │
+  │    "send" → tx      │    connect_and_register   │
+  │    "ping" → pong    │      ("cmd")              │
+  │    other  → ignore  │    write envelope         │
+  │                     │    read delivery ack      │
+  │                     │    close socket           │
+  └─────────────────────┴───────────────────────────┘
 ```
 
 **How it works:**
-1. On connect, `tokio::io::split()` the stream into `ReadHalf` + `WriteHalf`
-2. `WriteHalf` wrapped in `Arc<Mutex<OwnedWriteHalf>>` — shared between `send()` and the reader task (for pong responses)
-3. Reader task owns `ReadHalf` exclusively. It routes messages by type:
-   - `"send"` → feeds into the `tx` mpsc channel (becomes `ChannelMessage`)
-   - `"ping"` → immediately writes `"pong"` envelope via the shared writer
-   - `"delivery_ack"` / `"delivery_nack"` / `"error"` → looks up `envelope.body.in_response_to` in a `DashMap<String, oneshot::Sender>` and resolves the pending send
-4. `send()` inserts a `oneshot::channel()` into the pending map keyed by message ID, writes the envelope, then `await`s the oneshot receiver for the ack/nack
-5. If oneshot times out (5s), treat as delivery failure
+1. `listen()` opens a persistent **event socket** registered with `mode: "event"`. This socket receives inbound messages and broker pings.
+2. Each `send()` call opens a fresh **command socket** registered with `mode: "cmd"`. It writes the outbound envelope, reads the delivery ack/nack, then closes the socket.
+3. No shared state between send and listen — no `Arc<Mutex>`, no `DashMap`, no contention.
 
-**Pending sends map:** `Arc<DashMap<String, oneshot::Sender<Envelope>>>` — shared between the reader task and `send()`. Lock-free concurrent map.
+**Tradeoff:** Each send incurs a full connect + auth + register cycle (~1-2ms on UDS). This is acceptable for agent-to-agent chat volumes (dozens of messages per session). If high-throughput sending becomes a requirement, a persistent command socket with multiplexed acks would be more efficient but significantly more complex.
 
 ## Connection Lifecycle
 
 1. **Connect:** Open UDS to `broker_socket`
-2. **Handshake:** Receive `challenge` envelope with nonce → sign nonce with `{identity}.key` → send `auth` envelope with signature + public key
-3. **Register:** Send `register` envelope with name, agent_type (`"rustyclaw"`), capabilities (`[]`), directory (workspace path), and max_message_size (65536)
-4. **Split:** `tokio::io::split()` → reader task + shared writer
-5. **Listen:** Reader task reads JSON lines from socket. Routes `send` → tx channel, `ping` → auto-pong, `delivery_*` → pending map
-6. **Reconnect:** On socket error/EOF, exponential backoff: 1s → 2s → 4s → 8s → cap at 30s. Reset on successful connection. Log but don't crash.
+2. **Challenge:** Receive `challenge` envelope with nonce → verify `msg_type == "challenge"` → sign nonce with `{identity}.key`
+3. **Register:** Send a combined `register` envelope containing name, runtime (`"rustyclaw"`), capabilities, public key, signature, nonce, and `mode` (`"event"` or `"cmd"`). Auth and registration happen in one step.
+4. **Response:** Read broker response — success or `error` with code/message.
+5. **Event socket:** `tokio::io::split()` → read loop handles `send`/`ping` messages, write half handles `pong` responses.
+6. **Reconnect:** On socket error/EOF, exponential backoff: 1s → 2s → 4s → 8s → cap at 30s. Reset on successful connection. If the message receiver is dropped, stop reconnecting.
 
 ## Health Check
 
