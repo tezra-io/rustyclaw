@@ -341,12 +341,12 @@ impl BrowserTool {
         Ok(parsed)
     }
 
-    fn computer_use_available(&self) -> anyhow::Result<bool> {
+    async fn computer_use_available(&self) -> anyhow::Result<bool> {
         if self.is_unix_endpoint() {
             #[cfg(unix)]
             {
                 let path = self.unix_socket_path()?;
-                return Ok(unix_socket_reachable(&path));
+                return Ok(unix_socket_reachable(&path).await);
             }
             #[cfg(not(unix))]
             anyhow::bail!("Unix socket endpoints are not supported on this platform");
@@ -383,7 +383,7 @@ impl BrowserTool {
                 Ok(ResolvedBackend::RustNative)
             }
             BrowserBackendKind::ComputerUse => {
-                if !self.computer_use_available()? {
+                if !self.computer_use_available().await? {
                     anyhow::bail!(
                         "browser.backend='computer_use' but sidecar endpoint is unreachable. Check browser.computer_use.endpoint and sidecar status"
                     );
@@ -398,7 +398,7 @@ impl BrowserTool {
                     return Ok(ResolvedBackend::AgentBrowser);
                 }
 
-                let computer_use_err = match self.computer_use_available() {
+                let computer_use_err = match self.computer_use_available().await {
                     Ok(true) => return Ok(ResolvedBackend::ComputerUse),
                     Ok(false) => None,
                     Err(err) => Some(err.to_string()),
@@ -2091,6 +2091,8 @@ async fn http_post_unix(
 ) -> anyhow::Result<(u16, String)> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    let deadline = tokio::time::Instant::now() + timeout;
+
     let stream = tokio::time::timeout(timeout, tokio::net::UnixStream::connect(socket_path))
         .await
         .map_err(|_| {
@@ -2106,7 +2108,7 @@ async fn http_post_unix(
             )
         })?;
 
-    let (mut reader, mut writer) = stream.into_split();
+    let (reader, mut writer) = stream.into_split();
 
     let mut auth_header = String::new();
     if let Some(token) = bearer_token {
@@ -2128,11 +2130,26 @@ async fn http_post_unix(
     writer.write_all(body).await?;
     writer.shutdown().await?;
 
+    // Use remaining time after connect for the read deadline
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+    if remaining.is_zero() {
+        anyhow::bail!(
+            "Unix socket timed out after connect: {}",
+            socket_path.display()
+        );
+    }
+
     let mut response_buf = Vec::new();
-    tokio::time::timeout(timeout, reader.read_to_end(&mut response_buf))
-        .await
-        .map_err(|_| anyhow::anyhow!("Unix socket read timed out: {}", socket_path.display()))?
-        .context("Failed to read Unix socket response")?;
+    const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024; // 4MB
+    tokio::time::timeout(
+        remaining,
+        reader
+            .take(MAX_RESPONSE_BYTES)
+            .read_to_end(&mut response_buf),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Unix socket read timed out: {}", socket_path.display()))?
+    .context("Failed to read Unix socket response")?;
 
     let response_str = String::from_utf8_lossy(&response_buf);
     let (headers, response_body) = response_str.split_once("\r\n\r\n").ok_or_else(|| {
@@ -2146,12 +2163,41 @@ async fn http_post_unix(
         .and_then(|s| s.parse::<u16>().ok())
         .ok_or_else(|| anyhow::anyhow!("Could not parse HTTP status from Unix socket response"))?;
 
+    // Reject chunked transfer-encoding — our naive parser can't decode it
+    let headers_lower = headers.to_lowercase();
+    if headers_lower.contains("transfer-encoding: chunked") {
+        anyhow::bail!(
+            "Unix socket response uses chunked transfer-encoding, which is not supported"
+        );
+    }
+
+    // Verify Content-Length matches actual body if present
+    for line in headers.lines() {
+        if let Some(val) = line
+            .strip_prefix("Content-Length: ")
+            .or_else(|| line.strip_prefix("content-length: "))
+        {
+            if let Ok(expected) = val.trim().parse::<usize>() {
+                if response_body.len() != expected {
+                    anyhow::bail!(
+                        "Content-Length mismatch: header says {} bytes, got {} bytes",
+                        expected,
+                        response_body.len()
+                    );
+                }
+            }
+        }
+    }
+
     Ok((status, response_body.to_string()))
 }
 
 #[cfg(unix)]
-fn unix_socket_reachable(path: &std::path::Path) -> bool {
-    std::os::unix::net::UnixStream::connect(path).is_ok()
+async fn unix_socket_reachable(path: &std::path::Path) -> bool {
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || std::os::unix::net::UnixStream::connect(&path).is_ok())
+        .await
+        .unwrap_or(false)
 }
 
 fn extract_host(url_str: &str) -> anyhow::Result<String> {
@@ -2749,8 +2795,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn unix_endpoint_available_returns_false_for_missing_socket() {
+    #[tokio::test]
+    async fn unix_endpoint_available_returns_false_for_missing_socket() {
         let security = Arc::new(SecurityPolicy::default());
         let tool = BrowserTool::new_with_backend(
             security,
@@ -2765,12 +2811,12 @@ mod tests {
                 ..ComputerUseConfig::default()
             },
         );
-        assert!(!tool.computer_use_available().unwrap());
+        assert!(!tool.computer_use_available().await.unwrap());
     }
 
     #[cfg(unix)]
-    #[test]
-    fn unix_endpoint_available_returns_true_for_connectable_socket() {
+    #[tokio::test]
+    async fn unix_endpoint_available_returns_true_for_connectable_socket() {
         let sock_path = std::env::temp_dir().join("rustyclaw_uds_health_test.sock");
         let _ = std::fs::remove_file(&sock_path);
         let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
@@ -2789,7 +2835,7 @@ mod tests {
                 ..ComputerUseConfig::default()
             },
         );
-        assert!(tool.computer_use_available().unwrap());
+        assert!(tool.computer_use_available().await.unwrap());
 
         drop(listener);
         let _ = std::fs::remove_file(&sock_path);
