@@ -45,6 +45,7 @@ pub mod memory_forget;
 pub mod memory_recall;
 pub mod memory_store;
 pub mod model_routing_config;
+pub mod orchestrator;
 pub mod pdf_read;
 pub mod proxy_config;
 pub mod pushover;
@@ -90,6 +91,9 @@ pub use memory_forget::MemoryForgetTool;
 pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
 pub use model_routing_config::ModelRoutingConfigTool;
+pub use orchestrator::{
+    KillAgentBridgeTool, ListAgentsBridgeTool, MessageAgentBridgeTool, SpawnAgentBridgeTool,
+};
 pub use pdf_read::PdfReadTool;
 pub use proxy_config::ProxyConfigTool;
 pub use pushover::PushoverTool;
@@ -381,7 +385,13 @@ pub fn all_tools_with_runtime(
     }
 
     // Skill invocation tool — delegates to Elixir-supervised ephemeral agents
-    tool_arcs.push(Arc::new(InvokeSkillTool::new(config)));
+    tool_arcs.push(Arc::new(InvokeSkillTool::new(config.clone())));
+
+    // Elixir orchestrator bridge tools — agent lifecycle management
+    tool_arcs.push(Arc::new(SpawnAgentBridgeTool::new(config.clone())));
+    tool_arcs.push(Arc::new(ListAgentsBridgeTool::new(config.clone())));
+    tool_arcs.push(Arc::new(MessageAgentBridgeTool::new(config.clone())));
+    tool_arcs.push(Arc::new(KillAgentBridgeTool::new(config)));
 
     boxed_registry_from_arcs(tool_arcs)
 }
