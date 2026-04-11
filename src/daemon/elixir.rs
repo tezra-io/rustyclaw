@@ -121,6 +121,17 @@ impl ElixirOrchestrator {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    /// Generate a random 256-bit hex string (64 hex chars) for bridge authentication.
+    pub fn generate_bridge_secret() -> String {
+        use std::fmt::Write;
+        let bytes: [u8; 32] = rand::random();
+        let mut hex = String::with_capacity(64);
+        for b in &bytes {
+            write!(hex, "{b:02x}").unwrap();
+        }
+        hex
+    }
+
     /// Create a new orchestrator manager. Does not start the process.
     pub fn new(rust_bridge_port: u16, bridge_socket_path: Option<PathBuf>) -> Self {
         let synth_port = std::env::var("RUSTYCLAW_ELIXIR_SYNTH_PORT")
@@ -218,6 +229,17 @@ impl ElixirOrchestrator {
             }
         }
 
+        // Resolve or generate the bridge secret for Rust-Elixir authentication.
+        let bridge_secret = std::env::var("RUSTYCLAW_BRIDGE_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                let secret = Self::generate_bridge_secret();
+                std::env::set_var("RUSTYCLAW_BRIDGE_SECRET", &secret);
+                tracing::info!("Generated ephemeral bridge secret for this session");
+                secret
+            });
+
         // Start the Elixir application
         let mut cmd = Command::new("elixir");
         cmd.arg("--no-halt")
@@ -228,6 +250,7 @@ impl ElixirOrchestrator {
             .env("RUSTYCLAW_BRIDGE_PORT", self.rust_bridge_port.to_string())
             .env("RUSTYCLAW_ELIXIR_SYNTH_PORT", self.synth_port.to_string())
             .env("RUSTYCLAW_ELIXIR_PLUGIN_PORT", self.plugin_port.to_string())
+            .env("RUSTYCLAW_BRIDGE_SECRET", &bridge_secret)
             .env("MIX_ENV", "prod")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -518,5 +541,22 @@ mod tests {
         assert!(stats.active_agents.is_none());
         assert!(stats.synth_tools.is_none());
         assert!(stats.active_plugins.is_none());
+    }
+
+    #[test]
+    fn generate_bridge_secret_is_64_hex_chars() {
+        let secret = ElixirOrchestrator::generate_bridge_secret();
+        assert_eq!(secret.len(), 64, "bridge secret must be 64 hex characters");
+        assert!(
+            secret.chars().all(|c| c.is_ascii_hexdigit()),
+            "bridge secret must contain only hex characters, got: {secret}"
+        );
+    }
+
+    #[test]
+    fn generate_bridge_secret_is_unique() {
+        let a = ElixirOrchestrator::generate_bridge_secret();
+        let b = ElixirOrchestrator::generate_bridge_secret();
+        assert_ne!(a, b, "two generated secrets must differ");
     }
 }
