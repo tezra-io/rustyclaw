@@ -25,7 +25,8 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
     Synthesizer
   }
 
-  alias RustyclawOrchestrator.{AgentServer, AgentSupervisor, SkillRegistry}
+  alias RustyclawOrchestrator.{AgentCoordinator, AgentServer, AgentSupervisor, SkillRegistry}
+  alias RustyclawOrchestrator.Tools
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
@@ -318,6 +319,120 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
     json_response(conn, 200, %{ok: true, skills: skills})
   end
 
+  # --- POST /api/agents/spawn ---
+
+  post "/api/agents/spawn" do
+    case require_bridge_secret(conn) do
+      :ok ->
+        case Tools.SpawnAgentTool.execute(conn.body_params) do
+          {:ok, result} ->
+            json_response(conn, 200, %{
+              ok: true,
+              agent_name: result.agent_name,
+              pid: inspect(result.pid)
+            })
+
+          {:error, reason} ->
+            json_response(conn, 422, %{ok: false, error: stringify(reason)})
+        end
+
+      {:error, conn} ->
+        conn
+    end
+  end
+
+  # --- GET /api/agents ---
+
+  get "/api/agents" do
+    case require_bridge_secret(conn) do
+      :ok ->
+        query = Plug.Conn.fetch_query_params(conn).query_params
+
+        tool_params =
+          %{}
+          |> maybe_put_param(query, "detailed", fn v -> v == "true" end)
+          |> maybe_put_param(query, "capability", fn v -> v end)
+          |> maybe_put_param(query, "status", fn v -> v end)
+
+        {:ok, result} = Tools.ListAgentsTool.execute(tool_params)
+
+        json_response(conn, 200, %{ok: true, agents: result.agents, count: result.count})
+
+      {:error, conn} ->
+        conn
+    end
+  end
+
+  # --- POST /api/agents/message ---
+
+  post "/api/agents/message" do
+    case require_bridge_secret(conn) do
+      :ok ->
+        case Tools.MessageAgentTool.execute(conn.body_params) do
+          {:ok, result} ->
+            json_response(conn, 200, Map.put(result, :ok, true))
+
+          {:error, reason} ->
+            json_response(conn, 422, %{ok: false, error: stringify(reason)})
+        end
+
+      {:error, conn} ->
+        conn
+    end
+  end
+
+  # --- DELETE /api/agents/:name ---
+
+  delete "/api/agents/:name" do
+    case require_bridge_secret(conn) do
+      :ok ->
+        case Tools.KillAgentTool.execute(%{"name" => name}) do
+          {:ok, result} ->
+            json_response(conn, 200, Map.put(result, :ok, true))
+
+          {:error, reason} ->
+            json_response(conn, 422, %{ok: false, error: stringify(reason)})
+        end
+
+      {:error, conn} ->
+        conn
+    end
+  end
+
+  # --- POST /api/agents/delegate ---
+
+  post "/api/agents/delegate" do
+    case require_bridge_secret(conn) do
+      :ok ->
+        case require_field(conn.body_params, "task") do
+          {:ok, task} ->
+            capabilities =
+              conn.body_params
+              |> Map.get("capabilities", [])
+              |> Enum.map(&String.to_atom/1)
+
+            opts =
+              [capabilities: capabilities]
+              |> maybe_add_opt(conn.body_params, "from_agent", :from_agent)
+              |> maybe_add_strategy(conn.body_params)
+
+            case AgentCoordinator.delegate(task, opts) do
+              {:ok, result} ->
+                json_response(conn, 200, %{ok: true, result: inspect(result)})
+
+              {:error, reason} ->
+                json_response(conn, 422, %{ok: false, error: inspect(reason)})
+            end
+
+          {:error, {:missing_field, field}} ->
+            json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+        end
+
+      {:error, conn} ->
+        conn
+    end
+  end
+
   # --- Catch-all ---
 
   match _ do
@@ -352,6 +467,28 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
   defp build_skill_task(task, context) do
     "Context:\n#{context}\n\nTask:\n#{task}"
   end
+
+  defp stringify(value) when is_binary(value), do: value
+  defp stringify(value), do: inspect(value)
+
+  defp maybe_put_param(map, query, key, transform) do
+    case Map.fetch(query, key) do
+      {:ok, value} -> Map.put(map, key, transform.(value))
+      :error -> map
+    end
+  end
+
+  defp maybe_add_strategy(opts, params) do
+    case Map.fetch(params, "strategy") do
+      {:ok, strategy} -> Keyword.put(opts, :strategy, parse_strategy(strategy))
+      :error -> opts
+    end
+  end
+
+  defp parse_strategy("first_available"), do: :first_available
+  defp parse_strategy("sequential"), do: :sequential
+  defp parse_strategy("fanout"), do: :fanout
+  defp parse_strategy(_), do: :first_available
 
   defp require_bridge_secret(conn) do
     expected = System.get_env("RUSTYCLAW_BRIDGE_SECRET") || ""
