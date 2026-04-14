@@ -63,6 +63,29 @@ Tip:
 
 - `rustyclaw gateway [--host <HOST>] [--port <PORT>]`
 - `rustyclaw daemon [--host <HOST>] [--port <PORT>]`
+- `rustyclaw daemon --no-elixir` — start without the Elixir orchestrator
+
+Notes:
+
+- `rustyclaw daemon` spawns the Elixir orchestrator as a supervised child process by default.
+- If Elixir is not installed or the orchestrator fails to start, the daemon continues in single-agent mode.
+- Use `--no-elixir` to explicitly skip the orchestrator.
+
+## Agent Bridge Tools
+
+When the Elixir orchestrator is running, the following tools are available to the LLM during agentic loops:
+
+| Tool | Endpoint | Purpose |
+|---|---|---|
+| `spawn_agent` | `POST /api/agents/spawn` | Spawn a new supervised agent |
+| `list_agents` | `GET /api/agents` | List agents (optionally filter by capability/status) |
+| `message_agent` | `POST /api/agents/message` | Send sync or async message to an agent |
+| `kill_agent` | `DELETE /api/agents/{name}` | Stop and remove a running agent |
+| `delegate_agent` | `POST /api/agents/delegate` | Delegate a task via capability-based routing |
+
+These tools communicate with the Elixir orchestrator over HTTP (localhost) using the bridge secret for authentication.
+
+If the orchestrator is not running (`--no-elixir` or Elixir not installed), these tools return a clear "not reachable" error.
 
 ### `estop`
 

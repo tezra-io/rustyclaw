@@ -20,22 +20,25 @@ defmodule RustyclawOrchestrator.Tools.MessageAgentTool do
 
   alias RustyclawOrchestrator.AgentServer
 
+  @max_timeout_ms 300_000
+
   @doc "Execute the message_agent tool."
   @spec execute(map()) :: {:ok, map()} | {:error, String.t()}
   def execute(params) when is_map(params) do
     with {:ok, target} <- require_param(params, :target),
          {:ok, message} <- require_param(params, :message) do
       mode = get_param(params, :mode, :async)
-      do_message(target, message, mode)
+      timeout_ms = get_timeout_ms(params)
+      do_message(target, message, mode, timeout_ms)
     end
   end
 
   def execute(_), do: {:error, "params must be a map"}
 
-  defp do_message(target, message, :sync) do
+  defp do_message(target, message, :sync, timeout_ms) do
     case agent_exists?(target) do
       true ->
-        case AgentServer.run_task(target, message) do
+        case AgentServer.run_task(target, message, timeout: timeout_ms) do
           {:ok, result} -> {:ok, %{delivered: true, mode: :sync, result: result}}
           {:error, reason} -> {:error, "task failed: #{inspect(reason)}"}
         end
@@ -45,7 +48,7 @@ defmodule RustyclawOrchestrator.Tools.MessageAgentTool do
     end
   end
 
-  defp do_message(target, message, :async) do
+  defp do_message(target, message, :async, _timeout_ms) do
     case agent_exists?(target) do
       true ->
         AgentServer.send_message(target, message)
@@ -56,8 +59,17 @@ defmodule RustyclawOrchestrator.Tools.MessageAgentTool do
     end
   end
 
-  defp do_message(_target, _message, mode) do
+  defp do_message(_target, _message, mode, _timeout_ms) do
     {:error, "invalid mode: #{inspect(mode)}, expected :sync or :async"}
+  end
+
+  defp get_timeout_ms(params) do
+    raw = Map.get(params, "timeout_ms", Map.get(params, :timeout_ms, @max_timeout_ms))
+
+    case raw do
+      v when is_integer(v) -> max(1, min(v, @max_timeout_ms))
+      _ -> @max_timeout_ms
+    end
   end
 
   defp require_param(params, key) do

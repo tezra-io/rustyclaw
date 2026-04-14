@@ -251,5 +251,45 @@ defmodule RustyclawOrchestrator.AgentApiTest do
       assert body["ok"] == false
       assert is_binary(body["error"])
     end
+
+    test "rejects non-list capabilities" do
+      conn =
+        authed_post("/api/agents/delegate", %{task: "do something", capabilities: "not-a-list"})
+
+      assert conn.status == 400
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] =~ "capabilities must be a list"
+    end
+
+    test "rejects non-string capability entries" do
+      conn = authed_post("/api/agents/delegate", %{task: "do something", capabilities: [1, 2]})
+      assert conn.status == 400
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] =~ "capabilities must be a list of strings"
+    end
+
+    test "rejects unknown strategy" do
+      conn = authed_post("/api/agents/delegate", %{task: "do something", strategy: "yolo"})
+      assert conn.status == 400
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] =~ "unknown strategy"
+    end
+
+    test "accepts timeout_ms parameter" do
+      conn =
+        authed_post("/api/agents/delegate", %{
+          task: "do something",
+          capabilities: ["nonexistent"],
+          timeout_ms: 5000
+        })
+
+      # Should process normally (will fail with no_matching_agents, not timeout error)
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["ok"] == false
+    end
   end
 end

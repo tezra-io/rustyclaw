@@ -66,9 +66,10 @@ async fn elixir_post(
 async fn elixir_get(
     client: &reqwest::Client,
     url: &str,
+    query: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<ElixirResponse, ToolResult> {
-    let mut req = client.get(url).timeout(timeout);
+    let mut req = client.get(url).query(query).timeout(timeout);
     if let Some(secret) = bridge_secret() {
         req = req.header("x-bridge-secret", secret);
     }
@@ -91,11 +92,24 @@ async fn elixir_delete(
 /// Send a prepared request and parse the JSON response.
 async fn send_and_parse(req: reqwest::RequestBuilder) -> Result<ElixirResponse, ToolResult> {
     match req.send().await {
-        Ok(resp) => resp.json::<ElixirResponse>().await.map_err(|e| ToolResult {
-            success: false,
-            output: String::new(),
-            error: Some(format!("Failed to parse Elixir response: {e}")),
-        }),
+        Ok(resp) => {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+
+            match serde_json::from_str::<ElixirResponse>(&body_text) {
+                Ok(parsed) => Ok(parsed),
+                Err(_) if !status.is_success() => Err(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Elixir bridge returned HTTP {status}")),
+                }),
+                Err(e) => Err(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Failed to parse Elixir response: {e}")),
+                }),
+            }
+        }
         Err(e) if e.is_timeout() => Err(ToolResult {
             success: false,
             output: String::new(),
@@ -290,29 +304,27 @@ impl Tool for ListAgentsBridgeTool {
 
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let base = elixir_base_url(&self.config);
-        let mut query_parts: Vec<String> = Vec::new();
+        let url = format!("{base}/api/agents");
 
+        let mut query_params: Vec<(&str, String)> = Vec::new();
         if args
             .get("detailed")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
         {
-            query_parts.push("detailed=true".to_string());
+            query_params.push(("detailed", "true".to_string()));
         }
         if let Some(cap) = args.get("capability").and_then(|v| v.as_str()) {
-            query_parts.push(format!("capability={cap}"));
+            query_params.push(("capability", cap.to_string()));
         }
         if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
-            query_parts.push(format!("status={status}"));
+            query_params.push(("status", status.to_string()));
         }
 
-        let url = if query_parts.is_empty() {
-            format!("{base}/api/agents")
-        } else {
-            format!("{base}/api/agents?{}", query_parts.join("&"))
-        };
+        let query_refs: Vec<(&str, &str)> =
+            query_params.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
-        match elixir_get(&self.client, &url, FAST_TIMEOUT).await {
+        match elixir_get(&self.client, &url, &query_refs, FAST_TIMEOUT).await {
             Ok(resp) => Ok(response_to_result(resp)),
             Err(err) => Ok(err),
         }
@@ -471,9 +483,170 @@ impl Tool for KillAgentBridgeTool {
             }
         };
 
-        let url = format!("{}/api/agents/{}", elixir_base_url(&self.config), name);
+        let base = elixir_base_url(&self.config);
+        let mut url = reqwest::Url::parse(&format!("{base}/api/agents/"))
+            .map_err(|e| anyhow::anyhow!("Invalid base URL: {e}"))?;
+        url.path_segments_mut()
+            .expect("base URL is not cannot-be-a-base")
+            .push(name);
+        let url_str = url.to_string();
 
-        match elixir_delete(&self.client, &url, FAST_TIMEOUT).await {
+        match elixir_delete(&self.client, &url_str, FAST_TIMEOUT).await {
+            Ok(resp) => Ok(response_to_result(resp)),
+            Err(err) => Ok(err),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DelegateAgentBridgeTool
+// ---------------------------------------------------------------------------
+
+/// Delegate a task to agents via the Elixir orchestrator's capability-based coordinator.
+pub struct DelegateAgentBridgeTool {
+    config: Arc<Config>,
+    client: reqwest::Client,
+}
+
+impl DelegateAgentBridgeTool {
+    pub fn new(config: Arc<Config>) -> Self {
+        Self {
+            config,
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+/// Valid routing strategies for delegation.
+const VALID_STRATEGIES: &[&str] = &["first_available", "sequential", "fanout"];
+
+#[async_trait]
+impl Tool for DelegateAgentBridgeTool {
+    fn name(&self) -> &str {
+        "delegate_agent"
+    }
+
+    fn description(&self) -> &str {
+        "Delegate a task to agents via the Elixir orchestrator's capability-based \
+         coordinator. Matches agents by capability, routes using the selected strategy."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "The task to delegate"
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Capability tags to match agents"
+                },
+                "from_agent": {
+                    "type": "string",
+                    "description": "Delegating agent name for ACL"
+                },
+                "strategy": {
+                    "type": "string",
+                    "enum": ["first_available", "sequential", "fanout"],
+                    "description": "Routing strategy (default 'first_available')"
+                },
+                "timeout_secs": {
+                    "type": "integer",
+                    "description": "Timeout in seconds (default 300, max 300)"
+                }
+            },
+            "required": ["task"]
+        })
+    }
+
+    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        let task = match args.get("task").and_then(|v| v.as_str()) {
+            Some(t) if !t.is_empty() => t,
+            _ => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some("Missing or empty 'task' parameter".to_string()),
+                });
+            }
+        };
+
+        // Validate capabilities is an array of strings if present.
+        if let Some(caps) = args.get("capabilities") {
+            match caps.as_array() {
+                Some(arr) => {
+                    if !arr.iter().all(|v| v.is_string()) {
+                        return Ok(ToolResult {
+                            success: false,
+                            output: String::new(),
+                            error: Some("'capabilities' must be an array of strings".to_string()),
+                        });
+                    }
+                }
+                None => {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some("'capabilities' must be an array of strings".to_string()),
+                    });
+                }
+            }
+        }
+
+        // Validate strategy if present.
+        if let Some(strategy) = args.get("strategy").and_then(|v| v.as_str()) {
+            if !VALID_STRATEGIES.contains(&strategy) {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "Invalid strategy '{strategy}'. Must be one of: {}",
+                        VALID_STRATEGIES.join(", ")
+                    )),
+                });
+            }
+        }
+
+        // Resolve and clamp timeout.
+        let timeout_secs = args
+            .get("timeout_secs")
+            .and_then(|v| v.as_i64())
+            .map(|s| s.clamp(1, 300).unsigned_abs())
+            .unwrap_or(300);
+        let timeout = Duration::from_secs(timeout_secs);
+
+        let url = format!("{}/api/agents/delegate", elixir_base_url(&self.config));
+
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "task".to_string(),
+            serde_json::Value::String(task.to_string()),
+        );
+        if let Some(caps) = args.get("capabilities") {
+            body.insert("capabilities".to_string(), caps.clone());
+        }
+        if let Some(from) = args.get("from_agent").and_then(|v| v.as_str()) {
+            body.insert(
+                "from_agent".to_string(),
+                serde_json::Value::String(from.to_string()),
+            );
+        }
+        if let Some(strategy) = args.get("strategy").and_then(|v| v.as_str()) {
+            body.insert(
+                "strategy".to_string(),
+                serde_json::Value::String(strategy.to_string()),
+            );
+        }
+        body.insert(
+            "timeout_ms".to_string(),
+            serde_json::Value::Number((timeout_secs * 1000).into()),
+        );
+        let body = serde_json::Value::Object(body);
+
+        match elixir_post(&self.client, &url, &body, timeout).await {
             Ok(resp) => Ok(response_to_result(resp)),
             Err(err) => Ok(err),
         }
@@ -601,6 +774,57 @@ mod tests {
         let tool = KillAgentBridgeTool::new(test_config());
         let result = tool
             .execute(serde_json::json!({ "name": "doomed-agent" }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(
+            result.error.as_deref().unwrap().contains("not reachable")
+                || result.error.as_deref().unwrap().contains("failed"),
+            "Unexpected error: {:?}",
+            result.error
+        );
+    }
+
+    // -- DelegateAgentBridgeTool ------------------------------------------------
+
+    #[test]
+    fn delegate_tool_name_and_schema() {
+        let tool = DelegateAgentBridgeTool::new(test_config());
+        assert_eq!(tool.name(), "delegate_agent");
+
+        let schema = tool.parameters_schema();
+        let required = schema["required"].as_array().unwrap();
+        let required_strs: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(required_strs.contains(&"task"));
+    }
+
+    #[tokio::test]
+    async fn delegate_tool_missing_task_returns_error() {
+        let tool = DelegateAgentBridgeTool::new(test_config());
+        let result = tool.execute(serde_json::json!({})).await.unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("task"));
+    }
+
+    #[tokio::test]
+    async fn delegate_tool_invalid_capabilities_returns_error() {
+        let tool = DelegateAgentBridgeTool::new(test_config());
+        let result = tool
+            .execute(serde_json::json!({
+                "task": "do something",
+                "capabilities": "not-an-array"
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_deref().unwrap().contains("capabilities"));
+    }
+
+    #[tokio::test]
+    async fn delegate_tool_unreachable_returns_graceful_error() {
+        let tool = DelegateAgentBridgeTool::new(test_config());
+        let result = tool
+            .execute(serde_json::json!({ "task": "research topic X" }))
             .await
             .unwrap();
         assert!(!result.success);

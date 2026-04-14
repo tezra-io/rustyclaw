@@ -368,7 +368,10 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
   post "/api/agents/message" do
     case require_bridge_secret(conn) do
       :ok ->
-        case Tools.MessageAgentTool.execute(conn.body_params) do
+        timeout_ms = clamp_timeout(Map.get(conn.body_params, "timeout_ms", 300_000))
+        params = Map.put(conn.body_params, "timeout_ms", timeout_ms)
+
+        case Tools.MessageAgentTool.execute(params) do
           {:ok, result} ->
             json_response(conn, 200, Map.put(result, :ok, true))
 
@@ -404,29 +407,7 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
   post "/api/agents/delegate" do
     case require_bridge_secret(conn) do
       :ok ->
-        case require_field(conn.body_params, "task") do
-          {:ok, task} ->
-            capabilities =
-              conn.body_params
-              |> Map.get("capabilities", [])
-              |> Enum.map(&String.to_atom/1)
-
-            opts =
-              [capabilities: capabilities]
-              |> maybe_add_opt(conn.body_params, "from_agent", :from_agent)
-              |> maybe_add_strategy(conn.body_params)
-
-            case AgentCoordinator.delegate(task, opts) do
-              {:ok, result} ->
-                json_response(conn, 200, %{ok: true, result: inspect(result)})
-
-              {:error, reason} ->
-                json_response(conn, 422, %{ok: false, error: inspect(reason)})
-            end
-
-          {:error, {:missing_field, field}} ->
-            json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
-        end
+        handle_delegate(conn)
 
       {:error, conn} ->
         conn
@@ -478,17 +459,61 @@ defmodule RustyclawOrchestrator.ToolSynthesis.ApiRouter do
     end
   end
 
-  defp maybe_add_strategy(opts, params) do
-    case Map.fetch(params, "strategy") do
-      {:ok, strategy} -> Keyword.put(opts, :strategy, parse_strategy(strategy))
-      :error -> opts
+  defp handle_delegate(conn) do
+    with {:ok, task} <- require_field(conn.body_params, "task"),
+         raw_capabilities = Map.get(conn.body_params, "capabilities", []),
+         :ok <- validate_capabilities(raw_capabilities),
+         timeout_ms = clamp_timeout(Map.get(conn.body_params, "timeout_ms", 300_000)),
+         base_opts =
+           [capabilities: raw_capabilities, timeout: timeout_ms]
+           |> maybe_add_opt(conn.body_params, "from_agent", :from_agent),
+         {:ok, opts} <- maybe_add_strategy(base_opts, conn.body_params) do
+      case AgentCoordinator.delegate(task, opts) do
+        {:ok, result} ->
+          json_response(conn, 200, %{ok: true, result: inspect(result)})
+
+        {:error, reason} ->
+          json_response(conn, 422, %{ok: false, error: inspect(reason)})
+      end
+    else
+      {:error, {:missing_field, field}} ->
+        json_response(conn, 400, %{ok: false, error: "missing field: #{field}"})
+
+      {:error, reason} ->
+        json_response(conn, 400, %{ok: false, error: reason})
     end
   end
 
-  defp parse_strategy("first_available"), do: :first_available
-  defp parse_strategy("sequential"), do: :sequential
-  defp parse_strategy("fanout"), do: :fanout
-  defp parse_strategy(_), do: :first_available
+  defp validate_capabilities(caps) when is_list(caps) do
+    if Enum.all?(caps, &is_binary/1) do
+      :ok
+    else
+      {:error, "capabilities must be a list of strings"}
+    end
+  end
+
+  defp validate_capabilities(_), do: {:error, "capabilities must be a list"}
+
+  defp clamp_timeout(v) when is_integer(v), do: max(1, min(v, 300_000))
+  defp clamp_timeout(_), do: 300_000
+
+  defp maybe_add_strategy(opts, params) do
+    case Map.fetch(params, "strategy") do
+      {:ok, strategy} ->
+        case parse_strategy(strategy) do
+          {:ok, parsed} -> {:ok, Keyword.put(opts, :strategy, parsed)}
+          {:error, _} = err -> err
+        end
+
+      :error ->
+        {:ok, opts}
+    end
+  end
+
+  defp parse_strategy("first_available"), do: {:ok, :first_available}
+  defp parse_strategy("sequential"), do: {:ok, :sequential}
+  defp parse_strategy("fanout"), do: {:ok, :fanout}
+  defp parse_strategy(other), do: {:error, "unknown strategy: #{other}"}
 
   defp require_bridge_secret(conn) do
     expected = System.get_env("RUSTYCLAW_BRIDGE_SECRET") || ""

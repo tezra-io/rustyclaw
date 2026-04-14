@@ -45,7 +45,8 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
   @spec delegate(String.t(), keyword()) ::
           {:ok, term()} | {:error, :no_matching_agents | :acl_denied | :all_failed}
   def delegate(task, opts \\ []) do
-    GenServer.call(__MODULE__, {:delegate, task, opts}, @call_timeout)
+    timeout = Keyword.get(opts, :timeout, @call_timeout)
+    GenServer.call(__MODULE__, {:delegate, task, opts}, timeout)
   end
 
   @doc "Find agents matching the given capabilities."
@@ -122,6 +123,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
     strategy = Keyword.get(opts, :strategy, :first_available)
     from_agent = Keyword.get(opts, :from_agent)
     provenance = Keyword.get(opts, :provenance)
+    timeout = Keyword.get(opts, :timeout, @call_timeout)
 
     matching = find_matching_agents(capabilities, state)
 
@@ -147,7 +149,7 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
         %Task{ref: ref} =
           Task.Supervisor.async_nolink(
             __MODULE__.TaskSupervisor,
-            fn -> execute_strategy(strategy, task, agents, provenance, definitions) end
+            fn -> execute_strategy(strategy, task, agents, provenance, definitions, timeout) end
           )
 
         {:noreply, put_in(state, [:pending, ref], from)}
@@ -232,20 +234,20 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
     end
   end
 
-  defp execute_strategy(:first_available, task, [agent | _], provenance, definitions) do
+  defp execute_strategy(:first_available, task, [agent | _], provenance, definitions, timeout) do
     with :ok <- ensure_agent_running(agent, definitions) do
       child_prov = stamp_provenance(provenance, agent)
-      AgentServer.run_task(agent, task, provenance: child_prov)
+      AgentServer.run_task(agent, task, provenance: child_prov, timeout: timeout)
     end
   end
 
-  defp execute_strategy(:sequential, task, agents, provenance, definitions) do
+  defp execute_strategy(:sequential, task, agents, provenance, definitions, timeout) do
     Enum.reduce_while(agents, {:error, :all_failed}, fn agent, _acc ->
-      sequential_try_agent(agent, task, provenance, definitions)
+      sequential_try_agent(agent, task, provenance, definitions, timeout)
     end)
   end
 
-  defp execute_strategy(:fanout, task, agents, provenance, definitions) do
+  defp execute_strategy(:fanout, task, agents, provenance, definitions, timeout) do
     results =
       agents
       |> Task.async_stream(
@@ -253,13 +255,13 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
           case ensure_agent_running(agent, definitions) do
             :ok ->
               child_prov = stamp_provenance(provenance, agent)
-              {agent, AgentServer.run_task(agent, task, provenance: child_prov)}
+              {agent, AgentServer.run_task(agent, task, provenance: child_prov, timeout: timeout)}
 
             {:error, reason} ->
               {agent, {:error, {:spawn_failed, reason}}}
           end
         end,
-        timeout: @call_timeout,
+        timeout: timeout,
         on_timeout: :kill_task
       )
       |> Enum.map(fn
@@ -270,12 +272,12 @@ defmodule RustyclawOrchestrator.AgentCoordinator do
     {:ok, results}
   end
 
-  defp sequential_try_agent(agent, task, provenance, definitions) do
+  defp sequential_try_agent(agent, task, provenance, definitions, timeout) do
     case ensure_agent_running(agent, definitions) do
       :ok ->
         child_prov = stamp_provenance(provenance, agent)
 
-        case AgentServer.run_task(agent, task, provenance: child_prov) do
+        case AgentServer.run_task(agent, task, provenance: child_prov, timeout: timeout) do
           {:ok, _} = result -> {:halt, result}
           {:error, _} -> {:cont, {:error, :all_failed}}
         end

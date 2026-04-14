@@ -690,15 +690,23 @@ mod tests {
         assert!(!tool.is_read_only("add"));
     }
 
+    /// Initialize a git repo in a temp dir, clearing GIT_DIR/GIT_WORK_TREE so
+    /// `git init` creates a real `.git/` directory even inside worktrees or
+    /// pre-commit hooks where those env vars are set.
+    fn git_init_in(dir: &std::path::Path) {
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output()
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn blocks_readonly_mode_for_write_ops() {
         let tmp = TempDir::new().unwrap();
-        // Initialize a git repository
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(tmp.path())
-            .output()
-            .unwrap();
+        git_init_in(tmp.path());
 
         let security = Arc::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
@@ -722,12 +730,7 @@ mod tests {
     #[tokio::test]
     async fn allows_branch_listing_in_readonly_mode() {
         let tmp = TempDir::new().unwrap();
-        // Initialize a git repository so the command can succeed
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(tmp.path())
-            .output()
-            .unwrap();
+        git_init_in(tmp.path());
 
         let security = Arc::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
@@ -785,12 +788,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_unknown_operation() {
         let tmp = TempDir::new().unwrap();
-        // Initialize a git repository
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(tmp.path())
-            .output()
-            .unwrap();
+        git_init_in(tmp.path());
 
         let tool = test_tool(tmp.path());
 

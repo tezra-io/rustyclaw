@@ -92,7 +92,8 @@ pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
 pub use model_routing_config::ModelRoutingConfigTool;
 pub use orchestrator::{
-    KillAgentBridgeTool, ListAgentsBridgeTool, MessageAgentBridgeTool, SpawnAgentBridgeTool,
+    DelegateAgentBridgeTool, KillAgentBridgeTool, ListAgentsBridgeTool, MessageAgentBridgeTool,
+    SpawnAgentBridgeTool,
 };
 pub use pdf_read::PdfReadTool;
 pub use proxy_config::ProxyConfigTool;
@@ -391,7 +392,8 @@ pub fn all_tools_with_runtime(
     tool_arcs.push(Arc::new(SpawnAgentBridgeTool::new(config.clone())));
     tool_arcs.push(Arc::new(ListAgentsBridgeTool::new(config.clone())));
     tool_arcs.push(Arc::new(MessageAgentBridgeTool::new(config.clone())));
-    tool_arcs.push(Arc::new(KillAgentBridgeTool::new(config)));
+    tool_arcs.push(Arc::new(KillAgentBridgeTool::new(config.clone())));
+    tool_arcs.push(Arc::new(DelegateAgentBridgeTool::new(config)));
 
     boxed_registry_from_arcs(tool_arcs)
 }

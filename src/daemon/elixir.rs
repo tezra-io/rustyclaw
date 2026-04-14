@@ -448,44 +448,45 @@ pub async fn query_orchestrator_stats() -> OrchestratorStats {
     let synth_port = resolve_synth_port();
     let plugin_port = resolve_plugin_port();
 
-    let agents = client
-        .get(format!("http://127.0.0.1:{synth_port}/api/agents"))
-        .send()
-        .await
+    let bridge_secret = std::env::var("RUSTYCLAW_BRIDGE_SECRET")
         .ok()
-        .and_then(|r| {
-            if r.status().is_success() {
-                Some(r)
-            } else {
-                None
-            }
-        });
+        .filter(|s| !s.is_empty());
 
-    let synth_tools = client
-        .get(format!("http://127.0.0.1:{synth_port}/api/tools"))
-        .send()
-        .await
-        .ok()
-        .and_then(|r| {
-            if r.status().is_success() {
-                Some(r)
-            } else {
-                None
-            }
-        });
+    let mut agents_req = client.get(format!("http://127.0.0.1:{synth_port}/api/agents"));
+    if let Some(ref secret) = bridge_secret {
+        agents_req = agents_req.header("x-bridge-secret", secret);
+    }
+    let agents = agents_req.send().await.ok().and_then(|r| {
+        if r.status().is_success() {
+            Some(r)
+        } else {
+            None
+        }
+    });
 
-    let plugins = client
-        .get(format!("http://127.0.0.1:{plugin_port}/api/plugins"))
-        .send()
-        .await
-        .ok()
-        .and_then(|r| {
-            if r.status().is_success() {
-                Some(r)
-            } else {
-                None
-            }
-        });
+    let mut tools_req = client.get(format!("http://127.0.0.1:{synth_port}/api/tools"));
+    if let Some(ref secret) = bridge_secret {
+        tools_req = tools_req.header("x-bridge-secret", secret);
+    }
+    let synth_tools = tools_req.send().await.ok().and_then(|r| {
+        if r.status().is_success() {
+            Some(r)
+        } else {
+            None
+        }
+    });
+
+    let mut plugins_req = client.get(format!("http://127.0.0.1:{plugin_port}/api/plugins"));
+    if let Some(ref secret) = bridge_secret {
+        plugins_req = plugins_req.header("x-bridge-secret", secret);
+    }
+    let plugins = plugins_req.send().await.ok().and_then(|r| {
+        if r.status().is_success() {
+            Some(r)
+        } else {
+            None
+        }
+    });
 
     // Parse counts from responses (best-effort)
     let agent_count = parse_list_count(agents).await;
@@ -502,7 +503,30 @@ pub async fn query_orchestrator_stats() -> OrchestratorStats {
 async fn parse_list_count(response: Option<reqwest::Response>) -> Option<usize> {
     let resp = response?;
     let body: serde_json::Value = resp.json().await.ok()?;
-    body.as_array().map(Vec::len)
+    parse_count_from_value(&body)
+}
+
+/// Extract a count from a JSON value: direct array, object with `count` field,
+/// or object with a known array field (`agents`, `tools`, `plugins`).
+fn parse_count_from_value(body: &serde_json::Value) -> Option<usize> {
+    // Direct array
+    if let Some(arr) = body.as_array() {
+        return Some(arr.len());
+    }
+
+    // Object with integer "count"
+    if let Some(count) = body.get("count").and_then(|v| v.as_u64()) {
+        return usize::try_from(count).ok();
+    }
+
+    // Object with known array fields
+    for key in &["agents", "tools", "plugins"] {
+        if let Some(arr) = body.get(key).and_then(|v| v.as_array()) {
+            return Some(arr.len());
+        }
+    }
+
+    None
 }
 
 /// Summary stats from the Elixir orchestrator.
@@ -541,6 +565,42 @@ mod tests {
         assert!(stats.active_agents.is_none());
         assert!(stats.synth_tools.is_none());
         assert!(stats.active_plugins.is_none());
+    }
+
+    #[test]
+    fn parse_count_from_array() {
+        let v = serde_json::json!([1, 2, 3]);
+        assert_eq!(parse_count_from_value(&v), Some(3));
+    }
+
+    #[test]
+    fn parse_count_from_object_with_count() {
+        let v = serde_json::json!({"ok": true, "count": 5});
+        assert_eq!(parse_count_from_value(&v), Some(5));
+    }
+
+    #[test]
+    fn parse_count_from_object_with_agents_array() {
+        let v = serde_json::json!({"ok": true, "agents": [{"name": "a"}, {"name": "b"}]});
+        assert_eq!(parse_count_from_value(&v), Some(2));
+    }
+
+    #[test]
+    fn parse_count_from_object_with_tools_array() {
+        let v = serde_json::json!({"ok": true, "tools": [{"name": "t1"}]});
+        assert_eq!(parse_count_from_value(&v), Some(1));
+    }
+
+    #[test]
+    fn parse_count_from_object_with_plugins_array() {
+        let v = serde_json::json!({"ok": true, "plugins": []});
+        assert_eq!(parse_count_from_value(&v), Some(0));
+    }
+
+    #[test]
+    fn parse_count_from_unrecognized_returns_none() {
+        let v = serde_json::json!({"ok": true, "something_else": 42});
+        assert_eq!(parse_count_from_value(&v), None);
     }
 
     #[test]
