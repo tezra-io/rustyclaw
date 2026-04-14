@@ -1,9 +1,97 @@
-# CLAUDE.md — RustyClaw + Elixir Orchestration
+# RustyClaw
+
+## Project
+This is the upstream RustyClaw repository, a Rust AI agent runtime. We are extending it with an Elixir/OTP orchestration layer for multi-agent capabilities while keeping the Rust core responsible for channels, tools, providers, security, memory, gateway, cron, and observability.
+
+## How to Work
+
+### Planning
+- Plan mode for any non-trivial task (3+ steps or architectural decisions)
+- Detailed specs upfront — good plan = 1-shot implementation
+- State assumptions explicitly before coding. If multiple interpretations exist, surface them instead of picking silently.
+- If the request is ambiguous, ask. If a simpler approach exists, say so.
+- For multi-step work, write a short plan in `step -> verify` form.
+- If something goes sideways, STOP and re-plan
+
+### Test-First (Mandatory)
+1. Write failing tests that define correct behavior
+2. Make them pass
+3. Refactor while green
+
+"Write failing tests, then make them pass" — not "implement this feature."
+
+### Verification
+1. Write failing tests
+2. Implement to pass them
+3. Typecheck: `cargo check`
+4. Full test suite: `cargo test`
+5. Lint: `cargo clippy --all-targets -- -D warnings`
+
+Never mark done without proving it works.
+
+## Code Rules (Non-Negotiable)
+
+1. **Linear flow.** Max 2 nesting levels. Top to bottom.
+2. **Bound loops.** Explicit max on retries, polls, recursion. Define cap behavior.
+3. **Small functions.** 40-60 lines max. One job per function.
+4. **Own resources.** Open → close on every path, including errors.
+5. **Narrow state.** No module globals. Pass deps explicitly.
+6. **Assert assumptions.** Guards and validation on every public function. Fail loud.
+7. **Never swallow errors.** No bare `rescue`. No `{:error, _} -> :ok`. Log, raise, or return.
+8. **Visible side effects.** I/O obvious at call site. Separate pure from effectful.
+9. **Minimal indirection.** Readable > elegant. One layer of abstraction max.
+10. **Surgical changes only.** Touch only what the request requires. Do not refactor adjacent code, comments, or formatting unless the task needs it. Remove only the dead code your change creates.
+11. **Warnings = errors.** Linters, typecheckers, analyzers are hard gates. Zero warnings.
+
+## Conventions
+- Prefer explicit types, small modules, and `Result`-based error flow.
+- Avoid `unwrap`/`expect` in library paths unless the invariant is truly impossible to violate.
+
+## Commands
+```sh
+cargo build
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
+
+## Docs
+- `docs/ELIXIR_ORCHESTRATION_DESIGN.md` — orchestration architecture and implementation plan
+- `docs/session-bridge-design.md` — session bridge design and integration points
+- `docs/commands-reference.md` — CLI commands
+- `docs/providers-reference.md` — LLM provider configuration
+- `docs/channels-reference.md` — channel setup
+- `docs/config-reference.md` — configuration schema
+- `docs/operations-runbook.md` — operational procedures
+- `docs/troubleshooting.md` — debugging guide
+
+## Don'ts
+- Don't commit without running tests
+- Don't implement without failing tests first
+- Don't add abstractions you weren't asked for
+- Don't silently choose among ambiguous interpretations
+- Don't improve adjacent code that wasn't part of the request
+- Don't assume intent on ambiguous bugs — ask
+
+## Principles
+- Simplest correct solution
+- If 200 lines could be 50, rewrite it
+- Find root causes, no band-aids
+- Minimal blast radius
+- Own mistakes — write a rule to prevent repeating
+
+## Known Pitfalls
+- Update this section every time the repo teaches you the same lesson twice.
+
+---
+_Every mistake is a rule waiting to be written._
+
+## Preserved Project-Specific Notes
+These notes came from the previous `CLAUDE.md`. Keep the template above as the primary operating guide, and use the preserved context below where it is still relevant.
 
 Instructions for Claude agents working on this codebase.
 
 ## 1) What This Is
-
 This is the **upstream RustyClaw** repository — a Rust AI agent runtime. The internal package name is `rustyclaw`, the local directory is `rustyclaw`.
 
 RustyClaw is currently a **single-agent** system. We are extending it with an **Elixir/OTP orchestration layer** for multi-agent capabilities. The Rust core stays intact; Elixir replaces the agent lifecycle, registry, message bus, delegation, and supervision that were previously hand-rolled in Rust (~4,500 LOC, now removed and backed up at `rustyclaw-rust-backup/`).
@@ -11,7 +99,6 @@ RustyClaw is currently a **single-agent** system. We are extending it with an **
 **Read `docs/ELIXIR_ORCHESTRATION_DESIGN.md` before any orchestration work.** It contains the full architecture, subsystem breakdown, implementation order, and anti-patterns.
 
 ## 2) Architecture Overview
-
 ```
 ┌─────────────────────────────────────────────────┐
 │              Elixir/OTP Layer (NEW)              │
@@ -41,7 +128,6 @@ RustyClaw is currently a **single-agent** system. We are extending it with an **
 **Elixir takes over:** agent lifecycle (spawn/stop/restart), agent registry, inter-agent messaging (BEAM message passing replaces `AgentBus`), capability-based routing, delegation ACL, supervisor trees (OTP replaces manual restart logic), session persistence (ETS replaces `SubAgentRegistry`).
 
 ## 3) Repository Map
-
 ### Rust Core (`src/`)
 
 | Path | Purpose |
@@ -98,7 +184,6 @@ RustyClaw is currently a **single-agent** system. We are extending it with an **
 See `docs/ELIXIR_ORCHESTRATION_DESIGN.md` for the full architecture.
 
 ## 4) Build and Test
-
 ### Rust
 
 ```bash
@@ -141,7 +226,6 @@ validates `GET /health` returns 200, and runs a chat round-trip via `POST /webho
 Tests each available provider if multiple keys are set. Exit 0 = all pass.
 
 ## 5) Engineering Principles
-
 These are implementation constraints, not suggestions.
 
 - **KISS**: Prefer explicit control flow over meta-programming. Keep error paths obvious.
@@ -154,7 +238,6 @@ These are implementation constraints, not suggestions.
 - **Reversibility**: Small scope changes, clear rollback paths, no mixed mega-patches.
 
 ## 6) Agent Instructions (READ THIS)
-
 ### Before Any Work
 
 1. **Read `docs/ELIXIR_ORCHESTRATION_DESIGN.md`** — it is the source of truth for orchestration architecture.
@@ -168,7 +251,6 @@ These are implementation constraints, not suggestions.
 - High-risk paths: `src/security/`, `src/runtime/`, `src/gateway/`, `src/tools/`.
 
 ## ⛔ MANDATORY PRE-COMMIT GATE (DO NOT SKIP)
-
 **Before EVERY `git commit`, run the full gate for the code you changed. No exceptions.**
 
 A pre-commit hook enforces this, but if you're using `--no-verify` or committing programmatically, run these manually:
@@ -214,7 +296,6 @@ mix test --quiet                    # All tests must pass
 - The bridge is the only coupling point between layers. Keep it narrow and well-typed.
 
 ## 7) What Was Removed (and Why)
-
 The following Rust modules were our custom multi-agent additions. They have been removed from this repo (backed up at `rustyclaw-rust-backup/`) and will be replaced by Elixir:
 
 | Removed | Elixir Replacement |
@@ -234,7 +315,6 @@ The following Rust modules were our custom multi-agent additions. They have been
 **Everything else stays in Rust** — channels, providers, tools, memory, security, gateway, approval, cron, daemon, peripherals, observability.
 
 ## 8) Risk Tiers
-
 - **Low**: docs, chore, tests-only
 - **Medium**: most `src/**` behavior changes without security/boundary impact
 - **High**: `src/security/**`, `src/runtime/**`, `src/gateway/**`, `src/tools/**`, `.github/workflows/**`, Elixir bridge, access-control boundaries
@@ -242,7 +322,6 @@ The following Rust modules were our custom multi-agent additions. They have been
 When uncertain, classify as higher risk.
 
 ## 9) Validation by Change Type
-
 | Change Type | Required Checks |
 |-------------|----------------|
 | Rust code | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` |
@@ -252,7 +331,6 @@ When uncertain, classify as higher risk.
 | Security/gateway/tools | Include boundary/failure-mode test |
 
 ## 10) Anti-Patterns
-
 - Do not add heavy dependencies for minor convenience.
 - Do not silently weaken security policy.
 - Do not add speculative config/feature flags.
@@ -264,7 +342,6 @@ When uncertain, classify as higher risk.
 - Do not couple Elixir orchestration to Rust internals beyond the bridge interface.
 
 ## 11) Key Reference Docs
-
 - `docs/ELIXIR_ORCHESTRATION_DESIGN.md` — orchestration architecture and implementation plan
 - `docs/session-bridge-design.md` — session bridge (Telegram ↔ Claude Code) design and integration points
 - `docs/commands-reference.md` — CLI commands
@@ -274,24 +351,3 @@ When uncertain, classify as higher risk.
 - `docs/operations-runbook.md` — operational procedures
 - `docs/troubleshooting.md` — debugging guide
 - `CONTRIBUTING.md` — contribution guidelines
-
-## Test-First (Mandatory)
-
-1. Write failing tests that define correct behavior
-2. Make them pass
-3. Refactor while green
-
-"Write failing tests, then make them pass" — not "implement this feature."
-
-## Code Rules (Non-Negotiable)
-
-1. **Linear flow.** Max 2 nesting levels. Top to bottom.
-2. **Bound loops.** Explicit max on retries, polls, recursion. Define cap behavior.
-3. **Small functions.** 40-60 lines max. One job per function.
-4. **Own resources.** Open → close on every path, including errors.
-5. **Narrow state.** No module globals. Pass deps explicitly.
-6. **Assert assumptions.** Guards and validation on every public function. Fail loud.
-7. **Never swallow errors.** No bare catch/rescue. Every failure logged, raised, or returned.
-8. **Visible side effects.** I/O obvious at call site. Separate pure from effectful.
-9. **Minimal indirection.** Readable > elegant. One layer of abstraction max.
-10. **Warnings = errors.** Linters, typecheckers, analyzers are hard gates. Zero warnings.
