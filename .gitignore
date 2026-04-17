@@ -32,3 +32,6 @@ credentials.json
 
 # Claude Code session data
 .claude/
+
+
+docs/
