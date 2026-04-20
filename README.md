@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/tezra-io/rustyclaw/actions/workflows/ci.yml"><img src="https://github.com/tezra-io/rustyclaw/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/rust-1.91%2B-orange.svg?logo=rust" alt="Rust 1.91+" />
   <img src="https://img.shields.io/badge/elixir-1.17%2B-purple.svg?logo=elixir" alt="Elixir 1.17+" />
   <a href="https://github.com/tezra-io/rustyclaw/stargazers"><img src="https://img.shields.io/github/stars/tezra-io/rustyclaw?style=flat" alt="GitHub Stars" /></a>
@@ -504,12 +504,7 @@ See [`docs/`](docs/) for the full documentation index.
 
 ## License
 
-Licensed under either of:
-
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT License](LICENSE-MIT)
-
-at your option.
+Licensed under the [MIT License](LICENSE).
 
 ## Acknowledgments
 
